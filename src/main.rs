@@ -308,9 +308,6 @@ async fn run(args: Args) -> Result<(), VkError> {
 
     let skin = MadSkin::default();
     for t in threads {
-        if t.is_resolved {
-            continue;
-        }
         for c in &t.comments.nodes {
             let user = c.author.as_ref().map_or("unknown", |u| u.login.as_str());
             println!("\n{} commented:\n", user);
