@@ -18,6 +18,10 @@ run with only a number.
 `vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN` to authenticate. If it's not
 set you'll get a warning and anonymous requests may be rate limited.
 
+The token only needs read access. Select the `public_repo` scope (or `repo` for
+private repositories). See [docs/GITHUB_TOKEN.md](docs/GITHUB_TOKEN.md) for a
+detailed guide to creating one.
+
 ## Example
 
 ```
