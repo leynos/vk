@@ -207,7 +207,7 @@ async fn fetch_review_threads(
             let mut c_more = thread.comments.page_info.has_next_page;
             while c_more {
                 let c_resp: GraphQlResponse<CommentNodeWrapper> = client
-                    .post("https://api.github.com/graphql")
+                    .post(GITHUB_GRAPHQL_ENDPOINT)
                     .headers(headers.clone())
                     .json(&json!({
                         "query": COMMENT_QUERY,
