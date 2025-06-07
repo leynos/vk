@@ -86,8 +86,6 @@ struct ReviewThreadConnection {
 #[derive(Deserialize)]
 struct ReviewThread {
     id: String,
-    #[serde(rename = "isResolved")]
-    is_resolved: bool,
     comments: CommentConnection,
 }
 
@@ -169,88 +167,128 @@ const COMMENT_QUERY: &str = r#"
     }
 "#;
 
+async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
+where
+    F: FnMut(Option<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<(Vec<T>, PageInfo), VkError>>,
+{
+    let mut items = Vec::new();
+    let mut cursor = None;
+    loop {
+        let (mut page, info) = fetch(cursor.clone()).await?;
+        items.append(&mut page);
+        if !info.has_next_page {
+            break;
+        }
+        cursor = info.end_cursor;
+    }
+    Ok(items)
+}
+
+async fn fetch_comment_page(
+    client: &reqwest::Client,
+    headers: &HeaderMap,
+    id: &str,
+    cursor: Option<String>,
+) -> Result<(Vec<ReviewComment>, PageInfo), VkError> {
+    let resp: GraphQlResponse<CommentNodeWrapper> = client
+        .post("https://api.github.com/graphql")
+        .headers(headers.clone())
+        .json(&json!({
+            "query": COMMENT_QUERY,
+            "variables": { "id": id, "cursor": cursor },
+        }))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if let Some(errs) = resp.errors {
+        return Err(handle_graphql_errors(errs));
+    }
+    let wrapper = resp.data.ok_or(VkError::BadResponse)?;
+    let conn = wrapper.node.ok_or(VkError::BadResponse)?.comments;
+    Ok((conn.nodes, conn.page_info))
+}
+
+async fn fetch_thread_page(
+    client: &reqwest::Client,
+    headers: &HeaderMap,
+    repo: &RepoInfo,
+    number: u64,
+    cursor: Option<String>,
+) -> Result<(Vec<ReviewThread>, PageInfo), VkError> {
+    let resp: GraphQlResponse<ThreadData> = client
+        .post("https://api.github.com/graphql")
+        .headers(headers.clone())
+        .json(&json!({
+            "query": THREADS_QUERY,
+            "variables": {
+                "owner": repo.owner,
+                "name": repo.name,
+                "number": number,
+                "cursor": cursor,
+        }))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if let Some(errs) = resp.errors {
+        return Err(handle_graphql_errors(errs));
+    }
+    let data = resp.data.ok_or(VkError::BadResponse)?;
+    let conn = data.repository.pull_request.review_threads;
+    Ok((conn.nodes, conn.page_info))
+}
 async fn fetch_review_threads(
     client: &reqwest::Client,
     headers: &HeaderMap,
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
-    let mut threads = Vec::new();
-    let mut cursor: Option<String> = None;
-    const GITHUB_GRAPHQL_ENDPOINT: &str = "https://api.github.com/graphql";
-    loop {
-        let resp: GraphQlResponse<ThreadData> = client
-            .post(GITHUB_GRAPHQL_ENDPOINT)
-            .headers(headers.clone())
-            .json(&json!({
-                "query": THREADS_QUERY,
-                "variables": {
-                    "owner": repo.owner,
-                    "name": repo.name,
-                    "number": number,
-                    "cursor": cursor,
-                }
-            }))
-            .send()
-            .await?
-            .json()
-            .await?;
+    let mut threads =
+        paginate(|cursor| fetch_thread_page(client, headers, repo, number, cursor)).await?;
 
-        if let Some(errs) = resp.errors {
-            return Err(handle_graphql_errors(errs));
-        }
-
-        let data = resp.data.ok_or(VkError::BadResponse)?;
-        for mut thread in data.repository.pull_request.review_threads.nodes {
-            let mut comments = thread.comments.nodes;
-            let mut c_cursor = thread.comments.page_info.end_cursor.clone();
-            let mut c_more = thread.comments.page_info.has_next_page;
-            while c_more {
-                let c_resp: GraphQlResponse<CommentNodeWrapper> = client
-                    .post(GITHUB_GRAPHQL_ENDPOINT)
-                    .headers(headers.clone())
-                    .json(&json!({
-                        "query": COMMENT_QUERY,
-                        "variables": { "id": thread.id, "cursor": c_cursor },
-                    }))
-                    .send()
-                    .await?
-                    .json()
-                    .await?;
-                if let Some(errs) = c_resp.errors {
-                    return Err(handle_graphql_errors(errs));
-                }
-                let wrapper = c_resp.data.ok_or(VkError::BadResponse)?;
-                let conn = wrapper.node.ok_or(VkError::BadResponse)?.comments;
-                comments.extend(conn.nodes);
-                c_more = conn.page_info.has_next_page;
-                c_cursor = conn.page_info.end_cursor;
-            }
-            thread.comments.nodes = comments;
-            threads.push(thread);
-        }
-
-        if !data
-            .repository
-            .pull_request
-            .review_threads
-            .page_info
-            .has_next_page
-        {
-            break;
-        }
-        cursor = data
-            .repository
-            .pull_request
-            .review_threads
-            .page_info
-            .end_cursor;
+    for thread in &mut threads {
+        let initial = std::mem::replace(
+            &mut thread.comments,
+            CommentConnection {
+                nodes: Vec::new(),
+                page_info: PageInfo {
+                    has_next_page: false,
+                    end_cursor: None,
+                },
+            },
+        );
+        let mut comments = initial.nodes;
+        if initial.page_info.has_next_page {
+            let more = paginate(|c| fetch_comment_page(client, headers, &thread.id, c)).await?;
+            comments.extend(more);
+        thread.comments = CommentConnection {
+            nodes: comments,
+            page_info: PageInfo {
+                has_next_page: false,
+                end_cursor: None,
+            },
+        };
+fn build_headers(token: &str) -> HeaderMap {
+    headers
+}
+async fn run(args: Args) -> Result<(), VkError> {
+    let (repo, number) = parse_reference(&args.reference)?;
+    let token = env::var("GITHUB_TOKEN").unwrap_or_default();
+    if token.is_empty() {
+        eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
     }
-    Ok(threads)
+
+    let headers = build_headers(&token);
+    for t in threads {
+#[tokio::main]
+async fn main() -> Result<(), VkError> {
+    run(Args::parse()).await
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let (repo, number) = parse_reference(&args.reference)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
