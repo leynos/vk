@@ -8,7 +8,12 @@
 vk <pull-request-url-or-number>
 ```
 
-`vk` uses the GitHub GraphQL API and requires a GitHub token for API access, which should be provided in the `GITHUB_TOKEN` environment variable. If `GITHUB_TOKEN` is not set, you'll get a warning and anonymous requests may be rate limited.
+If you pass just a pull request number, `vk` tries to work out which repository
+you meant. It first examines `.git/FETCH_HEAD` for a GitHub remote URL and, if
+found, extracts the `owner/repo` from it. Failing that, it falls back to the
+`VK_REPO` environment variable which should be set to `owner/repo` (with or
+without a `.git` suffix). If neither source is available, `vk` will refuse to
+run with only a number.
 
 ## Example
 

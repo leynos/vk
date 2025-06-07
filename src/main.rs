@@ -267,6 +267,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = reqwest::Client::new();
     let threads = fetch_review_threads(&client, &headers, &repo, number).await?;
+    if threads.is_empty() {
+        println!("No unresolved comments.");
+        return Ok(());
+    }
 
     let skin = MadSkin::default();
     for (i, t) in threads.iter().filter(|t| !t.is_resolved).enumerate() {
