@@ -177,9 +177,10 @@ async fn fetch_review_threads(
 ) -> Result<Vec<ReviewThread>, VkError> {
     let mut threads = Vec::new();
     let mut cursor: Option<String> = None;
+    const GITHUB_GRAPHQL_ENDPOINT: &str = "https://api.github.com/graphql";
     loop {
         let resp: GraphQlResponse<ThreadData> = client
-            .post("https://api.github.com/graphql")
+            .post(GITHUB_GRAPHQL_ENDPOINT)
             .headers(headers.clone())
             .json(&json!({
                 "query": THREADS_QUERY,
