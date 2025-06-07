@@ -50,6 +50,15 @@ struct GraphQlError {
     message: String,
 }
 
+fn handle_graphql_errors(errors: Vec<GraphQlError>) -> VkError {
+    let msg = errors
+        .into_iter()
+        .map(|e| e.message)
+        .collect::<Vec<_>>()
+        .join(", ");
+    VkError::ApiErrors(msg)
+}
+
 #[derive(Deserialize)]
 struct ThreadData {
     repository: Repository,
@@ -187,12 +196,7 @@ async fn fetch_review_threads(
             .await?;
 
         if let Some(errs) = resp.errors {
-            let msg = errs
-                .into_iter()
-                .map(|e| e.message)
-                .collect::<Vec<_>>()
-                .join(", ");
-            return Err(VkError::ApiErrors(msg));
+            return Err(handle_graphql_errors(errs));
         }
 
         let data = resp.data.ok_or(VkError::BadResponse)?;
@@ -213,12 +217,7 @@ async fn fetch_review_threads(
                     .json()
                     .await?;
                 if let Some(errs) = c_resp.errors {
-                    let msg = errs
-                        .into_iter()
-                        .map(|e| e.message)
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    return Err(VkError::ApiErrors(msg));
+                    return Err(handle_graphql_errors(errs));
                 }
                 let wrapper = c_resp.data.ok_or(VkError::BadResponse)?;
                 let conn = wrapper.node.ok_or(VkError::BadResponse)?.comments;
