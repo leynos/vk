@@ -70,10 +70,13 @@ struct PullRequest {
 #[derive(Deserialize)]
 struct ReviewThreadConnection {
     nodes: Vec<ReviewThread>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
 }
 
 #[derive(Deserialize)]
 struct ReviewThread {
+    id: String,
     #[serde(rename = "isResolved")]
     is_resolved: bool,
     comments: CommentConnection,
@@ -82,6 +85,8 @@ struct ReviewThread {
 #[derive(Deserialize)]
 struct CommentConnection {
     nodes: Vec<ReviewComment>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
 }
 
 #[derive(Deserialize)]
@@ -92,8 +97,156 @@ struct ReviewComment {
 }
 
 #[derive(Deserialize)]
+struct PageInfo {
+    #[serde(rename = "hasNextPage")]
+    has_next_page: bool,
+    #[serde(rename = "endCursor")]
+    end_cursor: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct User {
     login: String,
+}
+
+#[derive(Deserialize)]
+struct CommentNodeWrapper {
+    node: Option<CommentNode>,
+}
+
+#[derive(Deserialize)]
+struct CommentNode {
+    comments: CommentConnection,
+}
+
+const THREADS_QUERY: &str = r#"
+    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          reviewThreads(first: 100, after: $cursor, states: [UNRESOLVED]) {
+            nodes {
+              id
+              isResolved
+              comments(first: 100) {
+                nodes {
+                  body
+                  url
+                  author { login }
+                }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    }
+"#;
+
+const COMMENT_QUERY: &str = r#"
+    query($id: ID!, $cursor: String) {
+      node(id: $id) {
+        ... on PullRequestReviewThread {
+          comments(first: 100, after: $cursor) {
+            nodes {
+              body
+              url
+              author { login }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    }
+"#;
+
+async fn fetch_review_threads(
+    client: &reqwest::Client,
+    headers: &HeaderMap,
+    repo: &RepoInfo,
+    number: u64,
+) -> Result<Vec<ReviewThread>, VkError> {
+    let mut threads = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        let resp: GraphQlResponse<ThreadData> = client
+            .post("https://api.github.com/graphql")
+            .headers(headers.clone())
+            .json(&json!({
+                "query": THREADS_QUERY,
+                "variables": {
+                    "owner": repo.owner,
+                    "name": repo.name,
+                    "number": number,
+                    "cursor": cursor,
+                }
+            }))
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        if let Some(errs) = resp.errors {
+            let msg = errs
+                .into_iter()
+                .map(|e| e.message)
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(VkError::ApiErrors(msg));
+        }
+
+        let data = resp.data.ok_or(VkError::BadResponse)?;
+        for mut thread in data.repository.pull_request.review_threads.nodes {
+            let mut comments = thread.comments.nodes;
+            let mut c_cursor = thread.comments.page_info.end_cursor.clone();
+            let mut c_more = thread.comments.page_info.has_next_page;
+            while c_more {
+                let c_resp: GraphQlResponse<CommentNodeWrapper> = client
+                    .post("https://api.github.com/graphql")
+                    .headers(headers.clone())
+                    .json(&json!({
+                        "query": COMMENT_QUERY,
+                        "variables": { "id": thread.id, "cursor": c_cursor },
+                    }))
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+                if let Some(errs) = c_resp.errors {
+                    let msg = errs
+                        .into_iter()
+                        .map(|e| e.message)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(VkError::ApiErrors(msg));
+                }
+                let wrapper = c_resp.data.ok_or(VkError::BadResponse)?;
+                let conn = wrapper.node.ok_or(VkError::BadResponse)?.comments;
+                comments.extend(conn.nodes);
+                c_more = conn.page_info.has_next_page;
+                c_cursor = conn.page_info.end_cursor;
+            }
+            thread.comments.nodes = comments;
+            threads.push(thread);
+        }
+
+        if !data
+            .repository
+            .pull_request
+            .review_threads
+            .page_info
+            .has_next_page
+        {
+            break;
+        }
+        cursor = data
+            .repository
+            .pull_request
+            .review_threads
+            .page_info
+            .end_cursor;
+    }
+    Ok(threads)
 }
 
 #[tokio::main]
@@ -112,60 +265,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         headers.insert(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap());
     }
 
-    let query = r#"
-        query($owner: String!, $name: String!, $number: Int!) {
-          repository(owner: $owner, name: $name) {
-            pullRequest(number: $number) {
-              reviewThreads(first: 100) {
-                nodes {
-                  isResolved
-                  comments(first: 100) {
-                    nodes {
-                      body
-                      url
-                      author { login }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-    "#;
-
     let client = reqwest::Client::new();
-    let resp: GraphQlResponse<ThreadData> = client
-        .post("https://api.github.com/graphql")
-        .headers(headers)
-        .json(&json!({
-            "query": query,
-            "variables": {
-                "owner": repo.owner,
-                "name": repo.name,
-                "number": number,
-            }
-        }))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    if let Some(errs) = resp.errors {
-        let msg = errs
-            .into_iter()
-            .map(|e| e.message)
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(VkError::ApiErrors(msg).into());
-    }
-
-    let threads = resp
-        .data
-        .ok_or(VkError::BadResponse)?
-        .repository
-        .pull_request
-        .review_threads
-        .nodes;
+    let threads = fetch_review_threads(&client, &headers, &repo, number).await?;
 
     let skin = MadSkin::default();
     for (i, t) in threads.iter().filter(|t| !t.is_resolved).enumerate() {
@@ -254,6 +355,15 @@ mod tests {
     #[test]
     fn parse_url() {
         let (repo, number) = parse_reference("https://github.com/owner/repo/pull/42").unwrap();
+
+    #[test]
+    fn repo_from_env_git_suffix() {
+        unsafe { std::env::set_var("VK_REPO", "a/b.git") };
+        let repo = repo_from_env().unwrap();
+        assert_eq!(repo.owner, "a");
+        assert_eq!(repo.name, "b");
+        unsafe { std::env::remove_var("VK_REPO") };
+    }
         assert_eq!(repo.owner, "owner");
         assert_eq!(repo.name, "repo");
         assert_eq!(number, 42);
