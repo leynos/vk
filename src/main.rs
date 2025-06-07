@@ -133,7 +133,7 @@ const THREADS_QUERY: &str = r#"
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
-          reviewThreads(first: 100, after: $cursor, states: [UNRESOLVED]) {
+          reviewThreads(first: 100, after: $cursor) {
             nodes {
               id
               isResolved
@@ -254,6 +254,7 @@ async fn fetch_review_threads(
 ) -> Result<Vec<ReviewThread>, VkError> {
     let mut threads =
         paginate(|cursor| fetch_thread_page(client, headers, repo, number, cursor)).await?;
+    threads.retain(|t| !t.is_resolved);
 
     for thread in &mut threads {
         let initial = std::mem::replace(
