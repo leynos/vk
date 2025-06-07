@@ -32,6 +32,8 @@ enum VkError {
     InvalidRef,
     #[error("malformed response")]
     BadResponse,
+    #[error("API errors: {0}")]
+    ApiErrors(String),
 }
 
 static GITHUB_RE: Lazy<Regex> =
@@ -40,6 +42,12 @@ static GITHUB_RE: Lazy<Regex> =
 #[derive(Deserialize)]
 struct GraphQlResponse<T> {
     data: Option<T>,
+    errors: Option<Vec<GraphQlError>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphQlError {
+    message: String,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +101,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let (repo, number) = parse_reference(&args.reference)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
+    if token.is_empty() {
+        eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
+    }
 
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().unwrap());
@@ -108,7 +119,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
               reviewThreads(first: 100) {
                 nodes {
                   isResolved
-                  comments(first: 1) {
+                  comments(first: 100) {
                     nodes {
                       body
                       url
@@ -139,6 +150,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .json()
         .await?;
 
+    if let Some(errs) = resp.errors {
+        let msg = errs
+            .into_iter()
+            .map(|e| e.message)
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(VkError::ApiErrors(msg).into());
+    }
+
     let threads = resp
         .data
         .ok_or(VkError::BadResponse)?
@@ -165,7 +185,10 @@ fn parse_reference(input: &str) -> Result<(RepoInfo, u64), VkError> {
             let segments: Vec<_> = url.path_segments().unwrap().collect();
             if segments.len() >= 4 && segments[2] == "pull" {
                 let owner = segments[0].to_string();
-                let name = segments[1].trim_end_matches('.').to_string();
+                let name = segments[1]
+                    .strip_suffix(".git")
+                    .unwrap_or(segments[1])
+                    .to_string();
                 let number: u64 = segments[3].parse().map_err(|_| VkError::InvalidRef)?;
                 return Ok((RepoInfo { owner, name }, number));
             }
@@ -187,10 +210,10 @@ fn repo_from_fetch_head() -> Option<RepoInfo> {
     for line in content.lines() {
         if let Some(caps) = GITHUB_RE.captures(line) {
             let owner = caps.name("owner")?.as_str().to_string();
-            let name = caps
-                .name("repo")?
-                .as_str()
-                .trim_end_matches('.')
+            let name_str = caps.name("repo")?.as_str();
+            let name = name_str
+                .strip_suffix(".git")
+                .unwrap_or(name_str)
                 .to_string();
             return Some(RepoInfo { owner, name });
         }
@@ -208,7 +231,10 @@ fn repo_from_env() -> Option<RepoInfo> {
         let parts: Vec<_> = repo.splitn(2, '/').collect();
         Some(RepoInfo {
             owner: parts[0].to_string(),
-            name: parts[1].to_string(),
+            name: parts[1]
+                .strip_suffix(".git")
+                .unwrap_or(parts[1])
+                .to_string(),
         })
     } else {
         None
@@ -218,6 +244,8 @@ fn repo_from_env() -> Option<RepoInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn parse_url() {
@@ -225,5 +253,30 @@ mod tests {
         assert_eq!(repo.owner, "owner");
         assert_eq!(repo.name, "repo");
         assert_eq!(number, 42);
+    }
+
+    #[test]
+    fn parse_url_git_suffix() {
+        let (repo, number) = parse_reference("https://github.com/owner/repo.git/pull/7").unwrap();
+        assert_eq!(repo.name, "repo");
+        assert_eq!(number, 7);
+    }
+
+    #[test]
+    fn repo_from_fetch_head_git_suffix() {
+        let dir = tempdir().unwrap();
+        let git_dir = dir.path().join(".git");
+        fs::create_dir(&git_dir).unwrap();
+        fs::write(
+            git_dir.join("FETCH_HEAD"),
+            "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/foo/bar.git",
+        )
+        .unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let repo = repo_from_fetch_head().unwrap();
+        std::env::set_current_dir(cwd).unwrap();
+        assert_eq!(repo.owner, "foo");
+        assert_eq!(repo.name, "bar");
     }
 }

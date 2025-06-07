@@ -8,7 +8,8 @@
 vk <pull-request-url-or-number>
 ```
 
-If you pass just a number, `vk` looks for the repository URL in `.git/FETCH_HEAD` first. If that fails it checks the `VK_REPO` environment variable. If neither is present `vk` will error.
+`vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN` to authenticate. If it's not
+set you'll get a warning and anonymous requests may be rate limited.
 
 A GitHub token is required for API access and should be provided in `GITHUB_TOKEN`.
 
