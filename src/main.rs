@@ -86,6 +86,8 @@ struct ReviewThreadConnection {
 #[derive(Deserialize)]
 struct ReviewThread {
     id: String,
+    #[serde(rename = "isResolved")]
+    is_resolved: bool,
     comments: CommentConnection,
 }
 
@@ -133,6 +135,7 @@ const THREADS_QUERY: &str = r#"
           reviewThreads(first: 100, after: $cursor, states: [UNRESOLVED]) {
             nodes {
               id
+              isResolved
               comments(first: 100) {
                 nodes {
                   body
@@ -283,6 +286,9 @@ async fn run(args: Args) -> Result<(), VkError> {
 
     let headers = build_headers(&token);
     for t in threads {
+        if t.is_resolved {
+            continue;
+        }
 #[tokio::main]
 async fn main() -> Result<(), VkError> {
     run(Args::parse()).await
