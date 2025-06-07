@@ -102,6 +102,9 @@ struct CommentConnection {
 #[derive(Deserialize)]
 struct ReviewComment {
     body: String,
+    #[serde(rename = "diffHunk")]
+    diff_hunk: String,
+    path: String,
     url: String,
     author: Option<User>,
 }
@@ -140,6 +143,8 @@ const THREADS_QUERY: &str = r#"
               comments(first: 100) {
                 nodes {
                   body
+                  diffHunk
+                  path
                   url
                   author { login }
                 }
@@ -160,6 +165,8 @@ const COMMENT_QUERY: &str = r#"
           comments(first: 100, after: $cursor) {
             nodes {
               body
+              diffHunk
+              path
               url
               author { login }
             }
@@ -283,6 +290,33 @@ async fn fetch_review_threads(
     Ok(threads)
 }
 
+fn print_comment(skin: &MadSkin, comment: &ReviewComment) -> anyhow::Result<()> {
+    use diffy::{Patch, PatchFormatter};
+
+    let full_patch = format!(
+        "--- a/{path}\n+++ b/{path}\n{hunk}",
+        path = comment.path,
+        hunk = comment.diff_hunk
+    );
+
+    match Patch::from_str(&full_patch) {
+        Ok(patch) => {
+            let formatter = PatchFormatter::new().with_color();
+            println!("{}", formatter.fmt_patch(&patch));
+        }
+        Err(_) => println!("{}", comment.diff_hunk),
+    }
+
+    let author = comment
+        .author
+        .as_ref()
+        .map_or("unknown", |u| u.login.as_str());
+    println!("\u{1f4ac}  \x1b[1m{}\x1b[0m wrote:", author);
+    skin.print_text(&comment.body);
+    println!();
+    Ok(())
+}
+
 fn build_headers(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().unwrap());
@@ -311,9 +345,7 @@ async fn run(args: Args) -> Result<(), VkError> {
     let skin = MadSkin::default();
     for t in threads {
         for c in &t.comments.nodes {
-            let user = c.author.as_ref().map_or("unknown", |u| u.login.as_str());
-            println!("\n{} commented:\n", user);
-            skin.print_text(&c.body);
+            print_comment(&skin, c).ok();
             println!("{}", c.url);
         }
     }
