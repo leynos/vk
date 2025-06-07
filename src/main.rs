@@ -338,6 +338,7 @@ fn repo_from_env() -> Option<RepoInfo> {
         Some(RepoInfo { owner, name })
     } else if repo.contains('/') {
         let parts: Vec<_> = repo.splitn(2, '/').collect();
+        assert_eq!(repo.owner, "owner");
         Some(RepoInfo {
             owner: parts[0].to_string(),
             name: parts[1]
