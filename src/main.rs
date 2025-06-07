@@ -168,7 +168,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nodes;
 
     let skin = MadSkin::default();
-    for t in threads.iter().filter(|t| !t.is_resolved) {
+    for (i, t) in threads.iter().filter(|t| !t.is_resolved).enumerate() {
+        println!("\n==================== Thread {} ====================\n", i + 1);
         for c in &t.comments.nodes {
             let user = c.author.as_ref().map_or("unknown", |u| u.login.as_str());
             println!("\n{} commented:\n", user);
