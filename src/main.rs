@@ -133,7 +133,6 @@ const THREADS_QUERY: &str = r#"
           reviewThreads(first: 100, after: $cursor, states: [UNRESOLVED]) {
             nodes {
               id
-              isResolved
               comments(first: 100) {
                 nodes {
                   body
