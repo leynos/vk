@@ -183,7 +183,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn parse_reference(input: &str) -> Result<(RepoInfo, u64), VkError> {
     if let Ok(url) = Url::parse(input) {
         if url.host_str() == Some("github.com") {
-            let segments: Vec<_> = url.path_segments().unwrap().collect();
+            let segments: Vec<_> = url
+                .path_segments()
+                .ok_or(VkError::InvalidRef)?
+                .collect();
             if segments.len() >= 4 && segments[2] == "pull" {
                 let owner = segments[0].to_string();
                 let name = segments[1]
