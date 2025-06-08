@@ -39,6 +39,8 @@ enum VkError {
 static GITHUB_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/.]+)").unwrap());
 
+static UTF8_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\bUTF-?8\b").unwrap());
+
 #[derive(Deserialize)]
 struct GraphQlResponse<T> {
     data: Option<T>,
@@ -425,8 +427,9 @@ fn repo_from_env() -> Option<RepoInfo> {
 
 fn locale_is_utf8() -> bool {
     env::var("LC_ALL")
+        .or_else(|_| env::var("LC_CTYPE"))
         .or_else(|_| env::var("LANG"))
-        .map(|v| v.to_uppercase().contains("UTF-8"))
+        .map(|v| UTF8_RE.is_match(&v))
         .unwrap_or(false)
 }
 
@@ -495,18 +498,44 @@ mod tests {
     #[serial]
     fn detect_utf8_locale() {
         let old_all = std::env::var("LC_ALL").ok();
+        let old_ctype = std::env::var("LC_CTYPE").ok();
         let old_lang = std::env::var("LANG").ok();
 
         set_var("LC_ALL", "en_GB.UTF-8");
+        remove_var("LC_CTYPE");
         remove_var("LANG");
         assert!(locale_is_utf8());
 
-        set_var("LC_ALL", "C");
+        set_var("LC_ALL", "en_GB.UTF8");
+        assert!(locale_is_utf8());
+
+        set_var("LC_ALL", "en_GB.utf8");
+        assert!(locale_is_utf8());
+
+        set_var("LC_ALL", "en_GB.UTF80");
+        assert!(!locale_is_utf8());
+
+        remove_var("LC_ALL");
+        set_var("LC_CTYPE", "en_GB.UTF-8");
+        assert!(locale_is_utf8());
+
+        set_var("LC_CTYPE", "C");
+        assert!(!locale_is_utf8());
+
+        remove_var("LC_CTYPE");
+        set_var("LANG", "en_GB.UTF-8");
+        assert!(locale_is_utf8());
+
+        set_var("LANG", "C");
         assert!(!locale_is_utf8());
 
         match old_all {
             Some(v) => set_var("LC_ALL", v),
             None => remove_var("LC_ALL"),
+        }
+        match old_ctype {
+            Some(v) => set_var("LC_CTYPE", v),
+            None => remove_var("LC_CTYPE"),
         }
         match old_lang {
             Some(v) => set_var("LANG", v),
