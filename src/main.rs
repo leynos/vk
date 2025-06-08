@@ -306,23 +306,38 @@ async fn fetch_review_threads(
     Ok(threads)
 }
 
-fn format_comment_diff(comment: &ReviewComment) -> String {
+fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Error> {
+    use std::fmt::Write;
+
     let mut lines_iter = comment.diff_hunk.lines();
     let header = match lines_iter.next() {
         Some(h) => h,
-        None => return String::new(),
+        None => return Ok(String::new()),
     };
 
     let caps = match HUNK_RE.captures(header) {
         Some(c) => c,
         None => {
             let mut out = String::new();
+            let mut old_line = 0;
+            let mut new_line = 0;
             for l in comment.diff_hunk.lines() {
-                out.push_str(&format!("        {l}\n"));
+                if l.starts_with('+') {
+                    writeln!(&mut out, "     {:>4} {}", new_line + 1, l)?;
+                    new_line += 1;
+                } else if l.starts_with('-') {
+                    writeln!(&mut out, "{:>4}      {}", old_line + 1, l)?;
+                    old_line += 1;
+                } else {
+                    writeln!(&mut out, "{:>4} {:>4} {}", old_line + 1, new_line + 1, l)?;
+                    old_line += 1;
+                    new_line += 1;
+                }
             }
-            return out;
+            return Ok(out);
         }
     };
+
     let mut old_line: i32 = caps
         .name("old")
         .and_then(|m| m.as_str().parse().ok())
@@ -331,6 +346,14 @@ fn format_comment_diff(comment: &ReviewComment) -> String {
         .name("new")
         .and_then(|m| m.as_str().parse().ok())
         .unwrap_or(0);
+    let _old_count: usize = caps
+        .name("old_count")
+        .and_then(|m| m.as_str().parse().ok())
+        .unwrap_or(1);
+    let _new_count: usize = caps
+        .name("new_count")
+        .and_then(|m| m.as_str().parse().ok())
+        .unwrap_or(1);
 
     let mut lines: Vec<(Option<i32>, Option<i32>, String)> = Vec::new();
     for l in lines_iter {
@@ -349,11 +372,13 @@ fn format_comment_diff(comment: &ReviewComment) -> String {
     }
 
     let target = lines.iter().position(|(o, n, _)| {
-        comment.original_position == *o || comment.position == *n
-    });
-    let (start, end) = if let Some(idx) = target {
-        (idx.saturating_sub(5), std::cmp::min(lines.len(), idx + 6))
-    } else {
+        (0, std::cmp::min(lines.len(), 20))
+        writeln!(&mut out, "{old_disp} {new_disp} {text}")?;
+    Ok(out)
+    match format_comment_diff(comment) {
+        Ok(diff) => print!("{}", diff),
+        Err(_) => print!("{}", comment.diff_hunk),
+    }
         (0, lines.len())
     };
 
@@ -609,8 +634,64 @@ mod tests {
     fn format_comment_diff_sample() {
         let data = fs::read_to_string("tests/fixtures/review_comment.json").unwrap();
         let comment: ReviewComment = serde_json::from_str(&data).unwrap();
-        let diff = format_comment_diff(&comment);
+        let diff = format_comment_diff(&comment).unwrap();
         assert!(diff.contains("-import dataclasses"));
         assert!(diff.contains("import typing"));
+    }
+
+    #[test]
+    fn hunk_re_variants() {
+        let caps = HUNK_RE.captures("@@ -1 +2 @@").unwrap();
+        assert_eq!(&caps["old"], "1");
+        assert!(caps.name("old_count").is_none());
+        assert_eq!(&caps["new"], "2");
+        assert!(caps.name("new_count").is_none());
+
+        let caps = HUNK_RE.captures("@@ -3,4 +5 @@").unwrap();
+        assert_eq!(&caps["old"], "3");
+        assert_eq!(caps.name("old_count").unwrap().as_str(), "4");
+        assert_eq!(&caps["new"], "5");
+        assert!(caps.name("new_count").is_none());
+
+        let caps = HUNK_RE.captures("@@ -7 +8,2 @@").unwrap();
+        assert_eq!(&caps["old"], "7");
+        assert!(caps.name("old_count").is_none());
+        assert_eq!(&caps["new"], "8");
+        assert_eq!(caps.name("new_count").unwrap().as_str(), "2");
+    }
+
+    #[test]
+    fn format_comment_diff_invalid_header() {
+        let comment = ReviewComment {
+            body: String::new(),
+            diff_hunk: "not a hunk\n-line1\n+line1".to_string(),
+            original_position: None,
+            position: None,
+            path: String::new(),
+            url: String::new(),
+            author: None,
+        };
+        let out = format_comment_diff(&comment).unwrap();
+        assert!(out.contains("-line1"));
+        assert!(out.contains("+line1"));
+    }
+
+    #[test]
+    fn format_comment_diff_caps_output() {
+        let mut diff = String::from("@@ -1,30 +1,30 @@\n");
+        for i in 0..30 {
+            diff.push_str(&format!(" line{}\n", i));
+        }
+        let comment = ReviewComment {
+            body: String::new(),
+            diff_hunk: diff,
+            original_position: None,
+            position: None,
+            path: String::new(),
+            url: String::new(),
+            author: None,
+        };
+        let out = format_comment_diff(&comment).unwrap();
+        assert_eq!(out.lines().count(), 20);
     }
 }
