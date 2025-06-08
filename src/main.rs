@@ -40,8 +40,12 @@ static GITHUB_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/.]+)").unwrap());
 
 static UTF8_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\bUTF-?8\b").unwrap());
-static HUNK_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"@@ -(?P<old>\d+)(?:,\d+)? \+(?P<new>\d+)(?:,\d+)? @@").unwrap());
+static HUNK_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(
+        r"@@ -(?P<old>\d+)(?:,(?P<old_count>\d+))? \+(?P<new>\d+)(?:,(?P<new_count>\d+))? @@",
+    )
+    .unwrap()
+});
 
 #[derive(Deserialize)]
 struct GraphQlResponse<T> {
@@ -311,7 +315,13 @@ fn format_comment_diff(comment: &ReviewComment) -> String {
 
     let caps = match HUNK_RE.captures(header) {
         Some(c) => c,
-        None => return format!("{}\n", comment.diff_hunk),
+        None => {
+            let mut out = String::new();
+            for l in comment.diff_hunk.lines() {
+                out.push_str(&format!("        {l}\n"));
+            }
+            return out;
+        }
     };
     let mut old_line: i32 = caps
         .name("old")
@@ -342,9 +352,11 @@ fn format_comment_diff(comment: &ReviewComment) -> String {
         comment.original_position.is_some_and(|p| Some(p) == *o)
             || comment.position.is_some_and(|p| Some(p) == *n)
     });
-    let idx = target.unwrap_or(0);
-    let start = idx.saturating_sub(5);
-    let end = std::cmp::min(lines.len(), idx + 6);
+    let (start, end) = if let Some(idx) = target {
+        (idx.saturating_sub(5), std::cmp::min(lines.len(), idx + 6))
+    } else {
+        (0, lines.len())
+    };
 
     let mut out = String::new();
     use std::fmt::Write;
