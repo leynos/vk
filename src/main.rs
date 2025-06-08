@@ -372,10 +372,13 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
     }
 
     let target = lines.iter().position(|(o, n, _)| {
-        (0, std::cmp::min(lines.len(), 20))
-        writeln!(&mut out, "{old_disp} {new_disp} {text}")?;
-    Ok(out)
-    match format_comment_diff(comment) {
+    let (start, end);
+    if let Some(idx) = target {
+        start = idx.saturating_sub(5);
+        end = std::cmp::min(lines.len(), idx + 6);
+        start = 0;
+        end = std::cmp::min(lines.len(), 20);
+    }
         Ok(diff) => print!("{}", diff),
         Err(_) => print!("{}", comment.diff_hunk),
     }
