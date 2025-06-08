@@ -371,19 +371,13 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
         }
     }
 
-    let target = lines.iter().position(|(o, n, _)| {
-    let (start, end);
-    if let Some(idx) = target {
-        start = idx.saturating_sub(5);
-        end = std::cmp::min(lines.len(), idx + 6);
-        start = 0;
-        end = std::cmp::min(lines.len(), 20);
-    }
-        Ok(diff) => print!("{}", diff),
-        Err(_) => print!("{}", comment.diff_hunk),
-    }
-        (0, lines.len())
+    let target_idx = lines.iter().position(|(o, n, _)| {
+    let (start, end) = match target_idx {
+        Some(idx) => (idx.saturating_sub(5), std::cmp::min(lines.len(), idx + 6)),
+        None => (0, std::cmp::min(lines.len(), 20)),
     };
+    let diff = format_comment_diff(comment).map_err(|e| anyhow::anyhow!(e))?;
+    print!("{}", diff);
 
     let mut out = String::new();
     use std::fmt::Write;
