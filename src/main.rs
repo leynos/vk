@@ -370,7 +370,7 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
         Some(idx) => (idx.saturating_sub(5), std::cmp::min(lines.len(), idx + 6)),
         None => (0, std::cmp::min(lines.len(), 20)),
     };
-    let diff = format_comment_diff(comment).map_err(|e| anyhow::anyhow!(e))?;
+    let diff = format_comment_diff(comment)?;
     print!("{}", diff);
 
     let mut out = String::new();
