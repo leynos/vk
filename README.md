@@ -28,6 +28,12 @@ detailed guide to creating one.
 $ vk https://github.com/leynos/mxd/pull/31
 ```
 
+## Troubleshooting
+
+`vk` renders comments with emoji for clarity. If these appear as random
+characters, your terminal locale may not be UTF-8. Set `LC_ALL` or `LANG`
+accordingly. `vk` prints a warning when it detects a non UTF-8 locale.
+
 ## Installing
 
 Build from source using Cargo:

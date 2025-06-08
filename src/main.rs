@@ -333,6 +333,9 @@ async fn run(args: Args) -> Result<(), VkError> {
     if token.is_empty() {
         eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
     }
+    if !locale_is_utf8() {
+        eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
+    }
 
     let headers = build_headers(&token);
     let client = reqwest::Client::new();
@@ -420,11 +423,28 @@ fn repo_from_env() -> Option<RepoInfo> {
     }
 }
 
+fn locale_is_utf8() -> bool {
+    env::var("LC_ALL")
+        .or_else(|_| env::var("LANG"))
+        .map(|v| v.to_uppercase().contains("UTF-8"))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
+        // SAFETY: manipulating environment variables in tests is safe because tests run serially.
+        unsafe { std::env::set_var(key, value) }
+    }
+
+    fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
+        // SAFETY: manipulating environment variables in tests is safe because tests run serially.
+        unsafe { std::env::remove_var(key) }
+    }
 
     #[test]
     fn parse_url() {
@@ -462,10 +482,35 @@ mod tests {
 
     #[test]
     fn repo_from_env_git_suffix() {
-        unsafe { std::env::set_var("VK_REPO", "a/b.git") };
+        set_var("VK_REPO", "a/b.git");
         let repo = repo_from_env().unwrap();
         assert_eq!(repo.owner, "a");
         assert_eq!(repo.name, "b");
-        unsafe { std::env::remove_var("VK_REPO") };
+        remove_var("VK_REPO");
+    }
+
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn detect_utf8_locale() {
+        let old_all = std::env::var("LC_ALL").ok();
+        let old_lang = std::env::var("LANG").ok();
+
+        set_var("LC_ALL", "en_GB.UTF-8");
+        remove_var("LANG");
+        assert!(locale_is_utf8());
+
+        set_var("LC_ALL", "C");
+        assert!(!locale_is_utf8());
+
+        match old_all {
+            Some(v) => set_var("LC_ALL", v),
+            None => remove_var("LC_ALL"),
+        }
+        match old_lang {
+            Some(v) => set_var("LANG", v),
+            None => remove_var("LANG"),
+        }
     }
 }
