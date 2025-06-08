@@ -349,8 +349,7 @@ fn format_comment_diff(comment: &ReviewComment) -> String {
     }
 
     let target = lines.iter().position(|(o, n, _)| {
-        comment.original_position.is_some_and(|p| Some(p) == *o)
-            || comment.position.is_some_and(|p| Some(p) == *n)
+        comment.original_position == *o || comment.position == *n
     });
     let (start, end) = if let Some(idx) = target {
         (idx.saturating_sub(5), std::cmp::min(lines.len(), idx + 6))
