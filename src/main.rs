@@ -333,6 +333,9 @@ async fn run(args: Args) -> Result<(), VkError> {
     if token.is_empty() {
         eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
     }
+    if !locale_is_utf8() {
+        eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
+    }
 
     let headers = build_headers(&token);
     let client = reqwest::Client::new();
@@ -420,6 +423,13 @@ fn repo_from_env() -> Option<RepoInfo> {
     }
 }
 
+fn locale_is_utf8() -> bool {
+    env::var("LC_ALL")
+        .or_else(|_| env::var("LANG"))
+        .map(|v| v.to_uppercase().contains("UTF-8"))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,5 +477,32 @@ mod tests {
         assert_eq!(repo.owner, "a");
         assert_eq!(repo.name, "b");
         unsafe { std::env::remove_var("VK_REPO") };
+    }
+
+    use serial_test::serial;
+
+    #[test]
+    #[serial]
+    fn detect_utf8_locale() {
+        let old_all = std::env::var("LC_ALL").ok();
+        let old_lang = std::env::var("LANG").ok();
+
+        unsafe {
+            std::env::set_var("LC_ALL", "en_GB.UTF-8");
+            std::env::remove_var("LANG");
+        }
+        assert!(locale_is_utf8());
+
+        unsafe { std::env::set_var("LC_ALL", "C") };
+        assert!(!locale_is_utf8());
+
+        match old_all {
+            Some(v) => unsafe { std::env::set_var("LC_ALL", v) },
+            None => unsafe { std::env::remove_var("LC_ALL") },
+        }
+        match old_lang {
+            Some(v) => unsafe { std::env::set_var("LANG", v) },
+            None => unsafe { std::env::remove_var("LANG") },
+        }
     }
 }
