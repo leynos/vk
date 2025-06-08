@@ -347,10 +347,11 @@ fn format_comment_diff(comment: &ReviewComment) -> String {
     let end = std::cmp::min(lines.len(), idx + 6);
 
     let mut out = String::new();
+    use std::fmt::Write;
     for (o, n, text) in &lines[start..end] {
-        let old_disp = o.map_or("    ".to_string(), |n| format!("{:>4}", n));
-        let new_disp = n.map_or("    ".to_string(), |n| format!("{:>4}", n));
-        out.push_str(&format!("{old_disp} {new_disp} {text}\n"));
+        let old_disp = o.map_or("    ", |n| format!("{:>4}", n));
+        let new_disp = n.map_or("    ", |n| format!("{:>4}", n));
+        write!(&mut out, "{} {} {}\n", old_disp, new_disp, text).unwrap();
     }
     out
 }
