@@ -311,8 +311,8 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
 
     fn parse_diff_lines<'a, I>(
         lines: I,
-        mut old_line: i32,
-        mut new_line: i32,
+        mut old_line: Option<i32>,
+        mut new_line: Option<i32>,
     ) -> Vec<(Option<i32>, Option<i32>, String)>
     where
         I: Iterator<Item = &'a str>,
@@ -320,16 +320,24 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
         let mut parsed = Vec::new();
         for l in lines {
             if l.starts_with('+') {
-                parsed.push((None, Some(new_line), l.to_string()));
-                new_line += 1;
+                parsed.push((None, new_line, l.to_string()));
+                if let Some(ref mut n) = new_line {
+                    *n += 1;
+                }
             } else if l.starts_with('-') {
-                parsed.push((Some(old_line), None, l.to_string()));
-                old_line += 1;
+                parsed.push((old_line, None, l.to_string()));
+                if let Some(ref mut o) = old_line {
+                    *o += 1;
+                }
             } else {
                 let text = l.strip_prefix(' ').unwrap_or(l);
-                parsed.push((Some(old_line), Some(new_line), format!(" {}", text)));
-                old_line += 1;
-                new_line += 1;
+                parsed.push((old_line, new_line, format!(" {}", text)));
+                if let Some(ref mut o) = old_line {
+                    *o += 1;
+                }
+                if let Some(ref mut n) = new_line {
+                    *n += 1;
+                }
             }
         }
         parsed
@@ -360,9 +368,9 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
                 .and_then(|m| m.as_str().parse().ok())
                 .unwrap_or(1);
 
-            parse_diff_lines(lines_iter, old_start, new_start)
+            parse_diff_lines(lines_iter, Some(old_start), Some(new_start))
         } else {
-            parse_diff_lines(comment.diff_hunk.lines(), 0, 0)
+            parse_diff_lines(comment.diff_hunk.lines(), None, None)
         };
 
     let target_idx = lines.iter().position(|(o, n, _)| {
