@@ -40,6 +40,8 @@ static GITHUB_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/.]+)").unwrap());
 
 static UTF8_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\bUTF-?8\b").unwrap());
+static HUNK_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"@@ -(?P<old>\d+)(?:,\d+)? \+(?P<new>\d+)(?:,\d+)? @@").unwrap());
 
 #[derive(Deserialize)]
 struct GraphQlResponse<T> {
@@ -106,6 +108,10 @@ struct ReviewComment {
     body: String,
     #[serde(rename = "diffHunk")]
     diff_hunk: String,
+    #[serde(rename = "originalPosition")]
+    original_position: Option<i32>,
+    position: Option<i32>,
+    #[allow(dead_code)]
     path: String,
     url: String,
     author: Option<User>,
@@ -146,6 +152,8 @@ const THREADS_QUERY: &str = r#"
                 nodes {
                   body
                   diffHunk
+                  originalPosition
+                  position
                   path
                   url
                   author { login }
@@ -168,6 +176,8 @@ const COMMENT_QUERY: &str = r#"
             nodes {
               body
               diffHunk
+              originalPosition
+              position
               path
               url
               author { login }
@@ -292,22 +302,62 @@ async fn fetch_review_threads(
     Ok(threads)
 }
 
-fn print_comment(skin: &MadSkin, comment: &ReviewComment) -> anyhow::Result<()> {
-    use diffy::{Patch, PatchFormatter};
+fn format_comment_diff(comment: &ReviewComment) -> String {
+    let mut lines_iter = comment.diff_hunk.lines();
+    let header = match lines_iter.next() {
+        Some(h) => h,
+        None => return String::new(),
+    };
 
-    let full_patch = format!(
-        "--- a/{path}\n+++ b/{path}\n{hunk}",
-        path = comment.path,
-        hunk = comment.diff_hunk
-    );
+    let caps = match HUNK_RE.captures(header) {
+        Some(c) => c,
+        None => return format!("{}\n", comment.diff_hunk),
+    };
+    let mut old_line: i32 = caps
+        .name("old")
+        .and_then(|m| m.as_str().parse().ok())
+        .unwrap_or(0);
+    let mut new_line: i32 = caps
+        .name("new")
+        .and_then(|m| m.as_str().parse().ok())
+        .unwrap_or(0);
 
-    match Patch::from_str(&full_patch) {
-        Ok(patch) => {
-            let formatter = PatchFormatter::new().with_color();
-            println!("{}", formatter.fmt_patch(&patch));
+    let mut lines: Vec<(Option<i32>, Option<i32>, String)> = Vec::new();
+    for l in lines_iter {
+        if l.starts_with('+') {
+            lines.push((None, Some(new_line), l.to_string()));
+            new_line += 1;
+        } else if l.starts_with('-') {
+            lines.push((Some(old_line), None, l.to_string()));
+            old_line += 1;
+        } else {
+            let text = l.strip_prefix(' ').unwrap_or(l);
+            lines.push((Some(old_line), Some(new_line), format!(" {}", text)));
+            old_line += 1;
+            new_line += 1;
         }
-        Err(_) => println!("{}", comment.diff_hunk),
     }
+
+    let target = lines.iter().position(|(o, n, _)| {
+        comment.original_position.is_some_and(|p| Some(p) == *o)
+            || comment.position.is_some_and(|p| Some(p) == *n)
+    });
+    let idx = target.unwrap_or(0);
+    let start = idx.saturating_sub(5);
+    let end = std::cmp::min(lines.len(), idx + 6);
+
+    let mut out = String::new();
+    for (o, n, text) in &lines[start..end] {
+        let old_disp = o.map_or("    ".to_string(), |n| format!("{:>4}", n));
+        let new_disp = n.map_or("    ".to_string(), |n| format!("{:>4}", n));
+        out.push_str(&format!("{old_disp} {new_disp} {text}\n"));
+    }
+    out
+}
+
+fn print_comment(skin: &MadSkin, comment: &ReviewComment) -> anyhow::Result<()> {
+    let diff = format_comment_diff(comment);
+    print!("{}", diff);
 
     let author = comment
         .author
@@ -541,5 +591,14 @@ mod tests {
             Some(v) => set_var("LANG", v),
             None => remove_var("LANG"),
         }
+    }
+
+    #[test]
+    fn format_comment_diff_sample() {
+        let data = fs::read_to_string("tests/fixtures/review_comment.json").unwrap();
+        let comment: ReviewComment = serde_json::from_str(&data).unwrap();
+        let diff = format_comment_diff(&comment);
+        assert!(diff.contains("-import dataclasses"));
+        assert!(diff.contains("import typing"));
     }
 }
