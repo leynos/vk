@@ -1739,7 +1739,6 @@ dependencies = [
  "anyhow",
  "clap",
  "diffy",
- "once_cell",
  "regex",
  "reqwest",
  "serde",
