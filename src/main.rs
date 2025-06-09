@@ -1,9 +1,9 @@
 use clap::Parser;
-use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde_json::json;
+use std::sync::LazyLock;
 use std::{env, fs, path::Path};
 use termimad::MadSkin;
 use thiserror::Error;
@@ -36,11 +36,11 @@ enum VkError {
     ApiErrors(String),
 }
 
-static GITHUB_RE: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/.]+)").unwrap());
+static GITHUB_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/.]+)").unwrap());
 
-static UTF8_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)\bUTF-?8\b").unwrap());
-static HUNK_RE: Lazy<Regex> = Lazy::new(|| {
+static UTF8_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").unwrap());
+static HUNK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"@@ -(?P<old>\d+)(?:,(?P<old_count>\d+))? \+(?P<new>\d+)(?:,(?P<new_count>\d+))? @@",
     )
@@ -144,7 +144,7 @@ struct CommentNode {
     comments: CommentConnection,
 }
 
-const THREADS_QUERY: &str = r#"
+const THREADS_QUERY: &str = r"
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
@@ -170,9 +170,9 @@ const THREADS_QUERY: &str = r#"
         }
       }
     }
-"#;
+";
 
-const COMMENT_QUERY: &str = r#"
+const COMMENT_QUERY: &str = r"
     query($id: ID!, $cursor: String) {
       node(id: $id) {
         ... on PullRequestReviewThread {
@@ -191,7 +191,7 @@ const COMMENT_QUERY: &str = r#"
         }
       }
     }
-"#;
+";
 
 async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
 where
@@ -331,7 +331,7 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
                 }
             } else {
                 let text = l.strip_prefix(' ').unwrap_or(l);
-                parsed.push((old_line, new_line, format!(" {}", text)));
+                parsed.push((old_line, new_line, format!(" {text}")));
                 if let Some(ref mut o) = old_line {
                     *o += 1;
                 }
@@ -344,9 +344,8 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
     }
 
     let mut lines_iter = comment.diff_hunk.lines();
-    let header = match lines_iter.next() {
-        Some(h) => h,
-        None => return Ok(String::new()),
+    let Some(header) = lines_iter.next() else {
+        return Ok(String::new());
     };
 
     let lines: Vec<(Option<i32>, Option<i32>, String)> =
@@ -373,31 +372,32 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
             parse_diff_lines(comment.diff_hunk.lines(), None, None)
         };
 
-    let target_idx = lines.iter().position(|(o, n, _)| {
+    let target_idx = lines
+        .iter()
+        .position(|(o, n, _)| comment.original_position == *o || comment.position == *n);
     let (start, end) = match target_idx {
         Some(idx) => (idx.saturating_sub(5), std::cmp::min(lines.len(), idx + 6)),
         None => (0, std::cmp::min(lines.len(), 20)),
     };
 
     let mut out = String::new();
-    use std::fmt::Write;
     for (o, n, text) in &lines[start..end] {
-        let old_disp = o.map_or("    ", |n| format!("{:>4}", n));
-        let new_disp = n.map_or("    ", |n| format!("{:>4}", n));
-        write!(&mut out, "{} {} {}\n", old_disp, new_disp, text).unwrap();
+        let old_disp = o.map_or(String::from("    "), |n| format!("{n:>4}"));
+        let new_disp = n.map_or(String::from("    "), |n| format!("{n:>4}"));
+        writeln!(&mut out, "{old_disp} {new_disp} {text}")?;
     }
-    out
+    Ok(out)
 }
 
 fn print_comment(skin: &MadSkin, comment: &ReviewComment) -> anyhow::Result<()> {
-    let diff = format_comment_diff(comment);
-    print!("{}", diff);
+    let diff = format_comment_diff(comment)?;
+    print!("{diff}");
 
     let author = comment
         .author
         .as_ref()
         .map_or("unknown", |u| u.login.as_str());
-    println!("\u{1f4ac}  \x1b[1m{}\x1b[0m wrote:", author);
+    println!("\u{1f4ac}  \x1b[1m{author}\x1b[0m wrote:");
     skin.print_text(&comment.body);
     println!();
     Ok(())
@@ -408,7 +408,7 @@ fn build_headers(token: &str) -> HeaderMap {
     headers.insert(USER_AGENT, "vk".parse().unwrap());
     headers.insert(ACCEPT, "application/vnd.github+json".parse().unwrap());
     if !token.is_empty() {
-        headers.insert(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap());
+        headers.insert(AUTHORIZATION, format!("Bearer {token}").parse().unwrap());
     }
     headers
 }
