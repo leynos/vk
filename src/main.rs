@@ -520,6 +520,7 @@ fn locale_is_utf8() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Write;
     use std::fs;
     use tempfile::tempdir;
 
@@ -677,7 +678,7 @@ mod tests {
     fn format_comment_diff_caps_output() {
         let mut diff = String::from("@@ -1,30 +1,30 @@\n");
         for i in 0..30 {
-            diff.push_str(&format!(" line{}\n", i));
+            writeln!(&mut diff, " line{i}").unwrap();
         }
         let comment = ReviewComment {
             body: String::new(),
