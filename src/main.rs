@@ -1,7 +1,9 @@
-use clap::Parser;
+#![allow(non_snake_case)]
+use clap::{Parser, Subcommand};
+use ortho_config::{OrthoConfig, load_and_merge_subcommand_for};
 use regex::Regex;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::LazyLock;
 use std::{env, fs, path::Path};
@@ -9,10 +11,52 @@ use termimad::MadSkin;
 use thiserror::Error;
 use url::Url;
 
+#[derive(Subcommand, Deserialize, Serialize, Clone, Debug)]
+enum Commands {
+    /// Show unresolved pull request comments
+    Pr(PrArgs),
+    /// Read a GitHub issue (todo)
+    Issue(IssueArgs),
+}
+
+impl Default for Commands {
+    fn default() -> Self {
+        Commands::Pr(PrArgs::default())
+    }
+}
+
 #[derive(Parser)]
-#[command(name = "vk", about = "View Komments - show unresolved PR comments")]
-struct Args {
+#[command(
+    name = "vk",
+    about = "View Komments - show unresolved PR comments",
+    subcommand_required = true,
+    arg_required_else_help = true
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: crate::Commands,
+    #[command(flatten)]
+    global: GlobalArgsCli,
+}
+
+#[derive(Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
+#[ortho_config(prefix = "VK")]
+struct GlobalArgs {
+    /// Repository used when passing only a pull request number
+    repo: Option<String>,
+}
+
+#[derive(Parser, Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
+#[ortho_config(prefix = "VK")]
+struct PrArgs {
     /// Pull request URL or number
+    reference: String,
+}
+
+#[derive(Parser, Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
+#[ortho_config(prefix = "VK")]
+struct IssueArgs {
+    /// Issue URL or number
     reference: String,
 }
 
@@ -34,6 +78,10 @@ enum VkError {
     BadResponse,
     #[error("API errors: {0}")]
     ApiErrors(String),
+    #[error("configuration error: {0}")]
+    Config(#[from] ortho_config::OrthoError),
+    #[error("{0} not implemented yet")]
+    Unimplemented(&'static str),
 }
 
 static GITHUB_RE: LazyLock<Regex> =
@@ -413,8 +461,9 @@ fn build_headers(token: &str) -> HeaderMap {
     headers
 }
 
-async fn run(args: Args) -> Result<(), VkError> {
-    let (repo, number) = parse_reference(&args.reference)?;
+#[allow(clippy::result_large_err)]
+async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
+    let (repo, number) = parse_reference(&args.reference, repo)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
@@ -442,11 +491,27 @@ async fn run(args: Args) -> Result<(), VkError> {
 }
 
 #[tokio::main]
+#[allow(clippy::result_large_err)]
 async fn main() -> Result<(), VkError> {
-    run(Args::parse()).await
+    let cli = Cli::parse();
+    let mut global = GlobalArgs::load_from_iter(std::iter::empty::<std::ffi::OsString>())?;
+    if let Some(repo) = cli.global.repo {
+        global.repo = Some(repo);
+    }
+    match cli.command {
+        Commands::Pr(pr_cli) => {
+            let args = load_and_merge_subcommand_for::<PrArgs>(&pr_cli)?;
+            run_pr(args, global.repo.as_deref()).await
+        }
+        Commands::Issue(issue_cli) => {
+            let _args = load_and_merge_subcommand_for::<IssueArgs>(&issue_cli)?;
+            Err(VkError::Unimplemented("issue command"))
+        }
+    }
 }
 
-fn parse_reference(input: &str) -> Result<(RepoInfo, u64), VkError> {
+#[allow(clippy::result_large_err)]
+fn parse_reference(input: &str, default_repo: Option<&str>) -> Result<(RepoInfo, u64), VkError> {
     if let Ok(url) = Url::parse(input) {
         if url.host_str() == Some("github.com") {
             let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
@@ -464,7 +529,7 @@ fn parse_reference(input: &str) -> Result<(RepoInfo, u64), VkError> {
         Err(VkError::InvalidRef)
     } else if let Ok(number) = input.parse::<u64>() {
         let repo = repo_from_fetch_head()
-            .or_else(repo_from_env)
+            .or_else(|| default_repo.and_then(repo_from_str))
             .ok_or(VkError::RepoNotFound)?;
         Ok((repo, number))
     } else {
@@ -489,9 +554,8 @@ fn repo_from_fetch_head() -> Option<RepoInfo> {
     None
 }
 
-fn repo_from_env() -> Option<RepoInfo> {
-    let repo = env::var("VK_REPO").ok()?;
-    if let Some(caps) = GITHUB_RE.captures(&repo) {
+fn repo_from_str(repo: &str) -> Option<RepoInfo> {
+    if let Some(caps) = GITHUB_RE.captures(repo) {
         let owner = caps.name("owner")?.as_str().to_string();
         let name = caps.name("repo")?.as_str().to_string();
         Some(RepoInfo { owner, name })
@@ -536,7 +600,8 @@ mod tests {
 
     #[test]
     fn parse_url() {
-        let (repo, number) = parse_reference("https://github.com/owner/repo/pull/42").unwrap();
+        let (repo, number) =
+            parse_reference("https://github.com/owner/repo/pull/42", None).unwrap();
         assert_eq!(repo.owner, "owner");
         assert_eq!(repo.name, "repo");
         assert_eq!(number, 42);
@@ -544,7 +609,8 @@ mod tests {
 
     #[test]
     fn parse_url_git_suffix() {
-        let (repo, number) = parse_reference("https://github.com/owner/repo.git/pull/7").unwrap();
+        let (repo, number) =
+            parse_reference("https://github.com/owner/repo.git/pull/7", None).unwrap();
         assert_eq!(repo.owner, "owner");
         assert_eq!(repo.name, "repo");
         assert_eq!(number, 7);
@@ -569,12 +635,16 @@ mod tests {
     }
 
     #[test]
-    fn repo_from_env_git_suffix() {
-        set_var("VK_REPO", "a/b.git");
-        let repo = repo_from_env().unwrap();
+    fn repo_from_str_git_suffix() {
+        let repo = repo_from_str("a/b.git").unwrap();
         assert_eq!(repo.owner, "a");
         assert_eq!(repo.name, "b");
-        remove_var("VK_REPO");
+    }
+
+    #[test]
+    fn cli_loads_repo_from_flag() {
+        let cli = Cli::try_parse_from(["vk", "--repo", "foo/bar", "pr", "1"]).unwrap();
+        assert_eq!(cli.global.repo.as_deref(), Some("foo/bar"));
     }
 
     use serial_test::serial;
@@ -691,5 +761,19 @@ mod tests {
         };
         let out = format_comment_diff(&comment).unwrap();
         assert_eq!(out.lines().count(), 20);
+    }
+
+    #[test]
+    fn cli_requires_subcommand() {
+        assert!(Cli::try_parse_from(["vk"]).is_err());
+    }
+
+    #[test]
+    fn pr_subcommand_parses() {
+        let cli = Cli::try_parse_from(["vk", "pr", "123"]).unwrap();
+        match cli.command {
+            Commands::Pr(args) => assert_eq!(args.reference, "123"),
+            _ => panic!("wrong variant"),
+        }
     }
 }

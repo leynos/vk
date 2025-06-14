@@ -7,14 +7,23 @@ This tool is intended for use by AI coding agents such as Aider, OpenAI Codex or
 ## Usage
 
 ```bash
-vk <pull-request-url-or-number>
+vk pr <pull-request-url-or-number>
 ```
+
+`vk` now uses [OrthoConfig](https://github.com/leynos/ortho-config) v0.2.0 for
+configuration. A global `--repo` option (or `VK_REPO` environment variable)
+sets the default repository when passing only a pull request number. The two
+available subcommands are:
+
+* `pr` - show unresolved pull request comments (existing behaviour)
+* `issue` - read a GitHub issue (**to do**)
 
 If you pass just a pull request number, `vk` tries to work out which repository
 you meant. It first examines `.git/FETCH_HEAD` for a GitHub remote URL and, if
 found, extracts the `owner/repo` from it. As Codex does not put the upstream URL in `.git/config`, we must obtain this from `FETCH_HEAD` for now. Failing that, it falls back to the
-`VK_REPO` environment variable which should be set to `owner/repo` (with or
-without a `.git` suffix). If neither source is available, `vk` will refuse to
+`VK_REPO` environment variable or `--repo` flag (both handled by
+OrthoConfig) which should be set to `owner/repo` (with or without a `.git`
+suffix). If neither source is available, `vk` will refuse to
 run with only a number.
 
 `vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN` to authenticate. If it's not
