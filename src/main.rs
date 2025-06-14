@@ -52,7 +52,7 @@ struct GlobalArgs {
 struct PrArgs {
     /// Pull request URL or number
     #[arg(required = true)]
-    reference: Option<String>,
+    reference: String,
 }
 
 #[derive(Parser, Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
@@ -60,7 +60,7 @@ struct PrArgs {
 struct IssueArgs {
     /// Issue URL or number
     #[arg(required = true)]
-    reference: Option<String>,
+    reference: String,
 }
 
 #[derive(Debug, Clone)]
@@ -466,7 +466,7 @@ fn build_headers(token: &str) -> HeaderMap {
 
 #[allow(clippy::result_large_err)]
 async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
-    let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
+    let reference = &args.reference;
     let (repo, number) = parse_reference(reference, repo)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
@@ -774,7 +774,7 @@ mod tests {
     fn pr_subcommand_parses() {
         let cli = Cli::try_parse_from(["vk", "pr", "123"]).unwrap();
         match cli.command {
-            Commands::Pr(args) => assert_eq!(args.reference.as_deref(), Some("123")),
+            Commands::Pr(args) => assert_eq!(args.reference, "123"),
             _ => panic!("wrong variant"),
         }
     }

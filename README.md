@@ -11,9 +11,10 @@ vk pr <pull-request-url-or-number>
 ```
 
 `vk` now uses [OrthoConfig](https://github.com/leynos/ortho-config) v0.2.0 for
-configuration. A global `--repo` option (or `VK_REPO` environment variable)
-sets the default repository when passing only a pull request number. The two
-available subcommands are:
+configuration. A global `--repo` option or the `VK_REPO` environment variable
+sets the default repository when passing only a pull request number.
+
+The CLI provides two subcommands:
 
 * `pr` - show unresolved pull request comments (existing behaviour)
 * `issue` - read a GitHub issue (**to do**)
@@ -22,10 +23,9 @@ If you pass just a pull request number, `vk` tries to work out which
 repository you meant. It first examines `.git/FETCH_HEAD` for a GitHub remote
 URL and, if found, extracts the `owner/repo` from it. As Codex does not put the
 upstream URL in `.git/config`, we must obtain this from `FETCH_HEAD` for now.
-Failing that, it falls back to the `VK_REPO` environment variable or the
-`--repo` flag (both handled by OrthoConfig). Set either one to `owner/repo`
-(with or without a `.git` suffix). If neither source is available, `vk` will
-refuse to run with only a number.
+Failing that, it falls back to the configured repository (`--repo` or
+`VK_REPO`). Set this value to `owner/repo` with or without a `.git` suffix. If
+neither source is available, `vk` will refuse to run with only a number.
 
 `vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN` to authenticate. If it's not
 set you'll get a warning and anonymous requests may be rate limited.
@@ -37,7 +37,7 @@ detailed guide to creating one.
 ## Example
 
 ```
-$ vk https://github.com/leynos/mxd/pull/31
+$ vk pr https://github.com/leynos/mxd/pull/31
 ```
 
 ## Troubleshooting
