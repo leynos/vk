@@ -19,12 +19,6 @@ enum Commands {
     Issue(IssueArgs),
 }
 
-impl Default for Commands {
-    fn default() -> Self {
-        Commands::Pr(PrArgs::default())
-    }
-}
-
 #[derive(Parser)]
 #[command(
     name = "vk",
@@ -39,6 +33,7 @@ struct Cli {
     global: GlobalArgs,
 }
 
+#[allow(non_snake_case)]
 #[derive(Parser, Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
 #[ortho_config(prefix = "VK")]
 struct GlobalArgs {
@@ -47,7 +42,16 @@ struct GlobalArgs {
     repo: Option<String>,
 }
 
-#[derive(Parser, Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
+impl GlobalArgs {
+    fn merge(&mut self, other: GlobalArgs) {
+        if let Some(repo) = other.repo {
+            self.repo = Some(repo);
+        }
+    }
+}
+
+#[allow(non_snake_case)]
+#[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
 #[ortho_config(prefix = "VK")]
 struct PrArgs {
     /// Pull request URL or number
@@ -55,12 +59,31 @@ struct PrArgs {
     reference: String,
 }
 
-#[derive(Parser, Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
+impl Default for PrArgs {
+    #[allow(clippy::derivable_impls)]
+    fn default() -> Self {
+        Self {
+            reference: String::new(),
+        }
+    }
+}
+
+#[allow(non_snake_case)]
+#[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
 #[ortho_config(prefix = "VK")]
 struct IssueArgs {
     /// Issue URL or number
     #[arg(required = true)]
     reference: String,
+}
+
+impl Default for IssueArgs {
+    #[allow(clippy::derivable_impls)]
+    fn default() -> Self {
+        Self {
+            reference: String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -499,9 +522,7 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
 async fn main() -> Result<(), VkError> {
     let cli = Cli::parse();
     let mut global = GlobalArgs::load()?;
-    if let Some(repo) = cli.global.repo {
-        global.repo = Some(repo);
-    }
+    global.merge(cli.global);
     match cli.command {
         Commands::Pr(pr_cli) => {
             let args = load_and_merge_subcommand_for::<PrArgs>(&pr_cli)?;

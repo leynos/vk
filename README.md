@@ -21,7 +21,7 @@ The CLI provides two subcommands:
 
 If you pass just a pull request number, `vk` tries to work out which
 repository you meant. It first examines `.git/FETCH_HEAD` for a GitHub remote
-URL and, if found, extracts the `owner/repo` from it. As Codex does not put the
+URL and, if found, extracts the `owner/repo` from it. As the Codex agent does not put the
 upstream URL in `.git/config`, we must obtain this from `FETCH_HEAD` for now.
 Failing that, it falls back to the configured repository (`--repo` or
 `VK_REPO`). Set this value to `owner/repo` with or without a `.git` suffix. If
