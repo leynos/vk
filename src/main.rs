@@ -178,11 +178,10 @@ impl GraphQLClient {
         V: serde::Serialize,
         for<'de> T: serde::Deserialize<'de>,
     {
-        let mut req = self.client.post(&self.endpoint);
-        for (k, v) in &self.headers {
-            req = req.header(k, v);
-        }
-        let resp: GraphQlResponse<T> = req
+        let resp: GraphQlResponse<T> = self
+            .client
+            .post(&self.endpoint)
+            .headers(self.headers.clone())
             .json(&json!({ "query": query, "variables": variables }))
             .send()
             .await?
@@ -389,7 +388,11 @@ async fn fetch_issue(
     let data: IssueData = client
         .run_query(
             ISSUE_QUERY,
-            json!({ "owner": repo.owner, "name": repo.name, "number": number }),
+            json!({
+                "owner": repo.owner.as_str(),
+                "name": repo.name.as_str(),
+                "number": number
+            }),
         )
         .await?;
     Ok(data.repository.issue)
@@ -405,8 +408,8 @@ async fn fetch_thread_page(
         .run_query(
             THREADS_QUERY,
             json!({
-                "owner": repo.owner,
-                "name": repo.name,
+                "owner": repo.owner.as_str(),
+                "name": repo.name.as_str(),
                 "number": number,
                 "cursor": cursor,
             }),
