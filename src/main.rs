@@ -294,6 +294,29 @@ const ISSUE_QUERY: &str = r"
     }
 ";
 
+/// Repeatedly fetches and accumulates paginated results using a provided asynchronous fetch function.
+///
+/// The fetch function is called with an optional cursor and must return a page of items and pagination info. This continues until there are no more pages, returning all collected items.
+///
+/// # Returns
+///
+/// A vector containing all items from all fetched pages.
+///
+/// # Errors
+///
+/// Returns a `VkError` if any page fetch fails.
+///
+/// # Examples
+///
+/// ```
+/// async fn fetch_page(cursor: Option<String>) -> Result<(Vec<u32>, PageInfo), VkError> {
+///     // Example: always returns a single page with two items
+///     Ok((vec![1, 2], PageInfo { has_next_page: false, end_cursor: None }))
+/// }
+///
+/// let all_items = paginate(fetch_page).await?;
+/// assert_eq!(all_items, vec![1, 2]);
+/// ```
 async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
 where
     F: FnMut(Option<String>) -> Fut,
@@ -312,6 +335,26 @@ where
     Ok(items)
 }
 
+/// Fetches a page of review comments for a given pull request review thread from GitHub.
+///
+/// Sends a GraphQL request to retrieve a single page of comments and pagination info for the specified thread ID. Returns the list of comments and page information for further pagination.
+///
+/// # Parameters
+/// - `id`: The GraphQL node ID of the review thread to fetch comments for.
+/// - `cursor`: An optional pagination cursor; if provided, fetches the next page of comments after this cursor.
+///
+/// # Returns
+/// A tuple containing a vector of review comments and pagination information.
+///
+/// # Errors
+/// Returns `VkError` if the request fails, the response is malformed, or the API returns errors.
+///
+/// # Examples
+///
+/// ```
+/// let (comments, page_info) = fetch_comment_page(&client, &headers, "MDExOlB1bGxSZXF1ZXN0UmV2aWV3VGhyZWFkMQ==", None).await?;
+/// assert!(!comments.is_empty());
+/// ```
 async fn fetch_comment_page(
     client: &reqwest::Client,
     headers: &HeaderMap,
@@ -338,6 +381,24 @@ async fn fetch_comment_page(
     Ok((conn.nodes, conn.page_info))
 }
 
+/// Fetches a GitHub issue by repository and issue number using the GraphQL API.
+///
+/// Returns the issue's title and body if found, or an error if the request fails or the response is malformed.
+///
+/// # Examples
+///
+/// ```
+/// # use reqwest::Client;
+/// # use std::collections::HashMap;
+/// # use vk::{fetch_issue, RepoInfo};
+/// # tokio_test::block_on(async {
+/// let client = Client::new();
+/// let headers = reqwest::header::HeaderMap::new();
+/// let repo = RepoInfo { owner: "octocat".into(), name: "Hello-World".into() };
+/// let issue = fetch_issue(&client, &headers, &repo, 42).await.unwrap();
+/// assert!(!issue.title.is_empty());
+/// # });
+/// ```
 async fn fetch_issue(
     client: &reqwest::Client,
     headers: &HeaderMap,
@@ -367,6 +428,20 @@ async fn fetch_issue(
     Ok(data.repository.issue)
 }
 
+/// Fetches a single page of review threads for a pull request from the GitHub GraphQL API.
+///
+/// Returns a tuple containing the list of review threads and pagination information for the next page, if available. Only one page of results is fetched per call.
+///
+/// # Errors
+///
+/// Returns `VkError` if the request fails, the response is malformed, or the API returns errors.
+///
+/// # Examples
+///
+/// ```
+/// let (threads, page_info) = fetch_thread_page(&client, &headers, &repo, 42, None).await?;
+/// assert!(!threads.is_empty());
+/// ```
 async fn fetch_thread_page(
     client: &reqwest::Client,
     headers: &HeaderMap,
@@ -544,6 +619,26 @@ fn build_headers(token: &str) -> HeaderMap {
 }
 
 #[allow(clippy::result_large_err)]
+/// Executes the pull request subcommand, fetching and displaying unresolved review comments for a specified pull request.
+///
+/// Parses the pull request reference, retrieves unresolved review threads from GitHub, and prints each comment with its diff context and URL. Warns if the GitHub token is missing or the terminal locale is not UTF-8.
+///
+/// # Arguments
+///
+/// * `args` - Arguments specifying the pull request reference.
+/// * `repo` - Optional default repository to use when the reference does not specify one.
+///
+/// # Returns
+///
+/// Returns `Ok(())` if successful, or a `VkError` if an error occurs.
+///
+/// # Examples
+///
+/// ```
+/// // Example usage within an async context:
+/// let args = PrArgs { reference: "123".to_string() };
+/// run_pr(args, Some("owner/repo")).await.unwrap();
+/// ```
 async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     let reference = &args.reference;
     let (repo, number) = parse_reference(reference, repo)?;
@@ -574,6 +669,13 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
 }
 
 #[allow(clippy::result_large_err)]
+/// Handles the `issue` subcommand by fetching and displaying a GitHub issue's title and body.
+///
+/// Parses the provided issue reference (URL or number), retrieves the issue from GitHub using the GraphQL API, and prints its title and body to the terminal. Warns if the GitHub token is missing or if the terminal locale is not UTF-8.
+///
+/// # Errors
+///
+/// Returns a `VkError` if the reference is invalid, the API request fails, or the response is malformed.
 async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
     let reference = &args.reference;
     let (repo, number) = parse_issue_reference(reference, repo)?;
@@ -595,6 +697,13 @@ async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
 
 #[tokio::main]
 #[allow(clippy::result_large_err)]
+/// Parses command-line arguments, loads configuration, and dispatches to the appropriate subcommand handler for pull requests or issues.
+///
+/// This is the asynchronous entry point for the CLI tool. It merges global and subcommand-specific configuration, then executes either the pull request or issue workflow based on user input.
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the command completes successfully, or a `VkError` if an error occurs during execution.
 async fn main() -> Result<(), VkError> {
     let cli = Cli::parse();
     let mut global = GlobalArgs::load()?;
@@ -612,6 +721,27 @@ async fn main() -> Result<(), VkError> {
 }
 
 #[allow(clippy::result_large_err)]
+/// Parses a pull request reference from a GitHub URL or number string.
+///
+/// Accepts either a full GitHub pull request URL (e.g., `https://github.com/owner/repo/pull/123`) or a numeric string. If a number is provided, attempts to infer the repository from the given default or from `.git/FETCH_HEAD`.
+///
+/// # Errors
+///
+/// Returns `VkError::InvalidRef` if the input is not a valid pull request reference, or `VkError::RepoNotFound` if the repository cannot be determined from context.
+///
+/// # Examples
+///
+/// ```
+/// let (repo, number) = parse_reference("https://github.com/foo/bar/pull/42", None).unwrap();
+/// assert_eq!(repo.owner, "foo");
+/// assert_eq!(repo.name, "bar");
+/// assert_eq!(number, 42);
+///
+/// let (repo, number) = parse_reference("42", Some("foo/bar")).unwrap();
+/// assert_eq!(repo.owner, "foo");
+/// assert_eq!(repo.name, "bar");
+/// assert_eq!(number, 42);
+/// ```
 fn parse_reference(input: &str, default_repo: Option<&str>) -> Result<(RepoInfo, u64), VkError> {
     if let Ok(url) = Url::parse(input) {
         if url.host_str() == Some("github.com") {
@@ -640,6 +770,33 @@ fn parse_reference(input: &str, default_repo: Option<&str>) -> Result<(RepoInfo,
 }
 
 #[allow(clippy::result_large_err)]
+/// Parses a GitHub issue reference from a URL or issue number.
+///
+/// Accepts either a full GitHub issue URL or a numeric string. If a number is provided, attempts to infer the repository from the given default or from `.git/FETCH_HEAD`.
+///
+/// # Errors
+///
+/// Returns `VkError::InvalidRef` if the input cannot be parsed as a valid issue reference, or `VkError::RepoNotFound` if the repository cannot be determined.
+///
+/// # Examples
+///
+/// ```
+/// let (repo, number) = parse_issue_reference(
+///     "https://github.com/owner/repo/issues/42",
+///     None
+/// ).unwrap();
+/// assert_eq!(repo.owner, "owner");
+/// assert_eq!(repo.name, "repo");
+/// assert_eq!(number, 42);
+///
+/// let (repo, number) = parse_issue_reference(
+///     "42",
+///     Some("owner/repo")
+/// ).unwrap();
+/// assert_eq!(repo.owner, "owner");
+/// assert_eq!(repo.name, "repo");
+/// assert_eq!(number, 42);
+/// ```
 fn parse_issue_reference(
     input: &str,
     default_repo: Option<&str>,
@@ -670,6 +827,18 @@ fn parse_issue_reference(
     }
 }
 
+/// Attempts to extract the GitHub repository owner and name from the `.git/FETCH_HEAD` file.
+///
+/// Returns `Some(RepoInfo)` if a GitHub repository URL is found in `.git/FETCH_HEAD`, otherwise returns `None`.
+///
+/// # Examples
+///
+/// ```
+/// if let Some(repo) = repo_from_fetch_head() {
+///     assert!(!repo.owner.is_empty());
+///     assert!(!repo.name.is_empty());
+/// }
+/// ```
 fn repo_from_fetch_head() -> Option<RepoInfo> {
     let path = Path::new(".git/FETCH_HEAD");
     let content = fs::read_to_string(path).ok()?;
