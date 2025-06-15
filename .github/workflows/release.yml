@@ -1,9 +1,12 @@
-name: Release
+name: Release Binary
 
 on:
   push:
     tags:
       - 'v*.*.*'
+
+env:
+  REPO_NAME: ${{ github.event.repository.name }}
 
 jobs:
   build:
@@ -14,11 +17,25 @@ jobs:
         with:
           toolchain: stable
           profile: minimal
-      - run: cargo build --release
-      - uses: actions/upload-artifact@v4
+          override: true
+      - name: Cache cargo registry
+        uses: actions/cache@v4
         with:
-          name: vk
-          path: target/release/vk
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+      - name: Build release binary
+        run: cargo build --release
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.REPO_NAME }}
+          path: target/release/${{ env.REPO_NAME }}
+
   release:
     needs: build
     runs-on: ubuntu-latest
@@ -27,9 +44,10 @@ jobs:
       - uses: softprops/action-gh-release@v1
         with:
           generate_release_notes: true
+          files: target/release/${{ env.REPO_NAME }}
       - uses: actions/download-artifact@v4
         with:
-          name: vk
-      - run: gh release upload "${{ github.ref_name }}" vk
+          name: ${{ env.REPO_NAME }}
+      - run: gh release upload "${{ github.ref_name }}" ${{ env.REPO_NAME }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
