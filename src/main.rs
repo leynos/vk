@@ -92,6 +92,21 @@ struct RepoInfo {
     name: String,
 }
 
+#[derive(Clone, Copy)]
+enum ResourceType {
+    Issues,
+    Pull,
+}
+
+impl ResourceType {
+    fn as_str(self) -> &'static str {
+        match self {
+            ResourceType::Issues => "issues",
+            ResourceType::Pull => "pull",
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 enum VkError {
     #[error("unable to determine repository")]
@@ -106,9 +121,6 @@ enum VkError {
     ApiErrors(String),
     #[error("configuration error: {0}")]
     Config(#[from] ortho_config::OrthoError),
-    #[error("{0} not implemented yet")]
-    #[allow(dead_code)]
-    Unimplemented(&'static str),
 }
 
 static GITHUB_RE: LazyLock<Regex> =
@@ -142,32 +154,46 @@ fn handle_graphql_errors(errors: Vec<GraphQlError>) -> VkError {
     VkError::ApiErrors(msg)
 }
 
-async fn run_query<V, T>(
-    client: &reqwest::Client,
-    headers: &HeaderMap,
-    endpoint: &str,
-    query: &str,
-    variables: V,
-) -> Result<T, VkError>
-where
-    V: serde::Serialize,
-    for<'de> T: serde::Deserialize<'de>,
-{
-    let mut req = client.post(endpoint);
-    for (k, v) in headers {
-        req = req.header(k, v);
-    }
-    let resp: GraphQlResponse<T> = req
-        .json(&json!({ "query": query, "variables": variables }))
-        .send()
-        .await?
-        .json()
-        .await?;
+struct GraphQLClient {
+    client: reqwest::Client,
+    headers: HeaderMap,
+    endpoint: String,
+}
 
-    if let Some(errs) = resp.errors {
-        return Err(handle_graphql_errors(errs));
+impl GraphQLClient {
+    fn new(token: &str) -> Self {
+        Self::with_endpoint(token, GITHUB_GRAPHQL_URL)
     }
-    resp.data.ok_or(VkError::BadResponse)
+
+    fn with_endpoint(token: &str, endpoint: &str) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            headers: build_headers(token),
+            endpoint: endpoint.to_string(),
+        }
+    }
+
+    async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
+    where
+        V: serde::Serialize,
+        for<'de> T: serde::Deserialize<'de>,
+    {
+        let mut req = self.client.post(&self.endpoint);
+        for (k, v) in &self.headers {
+            req = req.header(k, v);
+        }
+        let resp: GraphQlResponse<T> = req
+            .json(&json!({ "query": query, "variables": variables }))
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        if let Some(errs) = resp.errors {
+            return Err(handle_graphql_errors(errs));
+        }
+        resp.data.ok_or(VkError::BadResponse)
+    }
 }
 
 #[derive(Deserialize)]
@@ -344,72 +370,58 @@ where
 }
 
 async fn fetch_comment_page(
-    client: &reqwest::Client,
-    headers: &HeaderMap,
+    client: &GraphQLClient,
     id: &str,
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewComment>, PageInfo), VkError> {
-    let wrapper: CommentNodeWrapper = run_query(
-        client,
-        headers,
-        GITHUB_GRAPHQL_URL,
-        COMMENT_QUERY,
-        json!({ "id": id, "cursor": cursor }),
-    )
-    .await?;
+    let wrapper: CommentNodeWrapper = client
+        .run_query(COMMENT_QUERY, json!({ "id": id, "cursor": cursor }))
+        .await?;
     let conn = wrapper.node.ok_or(VkError::BadResponse)?.comments;
     Ok((conn.nodes, conn.page_info))
 }
 
 async fn fetch_issue(
-    client: &reqwest::Client,
-    headers: &HeaderMap,
+    client: &GraphQLClient,
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Issue, VkError> {
-    let data: IssueData = run_query(
-        client,
-        headers,
-        GITHUB_GRAPHQL_URL,
-        ISSUE_QUERY,
-        json!({ "owner": repo.owner, "name": repo.name, "number": number }),
-    )
-    .await?;
+    let data: IssueData = client
+        .run_query(
+            ISSUE_QUERY,
+            json!({ "owner": repo.owner, "name": repo.name, "number": number }),
+        )
+        .await?;
     Ok(data.repository.issue)
 }
 
 async fn fetch_thread_page(
-    client: &reqwest::Client,
-    headers: &HeaderMap,
+    client: &GraphQLClient,
     repo: &RepoInfo,
     number: u64,
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewThread>, PageInfo), VkError> {
-    let data: ThreadData = run_query(
-        client,
-        headers,
-        GITHUB_GRAPHQL_URL,
-        THREADS_QUERY,
-        json!({
-            "owner": repo.owner,
-            "name": repo.name,
-            "number": number,
-            "cursor": cursor,
-        }),
-    )
-    .await?;
+    let data: ThreadData = client
+        .run_query(
+            THREADS_QUERY,
+            json!({
+                "owner": repo.owner,
+                "name": repo.name,
+                "number": number,
+                "cursor": cursor,
+            }),
+        )
+        .await?;
     let conn = data.repository.pull_request.review_threads;
     Ok((conn.nodes, conn.page_info))
 }
 
 async fn fetch_review_threads(
-    client: &reqwest::Client,
-    headers: &HeaderMap,
+    client: &GraphQLClient,
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
-    let mut threads =
-        paginate(|cursor| fetch_thread_page(client, headers, repo, number, cursor)).await?;
+    let mut threads = paginate(|cursor| fetch_thread_page(client, repo, number, cursor)).await?;
     threads.retain(|t| !t.is_resolved);
 
     for thread in &mut threads {
@@ -425,7 +437,7 @@ async fn fetch_review_threads(
         );
         let mut comments = initial.nodes;
         if initial.page_info.has_next_page {
-            let more = paginate(|c| fetch_comment_page(client, headers, &thread.id, c)).await?;
+            let more = paginate(|c| fetch_comment_page(client, &thread.id, c)).await?;
             comments.extend(more);
         }
         thread.comments = CommentConnection {
@@ -558,9 +570,8 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
         eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let headers = build_headers(&token);
-    let client = reqwest::Client::new();
-    let threads = fetch_review_threads(&client, &headers, &repo, number).await?;
+    let client = GraphQLClient::new(&token);
+    let threads = fetch_review_threads(&client, &repo, number).await?;
     if threads.is_empty() {
         println!("No unresolved comments.");
         return Ok(());
@@ -588,9 +599,8 @@ async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
         eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let headers = build_headers(&token);
-    let client = reqwest::Client::new();
-    let issue = fetch_issue(&client, &headers, &repo, number).await?;
+    let client = GraphQLClient::new(&token);
+    let issue = fetch_issue(&client, &repo, number).await?;
 
     let skin = MadSkin::default();
     println!("\x1b[1m{}\x1b[0m", issue.title);
@@ -621,13 +631,13 @@ async fn main() -> Result<(), VkError> {
 fn parse_reference(
     input: &str,
     default_repo: Option<&str>,
-    resource_type: &str,
+    resource_type: ResourceType,
 ) -> Result<(RepoInfo, u64), VkError> {
     if let Ok(url) = Url::parse(input) {
         if url.host_str() == Some("github.com") {
             let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
             let segments: Vec<_> = segments_iter.collect();
-            if segments.len() >= 4 && segments[2] == resource_type {
+            if segments.len() >= 4 && segments[2] == resource_type.as_str() {
                 let owner = segments[0].to_string();
                 let name = segments[1]
                     .strip_suffix(".git")
@@ -654,12 +664,12 @@ fn parse_issue_reference(
     input: &str,
     default_repo: Option<&str>,
 ) -> Result<(RepoInfo, u64), VkError> {
-    parse_reference(input, default_repo, "issues")
+    parse_reference(input, default_repo, ResourceType::Issues)
 }
 
 #[allow(clippy::result_large_err)]
 fn parse_pr_reference(input: &str, default_repo: Option<&str>) -> Result<(RepoInfo, u64), VkError> {
-    parse_reference(input, default_repo, "pull")
+    parse_reference(input, default_repo, ResourceType::Pull)
 }
 
 fn repo_from_fetch_head() -> Option<RepoInfo> {
