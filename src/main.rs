@@ -3,7 +3,7 @@ use clap::{Parser, Subcommand};
 use ortho_config::{OrthoConfig, load_and_merge_subcommand_for};
 use regex::Regex;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::json;
 use std::sync::LazyLock;
 use std::{env, fs, path::Path};
@@ -95,14 +95,14 @@ struct RepoInfo {
 #[derive(Clone, Copy)]
 enum ResourceType {
     Issues,
-    Pull,
+    PullRequest,
 }
 
 impl ResourceType {
     fn as_str(self) -> &'static str {
         match self {
             ResourceType::Issues => "issues",
-            ResourceType::Pull => "pull",
+            ResourceType::PullRequest => "pull",
         }
     }
 }
@@ -113,8 +113,19 @@ enum VkError {
     RepoNotFound,
     #[error("request failed: {0}")]
     Request(#[from] reqwest::Error),
+    #[error("request failed when running {context}: {source}")]
+    RequestContext {
+        context: String,
+        #[source]
+        source: reqwest::Error,
+    },
     #[error("invalid reference")]
     InvalidRef,
+    #[error("expected URL path segment '{expected}', found '{found}'")]
+    WrongResourceType {
+        expected: &'static str,
+        found: String,
+    },
     #[error("malformed response")]
     BadResponse,
     #[error("API errors: {0}")]
@@ -176,17 +187,27 @@ impl GraphQLClient {
     async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
     where
         V: serde::Serialize,
-        for<'de> T: serde::Deserialize<'de>,
+        T: DeserializeOwned,
     {
+        let payload = json!({ "query": query, "variables": &variables });
+        let ctx = serde_json::to_string(&payload).unwrap_or_default();
         let resp: GraphQlResponse<T> = self
             .client
             .post(&self.endpoint)
             .headers(self.headers.clone())
-            .json(&json!({ "query": query, "variables": variables }))
+            .json(&payload)
             .send()
-            .await?
+            .await
+            .map_err(|e| VkError::RequestContext {
+                context: ctx.clone(),
+                source: e,
+            })?
             .json()
-            .await?;
+            .await
+            .map_err(|e| VkError::RequestContext {
+                context: ctx,
+                source: e,
+            })?;
 
         if let Some(errs) = resp.errors {
             return Err(handle_graphql_errors(errs));
@@ -640,14 +661,20 @@ fn parse_reference(
         if url.host_str() == Some("github.com") {
             let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
             let segments: Vec<_> = segments_iter.collect();
-            if segments.len() >= 4 && segments[2] == resource_type.as_str() {
-                let owner = segments[0].to_string();
-                let name = segments[1]
-                    .strip_suffix(".git")
-                    .unwrap_or(segments[1])
-                    .to_string();
-                let number: u64 = segments[3].parse().map_err(|_| VkError::InvalidRef)?;
-                return Ok((RepoInfo { owner, name }, number));
+            if segments.len() >= 4 {
+                if segments[2] == resource_type.as_str() {
+                    let owner = segments[0].to_string();
+                    let name = segments[1]
+                        .strip_suffix(".git")
+                        .unwrap_or(segments[1])
+                        .to_string();
+                    let number: u64 = segments[3].parse().map_err(|_| VkError::InvalidRef)?;
+                    return Ok((RepoInfo { owner, name }, number));
+                }
+                return Err(VkError::WrongResourceType {
+                    expected: resource_type.as_str(),
+                    found: segments[2].to_string(),
+                });
             }
         }
         Err(VkError::InvalidRef)
@@ -672,7 +699,7 @@ fn parse_issue_reference(
 
 #[allow(clippy::result_large_err)]
 fn parse_pr_reference(input: &str, default_repo: Option<&str>) -> Result<(RepoInfo, u64), VkError> {
-    parse_reference(input, default_repo, ResourceType::Pull)
+    parse_reference(input, default_repo, ResourceType::PullRequest)
 }
 
 fn repo_from_fetch_head() -> Option<RepoInfo> {
