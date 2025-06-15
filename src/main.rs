@@ -145,6 +145,7 @@ fn handle_graphql_errors(errors: Vec<GraphQlError>) -> VkError {
 async fn run_query<V, T>(
     client: &reqwest::Client,
     headers: &HeaderMap,
+    endpoint: &str,
     query: &str,
     variables: V,
 ) -> Result<T, VkError>
@@ -152,9 +153,11 @@ where
     V: serde::Serialize,
     for<'de> T: serde::Deserialize<'de>,
 {
-    let resp: GraphQlResponse<T> = client
-        .post("https://api.github.com/graphql")
-        .headers(headers.clone())
+    let mut req = client.post(endpoint);
+    for (k, v) in headers {
+        req = req.header(k, v);
+    }
+    let resp: GraphQlResponse<T> = req
         .json(&json!({ "query": query, "variables": variables }))
         .send()
         .await?
@@ -260,6 +263,8 @@ struct CommentNode {
     comments: CommentConnection,
 }
 
+const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
+
 const THREADS_QUERY: &str = r"
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -347,6 +352,7 @@ async fn fetch_comment_page(
     let wrapper: CommentNodeWrapper = run_query(
         client,
         headers,
+        GITHUB_GRAPHQL_URL,
         COMMENT_QUERY,
         json!({ "id": id, "cursor": cursor }),
     )
@@ -364,6 +370,7 @@ async fn fetch_issue(
     let data: IssueData = run_query(
         client,
         headers,
+        GITHUB_GRAPHQL_URL,
         ISSUE_QUERY,
         json!({ "owner": repo.owner, "name": repo.name, "number": number }),
     )
@@ -381,6 +388,7 @@ async fn fetch_thread_page(
     let data: ThreadData = run_query(
         client,
         headers,
+        GITHUB_GRAPHQL_URL,
         THREADS_QUERY,
         json!({
             "owner": repo.owner,
@@ -919,5 +927,21 @@ mod tests {
         assert_eq!(repo.owner, "owner");
         assert_eq!(repo.name, "repo");
         assert_eq!(number, 9);
+    }
+
+    #[test]
+    fn parse_pr_number_with_repo() {
+        let (repo, number) = parse_pr_reference("5", Some("foo/bar")).unwrap();
+        assert_eq!(repo.owner, "foo");
+        assert_eq!(repo.name, "bar");
+        assert_eq!(number, 5);
+    }
+
+    #[test]
+    fn parse_issue_number_with_repo() {
+        let (repo, number) = parse_issue_reference("8", Some("baz/qux")).unwrap();
+        assert_eq!(repo.owner, "baz");
+        assert_eq!(repo.name, "qux");
+        assert_eq!(number, 8);
     }
 }
