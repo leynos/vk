@@ -107,6 +107,7 @@ enum VkError {
     #[error("configuration error: {0}")]
     Config(#[from] ortho_config::OrthoError),
     #[error("{0} not implemented yet")]
+    #[allow(dead_code)]
     Unimplemented(&'static str),
 }
 
@@ -139,6 +140,31 @@ fn handle_graphql_errors(errors: Vec<GraphQlError>) -> VkError {
         .collect::<Vec<_>>()
         .join(", ");
     VkError::ApiErrors(msg)
+}
+
+async fn run_query<V, T>(
+    client: &reqwest::Client,
+    headers: &HeaderMap,
+    query: &str,
+    variables: V,
+) -> Result<T, VkError>
+where
+    V: serde::Serialize,
+    for<'de> T: serde::Deserialize<'de>,
+{
+    let resp: GraphQlResponse<T> = client
+        .post("https://api.github.com/graphql")
+        .headers(headers.clone())
+        .json(&json!({ "query": query, "variables": variables }))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if let Some(errs) = resp.errors {
+        return Err(handle_graphql_errors(errs));
+    }
+    resp.data.ok_or(VkError::BadResponse)
 }
 
 #[derive(Deserialize)]
@@ -318,22 +344,13 @@ async fn fetch_comment_page(
     id: &str,
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewComment>, PageInfo), VkError> {
-    let resp: GraphQlResponse<CommentNodeWrapper> = client
-        .post("https://api.github.com/graphql")
-        .headers(headers.clone())
-        .json(&json!({
-            "query": COMMENT_QUERY,
-            "variables": { "id": id, "cursor": cursor },
-        }))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    if let Some(errs) = resp.errors {
-        return Err(handle_graphql_errors(errs));
-    }
-    let wrapper = resp.data.ok_or(VkError::BadResponse)?;
+    let wrapper: CommentNodeWrapper = run_query(
+        client,
+        headers,
+        COMMENT_QUERY,
+        json!({ "id": id, "cursor": cursor }),
+    )
+    .await?;
     let conn = wrapper.node.ok_or(VkError::BadResponse)?.comments;
     Ok((conn.nodes, conn.page_info))
 }
@@ -344,26 +361,13 @@ async fn fetch_issue(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Issue, VkError> {
-    let resp: GraphQlResponse<IssueData> = client
-        .post("https://api.github.com/graphql")
-        .headers(headers.clone())
-        .json(&json!({
-            "query": ISSUE_QUERY,
-            "variables": {
-                "owner": repo.owner,
-                "name": repo.name,
-                "number": number
-            }
-        }))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    if let Some(errs) = resp.errors {
-        return Err(handle_graphql_errors(errs));
-    }
-    let data = resp.data.ok_or(VkError::BadResponse)?;
+    let data: IssueData = run_query(
+        client,
+        headers,
+        ISSUE_QUERY,
+        json!({ "owner": repo.owner, "name": repo.name, "number": number }),
+    )
+    .await?;
     Ok(data.repository.issue)
 }
 
@@ -374,27 +378,18 @@ async fn fetch_thread_page(
     number: u64,
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewThread>, PageInfo), VkError> {
-    let resp: GraphQlResponse<ThreadData> = client
-        .post("https://api.github.com/graphql")
-        .headers(headers.clone())
-        .json(&json!({
-            "query": THREADS_QUERY,
-            "variables": {
-                "owner": repo.owner,
-                "name": repo.name,
-                "number": number,
-                "cursor": cursor,
-            }
-        }))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    if let Some(errs) = resp.errors {
-        return Err(handle_graphql_errors(errs));
-    }
-    let data = resp.data.ok_or(VkError::BadResponse)?;
+    let data: ThreadData = run_query(
+        client,
+        headers,
+        THREADS_QUERY,
+        json!({
+            "owner": repo.owner,
+            "name": repo.name,
+            "number": number,
+            "cursor": cursor,
+        }),
+    )
+    .await?;
     let conn = data.repository.pull_request.review_threads;
     Ok((conn.nodes, conn.page_info))
 }
@@ -546,7 +541,7 @@ fn build_headers(token: &str) -> HeaderMap {
 #[allow(clippy::result_large_err)]
 async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     let reference = &args.reference;
-    let (repo, number) = parse_reference(reference, repo)?;
+    let (repo, number) = parse_pr_reference(reference, repo)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
@@ -589,7 +584,10 @@ async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
     let client = reqwest::Client::new();
     let issue = fetch_issue(&client, &headers, &repo, number).await?;
 
-    println!("{}\n\n{}", issue.title, issue.body);
+    let skin = MadSkin::default();
+    println!("\x1b[1m{}\x1b[0m", issue.title);
+    skin.print_text(&issue.body);
+    println!();
     Ok(())
 }
 
@@ -612,12 +610,16 @@ async fn main() -> Result<(), VkError> {
 }
 
 #[allow(clippy::result_large_err)]
-fn parse_reference(input: &str, default_repo: Option<&str>) -> Result<(RepoInfo, u64), VkError> {
+fn parse_reference(
+    input: &str,
+    default_repo: Option<&str>,
+    resource_type: &str,
+) -> Result<(RepoInfo, u64), VkError> {
     if let Ok(url) = Url::parse(input) {
         if url.host_str() == Some("github.com") {
             let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
             let segments: Vec<_> = segments_iter.collect();
-            if segments.len() >= 4 && segments[2] == "pull" {
+            if segments.len() >= 4 && segments[2] == resource_type {
                 let owner = segments[0].to_string();
                 let name = segments[1]
                     .strip_suffix(".git")
@@ -644,30 +646,12 @@ fn parse_issue_reference(
     input: &str,
     default_repo: Option<&str>,
 ) -> Result<(RepoInfo, u64), VkError> {
-    if let Ok(url) = Url::parse(input) {
-        if url.host_str() == Some("github.com") {
-            let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
-            let segments: Vec<_> = segments_iter.collect();
-            if segments.len() >= 4 && segments[2] == "issues" {
-                let owner = segments[0].to_string();
-                let name = segments[1]
-                    .strip_suffix(".git")
-                    .unwrap_or(segments[1])
-                    .to_string();
-                let number: u64 = segments[3].parse().map_err(|_| VkError::InvalidRef)?;
-                return Ok((RepoInfo { owner, name }, number));
-            }
-        }
-        Err(VkError::InvalidRef)
-    } else if let Ok(number) = input.parse::<u64>() {
-        let repo = default_repo
-            .and_then(repo_from_str)
-            .or_else(repo_from_fetch_head)
-            .ok_or(VkError::RepoNotFound)?;
-        Ok((repo, number))
-    } else {
-        Err(VkError::InvalidRef)
-    }
+    parse_reference(input, default_repo, "issues")
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_pr_reference(input: &str, default_repo: Option<&str>) -> Result<(RepoInfo, u64), VkError> {
+    parse_reference(input, default_repo, "pull")
 }
 
 fn repo_from_fetch_head() -> Option<RepoInfo> {
@@ -734,7 +718,7 @@ mod tests {
     #[test]
     fn parse_url() {
         let (repo, number) =
-            parse_reference("https://github.com/owner/repo/pull/42", None).unwrap();
+            parse_pr_reference("https://github.com/owner/repo/pull/42", None).unwrap();
         assert_eq!(repo.owner, "owner");
         assert_eq!(repo.name, "repo");
         assert_eq!(number, 42);
@@ -743,7 +727,7 @@ mod tests {
     #[test]
     fn parse_url_git_suffix() {
         let (repo, number) =
-            parse_reference("https://github.com/owner/repo.git/pull/7", None).unwrap();
+            parse_pr_reference("https://github.com/owner/repo.git/pull/7", None).unwrap();
         assert_eq!(repo.owner, "owner");
         assert_eq!(repo.name, "repo");
         assert_eq!(number, 7);
