@@ -159,6 +159,22 @@ struct PullRequest {
 }
 
 #[derive(Deserialize)]
+struct IssueData {
+    repository: IssueRepository,
+}
+
+#[derive(Deserialize)]
+struct IssueRepository {
+    issue: Issue,
+}
+
+#[derive(Deserialize)]
+struct Issue {
+    title: String,
+    body: String,
+}
+
+#[derive(Deserialize)]
 struct ReviewThreadConnection {
     nodes: Vec<ReviewThread>,
     #[serde(rename = "pageInfo")]
@@ -267,6 +283,17 @@ const COMMENT_QUERY: &str = r"
     }
 ";
 
+const ISSUE_QUERY: &str = r"
+    query($owner: String!, $name: String!, $number: Int!) {
+      repository(owner: $owner, name: $name) {
+        issue(number: $number) {
+          title
+          body
+        }
+      }
+    }
+";
+
 async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
 where
     F: FnMut(Option<String>) -> Fut,
@@ -309,6 +336,35 @@ async fn fetch_comment_page(
     let wrapper = resp.data.ok_or(VkError::BadResponse)?;
     let conn = wrapper.node.ok_or(VkError::BadResponse)?.comments;
     Ok((conn.nodes, conn.page_info))
+}
+
+async fn fetch_issue(
+    client: &reqwest::Client,
+    headers: &HeaderMap,
+    repo: &RepoInfo,
+    number: u64,
+) -> Result<Issue, VkError> {
+    let resp: GraphQlResponse<IssueData> = client
+        .post("https://api.github.com/graphql")
+        .headers(headers.clone())
+        .json(&json!({
+            "query": ISSUE_QUERY,
+            "variables": {
+                "owner": repo.owner,
+                "name": repo.name,
+                "number": number
+            }
+        }))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if let Some(errs) = resp.errors {
+        return Err(handle_graphql_errors(errs));
+    }
+    let data = resp.data.ok_or(VkError::BadResponse)?;
+    Ok(data.repository.issue)
 }
 
 async fn fetch_thread_page(
@@ -517,6 +573,26 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     Ok(())
 }
 
+#[allow(clippy::result_large_err)]
+async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
+    let reference = &args.reference;
+    let (repo, number) = parse_issue_reference(reference, repo)?;
+    let token = env::var("GITHUB_TOKEN").unwrap_or_default();
+    if token.is_empty() {
+        eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
+    }
+    if !locale_is_utf8() {
+        eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
+    }
+
+    let headers = build_headers(&token);
+    let client = reqwest::Client::new();
+    let issue = fetch_issue(&client, &headers, &repo, number).await?;
+
+    println!("{}\n\n{}", issue.title, issue.body);
+    Ok(())
+}
+
 #[tokio::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), VkError> {
@@ -528,7 +604,10 @@ async fn main() -> Result<(), VkError> {
             let args = load_and_merge_subcommand_for::<PrArgs>(&pr_cli)?;
             run_pr(args, global.repo.as_deref()).await
         }
-        Commands::Issue(_issue_cli) => Err(VkError::Unimplemented("issue command")),
+        Commands::Issue(issue_cli) => {
+            let args = load_and_merge_subcommand_for::<IssueArgs>(&issue_cli)?;
+            run_issue(args, global.repo.as_deref()).await
+        }
     }
 }
 
@@ -539,6 +618,37 @@ fn parse_reference(input: &str, default_repo: Option<&str>) -> Result<(RepoInfo,
             let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
             let segments: Vec<_> = segments_iter.collect();
             if segments.len() >= 4 && segments[2] == "pull" {
+                let owner = segments[0].to_string();
+                let name = segments[1]
+                    .strip_suffix(".git")
+                    .unwrap_or(segments[1])
+                    .to_string();
+                let number: u64 = segments[3].parse().map_err(|_| VkError::InvalidRef)?;
+                return Ok((RepoInfo { owner, name }, number));
+            }
+        }
+        Err(VkError::InvalidRef)
+    } else if let Ok(number) = input.parse::<u64>() {
+        let repo = default_repo
+            .and_then(repo_from_str)
+            .or_else(repo_from_fetch_head)
+            .ok_or(VkError::RepoNotFound)?;
+        Ok((repo, number))
+    } else {
+        Err(VkError::InvalidRef)
+    }
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_issue_reference(
+    input: &str,
+    default_repo: Option<&str>,
+) -> Result<(RepoInfo, u64), VkError> {
+    if let Ok(url) = Url::parse(input) {
+        if url.host_str() == Some("github.com") {
+            let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
+            let segments: Vec<_> = segments_iter.collect();
+            if segments.len() >= 4 && segments[2] == "issues" {
                 let owner = segments[0].to_string();
                 let name = segments[1]
                     .strip_suffix(".git")
@@ -798,5 +908,32 @@ mod tests {
             Commands::Pr(args) => assert_eq!(args.reference, "123"),
             _ => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn issue_subcommand_parses() {
+        let cli = Cli::try_parse_from(["vk", "issue", "123"]).unwrap();
+        match cli.command {
+            Commands::Issue(args) => assert_eq!(args.reference, "123"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn parse_issue_url() {
+        let (repo, number) =
+            parse_issue_reference("https://github.com/owner/repo/issues/3", None).unwrap();
+        assert_eq!(repo.owner, "owner");
+        assert_eq!(repo.name, "repo");
+        assert_eq!(number, 3);
+    }
+
+    #[test]
+    fn parse_issue_url_git_suffix() {
+        let (repo, number) =
+            parse_issue_reference("https://github.com/owner/repo.git/issues/9", None).unwrap();
+        assert_eq!(repo.owner, "owner");
+        assert_eq!(repo.name, "repo");
+        assert_eq!(number, 9);
     }
 }
