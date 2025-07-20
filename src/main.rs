@@ -249,14 +249,14 @@ struct Issue {
     body: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct ReviewThreadConnection {
     nodes: Vec<ReviewThread>,
     #[serde(rename = "pageInfo")]
     page_info: PageInfo,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct ReviewThread {
     id: String,
     #[serde(rename = "isResolved")]
@@ -265,14 +265,14 @@ struct ReviewThread {
     comments: CommentConnection,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct CommentConnection {
     nodes: Vec<ReviewComment>,
     #[serde(rename = "pageInfo")]
     page_info: PageInfo,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct ReviewComment {
     body: String,
     #[serde(rename = "diffHunk")]
@@ -286,7 +286,7 @@ struct ReviewComment {
     author: Option<User>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct PageInfo {
     #[serde(rename = "hasNextPage")]
     has_next_page: bool,
@@ -294,17 +294,17 @@ struct PageInfo {
     end_cursor: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct User {
     login: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct CommentNodeWrapper {
     node: Option<CommentNode>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct CommentNode {
     comments: CommentConnection,
 }
@@ -572,6 +572,36 @@ fn print_comment(skin: &MadSkin, comment: &ReviewComment) -> anyhow::Result<()> 
     Ok(())
 }
 
+fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
+    use std::collections::BTreeMap;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for t in threads {
+        for c in &t.comments.nodes {
+            *counts.entry(c.path.clone()).or_default() += 1;
+        }
+    }
+    counts.into_iter().collect()
+}
+
+fn write_summary<W: std::io::Write>(
+    mut out: W,
+    summary: &[(String, usize)],
+) -> std::io::Result<()> {
+    if summary.is_empty() {
+        return Ok(());
+    }
+    writeln!(out, "Summary:")?;
+    for (path, count) in summary {
+        writeln!(out, "{path}: {count}")?;
+    }
+    writeln!(out)?;
+    Ok(())
+}
+
+fn print_summary(summary: &[(String, usize)]) {
+    let _ = write_summary(std::io::stdout().lock(), summary);
+}
+
 fn build_headers(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().unwrap());
@@ -600,6 +630,9 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
         println!("No unresolved comments.");
         return Ok(());
     }
+
+    let summary = summarize_files(&threads);
+    print_summary(&summary);
 
     let skin = MadSkin::default();
     for t in threads {
@@ -749,6 +782,7 @@ fn locale_is_utf8() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::*;
     use std::fmt::Write;
     use std::fs;
     use tempfile::tempdir;
@@ -983,5 +1017,66 @@ mod tests {
         assert_eq!(repo.owner, "baz");
         assert_eq!(repo.name, "qux");
         assert_eq!(number, 8);
+    }
+
+    #[fixture]
+    fn review_comment(#[default("test.rs")] path: &str) -> ReviewComment {
+        ReviewComment {
+            path: path.into(),
+            ..Default::default()
+        }
+    }
+
+    #[rstest]
+    #[case(vec![], vec![])]
+    #[case(
+        vec![ReviewThread {
+            comments: CommentConnection {
+                nodes: vec![review_comment("a.rs"), review_comment("b.rs")],
+                ..Default::default()
+            },
+            ..Default::default()
+        }],
+        vec![("a.rs".into(), 1), ("b.rs".into(), 1)]
+    )]
+    #[case(
+        vec![ReviewThread {
+            comments: CommentConnection {
+                nodes: vec![
+                    review_comment("a.rs"),
+                    review_comment("a.rs"),
+                    review_comment("b.rs"),
+                ],
+                ..Default::default()
+            },
+            ..Default::default()
+        }],
+        vec![("a.rs".into(), 2), ("b.rs".into(), 1)]
+    )]
+    fn summarize_files_counts_comments(
+        #[case] threads: Vec<ReviewThread>,
+        #[case] expected: Vec<(String, usize)>,
+    ) {
+        let summary = summarize_files(&threads);
+        assert_eq!(summary, expected);
+    }
+
+    #[test]
+    fn write_summary_outputs_text() {
+        let summary = vec![("a.rs".into(), 2), ("b.rs".into(), 1)];
+        let mut buf = Vec::new();
+        write_summary(&mut buf, &summary).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("Summary:"));
+        assert!(out.contains("a.rs: 2"));
+        assert!(out.contains("b.rs: 1"));
+    }
+
+    #[test]
+    fn write_summary_handles_empty() {
+        let summary: Vec<(String, usize)> = Vec::new();
+        let mut buf = Vec::new();
+        write_summary(&mut buf, &summary).unwrap();
+        assert!(buf.is_empty());
     }
 }
