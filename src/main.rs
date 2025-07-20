@@ -572,6 +572,17 @@ fn print_comment(skin: &MadSkin, comment: &ReviewComment) -> anyhow::Result<()> 
     Ok(())
 }
 
+fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
+    use std::collections::BTreeMap;
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for t in threads {
+        for c in &t.comments.nodes {
+            *counts.entry(c.path.clone()).or_default() += 1;
+        }
+    }
+    counts.into_iter().collect()
+}
+
 fn build_headers(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().unwrap());
@@ -599,6 +610,15 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     if threads.is_empty() {
         println!("No unresolved comments.");
         return Ok(());
+    }
+
+    let summary = summarize_files(&threads);
+    if !summary.is_empty() {
+        println!("Summary:");
+        for (path, count) in summary {
+            println!("{path}: {count}");
+        }
+        println!();
     }
 
     let skin = MadSkin::default();
@@ -983,5 +1003,48 @@ mod tests {
         assert_eq!(repo.owner, "baz");
         assert_eq!(repo.name, "qux");
         assert_eq!(number, 8);
+    }
+
+    #[test]
+    fn summarize_files_counts_comments() {
+        fn comment(path: &str) -> ReviewComment {
+            ReviewComment {
+                body: String::new(),
+                diff_hunk: String::new(),
+                original_position: None,
+                position: None,
+                path: path.into(),
+                url: String::new(),
+                author: None,
+            }
+        }
+
+        let threads = vec![
+            ReviewThread {
+                id: String::new(),
+                is_resolved: false,
+                comments: CommentConnection {
+                    nodes: vec![comment("a.rs"), comment("b.rs")],
+                    page_info: PageInfo {
+                        has_next_page: false,
+                        end_cursor: None,
+                    },
+                },
+            },
+            ReviewThread {
+                id: String::new(),
+                is_resolved: false,
+                comments: CommentConnection {
+                    nodes: vec![comment("a.rs")],
+                    page_info: PageInfo {
+                        has_next_page: false,
+                        end_cursor: None,
+                    },
+                },
+            },
+        ];
+
+        let summary = summarize_files(&threads);
+        assert_eq!(summary, vec![("a.rs".into(), 2), ("b.rs".into(), 1)]);
     }
 }

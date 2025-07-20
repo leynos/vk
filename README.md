@@ -1,8 +1,13 @@
 # View Komments (vk)
 
-`vk` stands for **View Komments** because `vc` was already taken back in the 1970s and no one argues with a greybeard. This command line tool fetches unresolved GitHub code review comments for a pull request and displays them with colourful terminal markdown using [Termimad](https://crates.io/crates/termimad).
+`vk` stands for **View Komments** because `vc` was already taken back in the
+1970s and no one argues with a greybeard. This command line tool fetches
+unresolved GitHub code review comments for a pull request and displays them with
+colourful terminal markdown using
+[Termimad](https://crates.io/crates/termimad).
 
-This tool is intended for use by AI coding agents such as Aider, OpenAI Codex or Claude Code (without implying association with any of these companies).
+This tool is intended for use by AI coding agents such as Aider, OpenAI Codex or
+Claude Code (without implying association with any of these companies).
 
 ## Usage
 
@@ -16,19 +21,20 @@ sets the default repository when passing only a pull request number.
 
 The CLI provides two subcommands:
 
-* `pr` - show unresolved pull request comments (existing behaviour)
+* `pr` - show unresolved pull request comments. A summary of files and comment
+  counts is printed first.
 * `issue` - read a GitHub issue (**to do**)
 
-If you pass just a pull request number, `vk` tries to work out which
-repository you meant. It first examines `.git/FETCH_HEAD` for a GitHub remote
-URL and, if found, extracts the `owner/repo` from it. As the Codex agent does not put the
+If you pass just a pull request number, `vk` tries to work out which repository
+you meant. It first examines `.git/FETCH_HEAD` for a GitHub remote URL and, if
+found, extracts the `owner/repo` from it. As the Codex agent does not put the
 upstream URL in `.git/config`, we must obtain this from `FETCH_HEAD` for now.
 Failing that, it falls back to the configured repository (`--repo` or
 `VK_REPO`). Set this value to `owner/repo` with or without a `.git` suffix. If
 neither source is available, `vk` will refuse to run with only a number.
 
-`vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN` to authenticate. If it's not
-set you'll get a warning and anonymous requests may be rate limited.
+`vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN` to authenticate. If it's
+not set you'll get a warning and anonymous requests may be rate limited.
 
 The token only needs read access. Select the `public_repo` scope (or `repo` for
 private repositories). See [docs/GITHUB_TOKEN.md](docs/GITHUB_TOKEN.md) for a
@@ -36,8 +42,8 @@ detailed guide to creating one.
 
 ## Example
 
-```
-$ vk pr https://github.com/leynos/mxd/pull/31
+```bash
+vk pr https://github.com/leynos/mxd/pull/31
 ```
 
 ## Troubleshooting
@@ -56,4 +62,5 @@ cargo install --path .
 
 ## License
 
-This project is licensed under the ISC License. See [LICENSE](LICENSE) for details.
+This project is licensed under the ISC License. See
+[LICENSE](LICENSE) for details.
