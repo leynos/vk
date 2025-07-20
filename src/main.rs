@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 use clap::{Parser, Subcommand};
+use figment::error::{Error as FigmentError, Kind as FigmentKind};
 use ortho_config::{OrthoConfig, OrthoError, load_and_merge_subcommand_for};
 use regex::Regex;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
@@ -666,6 +667,23 @@ async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
     Ok(())
 }
 
+fn missing_reference(err: &FigmentError) -> bool {
+    err.clone()
+        .into_iter()
+        .any(|e| matches!(e.kind, FigmentKind::MissingField(ref f) if f == "reference"))
+}
+#[allow(clippy::result_large_err)]
+fn load_with_reference_fallback<T>(cli_args: T) -> Result<T, OrthoError>
+where
+    T: OrthoConfig + serde::Serialize + Default + clap::CommandFactory + Clone,
+{
+    match load_and_merge_subcommand_for::<T>(&cli_args) {
+        Ok(v) => Ok(v),
+        Err(OrthoError::Gathering(e)) if missing_reference(&e) => Ok(cli_args),
+        Err(e) => Err(e),
+    }
+}
+
 #[tokio::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), VkError> {
@@ -674,27 +692,11 @@ async fn main() -> Result<(), VkError> {
     global.merge(cli.global);
     match cli.command {
         Commands::Pr(pr_cli) => {
-            let args = match load_and_merge_subcommand_for::<PrArgs>(&pr_cli) {
-                Ok(v) => v,
-                Err(OrthoError::Gathering(e))
-                    if format!("{e:?}").contains("MissingField(\"reference\")") =>
-                {
-                    pr_cli
-                }
-                Err(e) => return Err(e.into()),
-            };
+            let args = load_with_reference_fallback::<PrArgs>(pr_cli.clone())?;
             run_pr(args, global.repo.as_deref()).await
         }
         Commands::Issue(issue_cli) => {
-            let args = match load_and_merge_subcommand_for::<IssueArgs>(&issue_cli) {
-                Ok(v) => v,
-                Err(OrthoError::Gathering(e))
-                    if format!("{e:?}").contains("MissingField(\"reference\")") =>
-                {
-                    issue_cli
-                }
-                Err(e) => return Err(e.into()),
-            };
+            let args = load_with_reference_fallback::<IssueArgs>(issue_cli.clone())?;
             run_issue(args, global.repo.as_deref()).await
         }
     }
