@@ -670,7 +670,7 @@ async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), VkError> {
     let cli = Cli::parse();
-    let mut global = GlobalArgs::load()?;
+    let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
     global.merge(cli.global);
     match cli.command {
         Commands::Pr(pr_cli) => {
