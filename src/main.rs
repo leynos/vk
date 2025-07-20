@@ -672,14 +672,23 @@ fn missing_reference(err: &FigmentError) -> bool {
         .into_iter()
         .any(|e| matches!(e.kind, FigmentKind::MissingField(ref f) if f == "reference"))
 }
-#[allow(clippy::result_large_err)]
+#[expect(
+    clippy::result_large_err,
+    reason = "configuration loading errors can be verbose"
+)]
 fn load_with_reference_fallback<T>(cli_args: T) -> Result<T, OrthoError>
 where
     T: OrthoConfig + serde::Serialize + Default + clap::CommandFactory + Clone,
 {
     match load_and_merge_subcommand_for::<T>(&cli_args) {
         Ok(v) => Ok(v),
-        Err(OrthoError::Gathering(e)) if missing_reference(&e) => Ok(cli_args),
+        Err(OrthoError::Gathering(e)) => {
+            if missing_reference(&e) {
+                Ok(cli_args)
+            } else {
+                Err(OrthoError::Gathering(e))
+            }
+        }
         Err(e) => Err(e),
     }
 }
