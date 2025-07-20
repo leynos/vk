@@ -59,11 +59,13 @@ struct PrArgs {
     reference: String,
 }
 
+const UNSET_REF: &str = "<unset>";
+
 impl Default for PrArgs {
     #[allow(clippy::derivable_impls)]
     fn default() -> Self {
         Self {
-            reference: String::new(),
+            reference: UNSET_REF.to_string(),
         }
     }
 }
@@ -81,7 +83,7 @@ impl Default for IssueArgs {
     #[allow(clippy::derivable_impls)]
     fn default() -> Self {
         Self {
-            reference: String::new(),
+            reference: UNSET_REF.to_string(),
         }
     }
 }
