@@ -25,6 +25,11 @@ The CLI provides two subcommands:
   counts is printed first.
 * `issue` — read a GitHub issue (**to do**)
 
+`vk` loads default values for subcommands from configuration files and
+environment variables. When these defaults omit the required `reference`
+field, the tool continues with the value provided on the CLI instead of
+exiting with an error.
+
 If you pass just a pull request number, `vk` tries to work out which repository
 you meant. It first examines `.git/FETCH_HEAD` for a GitHub remote URL and, if
 found, extracts the `owner/repo` from it. As the Codex agent does not put the
