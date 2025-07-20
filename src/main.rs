@@ -561,18 +561,12 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
 
     let mut out = String::new();
     for (o, n, text) in &lines[start..end] {
-        let num = if let Some(num) = n {
-            *num
-        } else if let Some(num) = o {
-            *num
-        } else {
-            0
-        };
-        let disp = if n.is_none() && o.is_none() {
-            "    ".to_string()
-        } else {
-            num_disp(num)
-        };
+        // Prefer the new line number, fall back to old, or blanks if neither
+        let disp = n
+            .or(*o)
+            .map(num_disp)
+            .unwrap_or_else(|| "    ".to_string());
+
         writeln!(&mut out, "{disp}|{text}")?;
     }
     Ok(out)
