@@ -583,6 +583,25 @@ fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
     counts.into_iter().collect()
 }
 
+fn write_summary<W: std::io::Write>(
+    mut out: W,
+    summary: &[(String, usize)],
+) -> std::io::Result<()> {
+    if summary.is_empty() {
+        return Ok(());
+    }
+    writeln!(out, "Summary:")?;
+    for (path, count) in summary {
+        writeln!(out, "{path}: {count}")?;
+    }
+    writeln!(out)?;
+    Ok(())
+}
+
+fn print_summary(summary: &[(String, usize)]) {
+    let _ = write_summary(std::io::stdout().lock(), summary);
+}
+
 fn build_headers(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().unwrap());
@@ -613,13 +632,7 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     }
 
     let summary = summarize_files(&threads);
-    if !summary.is_empty() {
-        println!("Summary:");
-        for (path, count) in summary {
-            println!("{path}: {count}");
-        }
-        println!();
-    }
+    print_summary(&summary);
 
     let skin = MadSkin::default();
     for t in threads {
@@ -1046,5 +1059,24 @@ mod tests {
 
         let summary = summarize_files(&threads);
         assert_eq!(summary, vec![("a.rs".into(), 2), ("b.rs".into(), 1)]);
+    }
+
+    #[test]
+    fn write_summary_outputs_text() {
+        let summary = vec![("a.rs".into(), 2), ("b.rs".into(), 1)];
+        let mut buf = Vec::new();
+        write_summary(&mut buf, &summary).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("Summary:"));
+        assert!(out.contains("a.rs: 2"));
+        assert!(out.contains("b.rs: 1"));
+    }
+
+    #[test]
+    fn write_summary_handles_empty() {
+        let summary: Vec<(String, usize)> = Vec::new();
+        let mut buf = Vec::new();
+        write_summary(&mut buf, &summary).unwrap();
+        assert!(buf.is_empty());
     }
 }
