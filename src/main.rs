@@ -312,6 +312,9 @@ struct CommentNode {
 
 const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
+/// Width of the line number gutter in diff output
+const GUTTER_WIDTH: usize = 5;
+
 const THREADS_QUERY: &str = r"
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -513,6 +516,15 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
         parsed
     }
 
+    fn num_disp(num: i32) -> String {
+        let mut s = num.to_string();
+        if s.len() > GUTTER_WIDTH {
+            let len = s.len();
+            s = s[len - GUTTER_WIDTH..].to_string();
+        }
+        format!("{s:>GUTTER_WIDTH$}")
+    }
+
     let mut lines_iter = comment.diff_hunk.lines();
     let Some(header) = lines_iter.next() else {
         return Ok(String::new());
@@ -552,9 +564,10 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
 
     let mut out = String::new();
     for (o, n, text) in &lines[start..end] {
-        let old_disp = o.map_or(String::from("    "), |n| format!("{n:>4}"));
-        let new_disp = n.map_or(String::from("    "), |n| format!("{n:>4}"));
-        writeln!(&mut out, "{old_disp} {new_disp} {text}")?;
+        // Prefer the new line number, fall back to old, or blanks if neither
+        let disp = n.or(*o).map_or_else(|| " ".repeat(GUTTER_WIDTH), num_disp);
+
+        writeln!(&mut out, "{disp}|{text}")?;
     }
     Ok(out)
 }
