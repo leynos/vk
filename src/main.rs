@@ -513,6 +513,15 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
         parsed
     }
 
+    fn num_disp(num: i32) -> String {
+        let mut s = num.to_string();
+        if s.len() > 4 {
+            let len = s.len();
+            s = s[len - 4..].to_string();
+        }
+        format!("{s:>4}")
+    }
+
     let mut lines_iter = comment.diff_hunk.lines();
     let Some(header) = lines_iter.next() else {
         return Ok(String::new());
@@ -552,9 +561,19 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
 
     let mut out = String::new();
     for (o, n, text) in &lines[start..end] {
-        let old_disp = o.map_or(String::from("    "), |n| format!("{n:>4}"));
-        let new_disp = n.map_or(String::from("    "), |n| format!("{n:>4}"));
-        writeln!(&mut out, "{old_disp} {new_disp} {text}")?;
+        let num = if let Some(num) = n {
+            *num
+        } else if let Some(num) = o {
+            *num
+        } else {
+            0
+        };
+        let disp = if n.is_none() && o.is_none() {
+            "    ".to_string()
+        } else {
+            num_disp(num)
+        };
+        writeln!(&mut out, "{disp}|{text}")?;
     }
     Ok(out)
 }
