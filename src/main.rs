@@ -57,15 +57,15 @@ impl GlobalArgs {
 struct PrArgs {
     /// Pull request URL or number
     #[arg(required = true)]
-    reference: String,
+    // Clap marks the argument as required so parsing yields `Some(value)`. The
+    // `Option` allows `PrArgs::default()` and config merging to leave it unset.
+    reference: Option<String>,
 }
 
 impl Default for PrArgs {
     #[allow(clippy::derivable_impls)]
     fn default() -> Self {
-        Self {
-            reference: String::new(),
-        }
+        Self { reference: None }
     }
 }
 
@@ -75,15 +75,15 @@ impl Default for PrArgs {
 struct IssueArgs {
     /// Issue URL or number
     #[arg(required = true)]
-    reference: String,
+    // The argument is required and will parse to `Some`, but `Option` permits
+    // defaults or config merging to leave it unset.
+    reference: Option<String>,
 }
 
 impl Default for IssueArgs {
     #[allow(clippy::derivable_impls)]
     fn default() -> Self {
-        Self {
-            reference: String::new(),
-        }
+        Self { reference: None }
     }
 }
 
@@ -628,7 +628,7 @@ fn build_headers(token: &str) -> HeaderMap {
 
 #[allow(clippy::result_large_err)]
 async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
-    let reference = &args.reference;
+    let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, repo)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
@@ -660,7 +660,7 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
 
 #[allow(clippy::result_large_err)]
 async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
-    let reference = &args.reference;
+    let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_issue_reference(reference, repo)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
@@ -1011,7 +1011,7 @@ mod tests {
     fn pr_subcommand_parses() {
         let cli = Cli::try_parse_from(["vk", "pr", "123"]).unwrap();
         match cli.command {
-            Commands::Pr(args) => assert_eq!(args.reference, "123"),
+            Commands::Pr(args) => assert_eq!(args.reference.as_deref(), Some("123")),
             _ => panic!("wrong variant"),
         }
     }
@@ -1020,7 +1020,7 @@ mod tests {
     fn issue_subcommand_parses() {
         let cli = Cli::try_parse_from(["vk", "issue", "123"]).unwrap();
         match cli.command {
-            Commands::Issue(args) => assert_eq!(args.reference, "123"),
+            Commands::Issue(args) => assert_eq!(args.reference.as_deref(), Some("123")),
             _ => panic!("wrong variant"),
         }
     }
