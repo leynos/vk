@@ -56,6 +56,8 @@ impl GlobalArgs {
 struct PrArgs {
     /// Pull request URL or number
     #[arg(required = true)]
+    // Clap marks the argument as required so parsing yields `Some(value)`. The
+    // `Option` allows `PrArgs::default()` and config merging to leave it unset.
     reference: Option<String>,
 }
 
@@ -72,6 +74,8 @@ impl Default for PrArgs {
 struct IssueArgs {
     /// Issue URL or number
     #[arg(required = true)]
+    // The argument is required and will parse to `Some`, but `Option` permits
+    // defaults or config merging to leave it unset.
     reference: Option<String>,
 }
 
