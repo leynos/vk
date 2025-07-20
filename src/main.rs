@@ -249,14 +249,14 @@ struct Issue {
     body: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct ReviewThreadConnection {
     nodes: Vec<ReviewThread>,
     #[serde(rename = "pageInfo")]
     page_info: PageInfo,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct ReviewThread {
     id: String,
     #[serde(rename = "isResolved")]
@@ -265,14 +265,14 @@ struct ReviewThread {
     comments: CommentConnection,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct CommentConnection {
     nodes: Vec<ReviewComment>,
     #[serde(rename = "pageInfo")]
     page_info: PageInfo,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct ReviewComment {
     body: String,
     #[serde(rename = "diffHunk")]
@@ -286,7 +286,7 @@ struct ReviewComment {
     author: Option<User>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct PageInfo {
     #[serde(rename = "hasNextPage")]
     has_next_page: bool,
@@ -294,17 +294,17 @@ struct PageInfo {
     end_cursor: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct User {
     login: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct CommentNodeWrapper {
     node: Option<CommentNode>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct CommentNode {
     comments: CommentConnection,
 }
@@ -782,6 +782,7 @@ fn locale_is_utf8() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::*;
     use std::fmt::Write;
     use std::fs;
     use tempfile::tempdir;
@@ -1018,47 +1019,46 @@ mod tests {
         assert_eq!(number, 8);
     }
 
-    #[test]
-    fn summarize_files_counts_comments() {
-        fn comment(path: &str) -> ReviewComment {
-            ReviewComment {
-                body: String::new(),
-                diff_hunk: String::new(),
-                original_position: None,
-                position: None,
-                path: path.into(),
-                url: String::new(),
-                author: None,
-            }
+    #[fixture]
+    fn review_comment(#[default("test.rs")] path: &str) -> ReviewComment {
+        ReviewComment {
+            path: path.into(),
+            ..Default::default()
         }
+    }
 
-        let threads = vec![
-            ReviewThread {
-                id: String::new(),
-                is_resolved: false,
-                comments: CommentConnection {
-                    nodes: vec![comment("a.rs"), comment("b.rs")],
-                    page_info: PageInfo {
-                        has_next_page: false,
-                        end_cursor: None,
-                    },
-                },
+    #[rstest]
+    #[case(vec![], vec![])]
+    #[case(
+        vec![ReviewThread {
+            comments: CommentConnection {
+                nodes: vec![review_comment("a.rs"), review_comment("b.rs")],
+                ..Default::default()
             },
-            ReviewThread {
-                id: String::new(),
-                is_resolved: false,
-                comments: CommentConnection {
-                    nodes: vec![comment("a.rs")],
-                    page_info: PageInfo {
-                        has_next_page: false,
-                        end_cursor: None,
-                    },
-                },
+            ..Default::default()
+        }],
+        vec![("a.rs".into(), 1), ("b.rs".into(), 1)]
+    )]
+    #[case(
+        vec![ReviewThread {
+            comments: CommentConnection {
+                nodes: vec![
+                    review_comment("a.rs"),
+                    review_comment("a.rs"),
+                    review_comment("b.rs"),
+                ],
+                ..Default::default()
             },
-        ];
-
+            ..Default::default()
+        }],
+        vec![("a.rs".into(), 2), ("b.rs".into(), 1)]
+    )]
+    fn summarize_files_counts_comments(
+        #[case] threads: Vec<ReviewThread>,
+        #[case] expected: Vec<(String, usize)>,
+    ) {
         let summary = summarize_files(&threads);
-        assert_eq!(summary, vec![("a.rs".into(), 2), ("b.rs".into(), 1)]);
+        assert_eq!(summary, expected);
     }
 
     #[test]

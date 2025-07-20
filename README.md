@@ -1,7 +1,7 @@
 # View Komments (vk)
 
 `vk` stands for **View Komments** because `vc` was already taken back in the
-1970s and no one argues with a greybeard. This command line tool fetches
+1970s, and no one argues with a greybeard. This command line tool fetches
 unresolved GitHub code review comments for a pull request and displays them with
 colourful terminal markdown using
 [Termimad](https://crates.io/crates/termimad).
@@ -21,9 +21,9 @@ sets the default repository when passing only a pull request number.
 
 The CLI provides two subcommands:
 
-* `pr` - show unresolved pull request comments. A summary of files and comment
+* `pr` — show unresolved pull request comments. A summary of files and comment
   counts is printed first.
-* `issue` - read a GitHub issue (**to do**)
+* `issue` — read a GitHub issue (**to do**)
 
 If you pass just a pull request number, `vk` tries to work out which repository
 you meant. It first examines `.git/FETCH_HEAD` for a GitHub remote URL and, if
@@ -34,7 +34,7 @@ Failing that, it falls back to the configured repository (`--repo` or
 neither source is available, `vk` will refuse to run with only a number.
 
 `vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN` to authenticate. If it's
-not set you'll get a warning and anonymous requests may be rate limited.
+not set, you'll get a warning and anonymous requests may be rate limited.
 
 The token only needs read access. Select the `public_repo` scope (or `repo` for
 private repositories). See [docs/GITHUB_TOKEN.md](docs/GITHUB_TOKEN.md) for a
@@ -62,5 +62,5 @@ cargo install --path .
 
 ## License
 
-This project is licensed under the ISC License. See
+This project is licensed under the ISC Licence. See
 [LICENSE](LICENSE) for details.
