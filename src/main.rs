@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
 use clap::{Parser, Subcommand};
-use ortho_config::{OrthoConfig, load_and_merge_subcommand_for};
+use ortho_config::{OrthoConfig, OrthoError, load_and_merge_subcommand_for};
 use regex::Regex;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -674,11 +674,27 @@ async fn main() -> Result<(), VkError> {
     global.merge(cli.global);
     match cli.command {
         Commands::Pr(pr_cli) => {
-            let args = load_and_merge_subcommand_for::<PrArgs>(&pr_cli)?;
+            let args = match load_and_merge_subcommand_for::<PrArgs>(&pr_cli) {
+                Ok(v) => v,
+                Err(OrthoError::Gathering(e))
+                    if format!("{e:?}").contains("MissingField(\"reference\")") =>
+                {
+                    pr_cli
+                }
+                Err(e) => return Err(e.into()),
+            };
             run_pr(args, global.repo.as_deref()).await
         }
         Commands::Issue(issue_cli) => {
-            let args = load_and_merge_subcommand_for::<IssueArgs>(&issue_cli)?;
+            let args = match load_and_merge_subcommand_for::<IssueArgs>(&issue_cli) {
+                Ok(v) => v,
+                Err(OrthoError::Gathering(e))
+                    if format!("{e:?}").contains("MissingField(\"reference\")") =>
+                {
+                    issue_cli
+                }
+                Err(e) => return Err(e.into()),
+            };
             run_issue(args, global.repo.as_deref()).await
         }
     }
