@@ -1,4 +1,8 @@
 //! CLI tool for inspecting GitHub pull requests and issues.
+//!
+//! `vk` fetches unresolved review comments from GitHub's GraphQL API,
+//! summarizes them by file, and prints each thread. When a thread has
+//! multiple comments on the same diff, the diff is displayed only once.
 #![allow(non_snake_case)]
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
