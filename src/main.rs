@@ -606,7 +606,8 @@ fn write_summary<W: std::io::Write>(
     }
     writeln!(out, "Summary:")?;
     for (path, count) in summary {
-        writeln!(out, "{path}: {count} comments")?;
+        let label = if *count == 1 { "comment" } else { "comments" };
+        writeln!(out, "{path}: {count} {label}")?;
     }
     writeln!(out)?;
     Ok(())
@@ -1109,7 +1110,7 @@ mod tests {
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("Summary:"));
         assert!(out.contains("a.rs: 2 comments"));
-        assert!(out.contains("b.rs: 1 comments"));
+        assert!(out.contains("b.rs: 1 comment"));
     }
 
     #[test]
