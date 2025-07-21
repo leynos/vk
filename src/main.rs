@@ -1,3 +1,4 @@
+//! CLI tool for inspecting GitHub pull requests and issues.
 #![allow(non_snake_case)]
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
@@ -576,7 +577,7 @@ fn write_comment_body<W: std::io::Write>(
     mut out: W,
     skin: &MadSkin,
     comment: &ReviewComment,
-) -> std::io::Result<()> {
+) -> anyhow::Result<()> {
     let author = comment
         .author
         .as_ref()
@@ -683,7 +684,9 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
 
     let skin = MadSkin::default();
     for t in threads {
-        print_thread(&skin, &t).ok();
+        if let Err(e) = print_thread(&skin, &t) {
+            eprintln!("error printing thread: {e}");
+        }
     }
     Ok(())
 }
