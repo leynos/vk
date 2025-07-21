@@ -575,7 +575,11 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
 fn print_comment(skin: &MadSkin, comment: &ReviewComment) -> anyhow::Result<()> {
     let diff = format_comment_diff(comment)?;
     print!("{diff}");
+    print_comment_body(skin, comment);
+    Ok(())
+}
 
+fn print_comment_body(skin: &MadSkin, comment: &ReviewComment) {
     let author = comment
         .author
         .as_ref()
@@ -583,6 +587,18 @@ fn print_comment(skin: &MadSkin, comment: &ReviewComment) -> anyhow::Result<()> 
     println!("\u{1f4ac}  \x1b[1m{author}\x1b[0m wrote:");
     skin.print_text(&comment.body);
     println!();
+}
+
+fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
+    let mut iter = thread.comments.nodes.iter();
+    if let Some(first) = iter.next() {
+        print_comment(skin, first)?;
+        println!("{}", first.url);
+        for c in iter {
+            print_comment_body(skin, c);
+            println!("{}", c.url);
+        }
+    }
     Ok(())
 }
 
@@ -650,10 +666,7 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
 
     let skin = MadSkin::default();
     for t in threads {
-        for c in &t.comments.nodes {
-            print_comment(&skin, c).ok();
-            println!("{}", c.url);
-        }
+        print_thread(&skin, &t).ok();
     }
     Ok(())
 }
