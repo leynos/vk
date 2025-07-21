@@ -573,6 +573,14 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
     Ok(out)
 }
 
+/// Format the body of a single review comment.
+///
+/// The formatted output includes the author's login in bold followed by the
+/// markdown-rendered comment text and a trailing newline.
+///
+/// * `out` - Destination implementing [`Write`]
+/// * `skin` - Skin used for markdown formatting
+/// * `comment` - Review comment to display
 fn write_comment_body<W: std::io::Write>(
     mut out: W,
     skin: &MadSkin,
@@ -585,6 +593,14 @@ fn write_comment_body<W: std::io::Write>(
     Ok(())
 }
 
+/// Print a single review comment including its diff hunk.
+///
+/// The diff is emitted first, followed by the comment body formatted using
+/// [`write_comment_body`].
+///
+/// * `out` - Destination implementing [`Write`]
+/// * `skin` - Skin used for markdown formatting
+/// * `comment` - Review comment to display
 fn write_comment<W: std::io::Write>(
     mut out: W,
     skin: &MadSkin,
@@ -596,6 +612,15 @@ fn write_comment<W: std::io::Write>(
     Ok(())
 }
 
+/// Write all comments in a review thread, showing the diff only once.
+///
+/// The first comment is printed via [`write_comment`]. Subsequent comments omit
+/// the diff and are printed with [`write_comment_body`]. Each comment URL is
+/// appended on its own line.
+///
+/// * `out` - Destination implementing [`Write`]
+/// * `skin` - Skin used for markdown formatting
+/// * `thread` - Review thread to display
 fn write_thread<W: std::io::Write>(
     mut out: W,
     skin: &MadSkin,
@@ -613,6 +638,9 @@ fn write_thread<W: std::io::Write>(
     Ok(())
 }
 
+/// Print a review thread to stdout.
+///
+/// This simply calls [`write_thread`] with a locked `stdout` handle.
 fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
     write_thread(std::io::stdout().lock(), skin, thread)
 }
