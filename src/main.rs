@@ -1,3 +1,4 @@
+//! CLI tool for inspecting GitHub pull requests and issues.
 #![allow(non_snake_case)]
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
@@ -572,18 +573,76 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
     Ok(out)
 }
 
-fn print_comment(skin: &MadSkin, comment: &ReviewComment) -> anyhow::Result<()> {
-    let diff = format_comment_diff(comment)?;
-    print!("{diff}");
-
-    let author = comment
-        .author
-        .as_ref()
-        .map_or("unknown", |u| u.login.as_str());
-    println!("\u{1f4ac}  \x1b[1m{author}\x1b[0m wrote:");
-    skin.print_text(&comment.body);
-    println!();
+/// Format the body of a single review comment.
+///
+/// The formatted output includes the author's login in bold followed by the
+/// markdown-rendered comment text and a trailing newline.
+///
+/// * `out` - Destination implementing [`Write`]
+/// * `skin` - Skin used for markdown formatting
+/// * `comment` - Review comment to display
+fn write_comment_body<W: std::io::Write>(
+    mut out: W,
+    skin: &MadSkin,
+    comment: &ReviewComment,
+) -> anyhow::Result<()> {
+    let author = comment.author.as_ref().map_or("", |u| u.login.as_str());
+    writeln!(out, "\u{1f4ac}  \x1b[1m{author}\x1b[0m wrote:")?;
+    let _ = skin.write_text_on(&mut out, &comment.body);
+    writeln!(out)?;
     Ok(())
+}
+
+/// Print a single review comment including its diff hunk.
+///
+/// The diff is emitted first, followed by the comment body formatted using
+/// [`write_comment_body`].
+///
+/// * `out` - Destination implementing [`Write`]
+/// * `skin` - Skin used for markdown formatting
+/// * `comment` - Review comment to display
+fn write_comment<W: std::io::Write>(
+    mut out: W,
+    skin: &MadSkin,
+    comment: &ReviewComment,
+) -> anyhow::Result<()> {
+    let diff = format_comment_diff(comment)?;
+    write!(out, "{diff}")?;
+    write_comment_body(&mut out, skin, comment)?;
+    Ok(())
+}
+
+/// Write all comments in a review thread, showing the diff only once.
+///
+/// The first comment is printed via [`write_comment`]. Subsequent comments omit
+/// the diff and are printed with [`write_comment_body`]. Each comment URL is
+/// appended on its own line.
+///
+/// * `out` - Destination implementing [`Write`]
+/// * `skin` - Skin used for markdown formatting
+/// * `thread` - Review thread to display
+fn write_thread<W: std::io::Write>(
+    mut out: W,
+    skin: &MadSkin,
+    thread: &ReviewThread,
+) -> anyhow::Result<()> {
+    let mut iter = thread.comments.nodes.iter();
+    if let Some(first) = iter.next() {
+        write_comment(&mut out, skin, first)?;
+        writeln!(out, "{}", first.url)?;
+        for c in iter {
+            write_comment_body(&mut out, skin, c)?;
+            writeln!(out, "{}", c.url)?;
+        }
+    }
+    Ok(())
+}
+
+/// Print a review thread to stdout.
+///
+/// This simply calls [`write_thread`] with a locked `stdout` handle.
+fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
+    write_thread(std::io::stdout().lock(), skin, thread)
 }
 
 fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
@@ -651,9 +710,8 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
 
     let skin = MadSkin::default();
     for t in threads {
-        for c in &t.comments.nodes {
-            print_comment(&skin, c).ok();
-            println!("{}", c.url);
+        if let Err(e) = print_thread(&skin, &t) {
+            eprintln!("error printing thread: {e}");
         }
     }
     Ok(())
@@ -1119,5 +1177,33 @@ mod tests {
         let mut buf = Vec::new();
         write_summary(&mut buf, &summary).unwrap();
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn write_thread_emits_diff_once() {
+        let diff = "@@ -1 +1 @@\n-old\n+new\n";
+        let c1 = ReviewComment {
+            diff_hunk: diff.into(),
+            url: "http://u1".into(),
+            ..Default::default()
+        };
+        let c2 = ReviewComment {
+            diff_hunk: diff.into(),
+            url: "http://u2".into(),
+            ..Default::default()
+        };
+        let thread = ReviewThread {
+            comments: CommentConnection {
+                nodes: vec![c1, c2],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let skin = MadSkin::default();
+        let mut buf = Vec::new();
+        write_thread(&mut buf, &skin, &thread).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert_eq!(out.matches("|-old").count(), 1);
+        assert_eq!(out.matches("wrote:").count(), 2);
     }
 }
