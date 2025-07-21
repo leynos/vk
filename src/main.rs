@@ -572,34 +572,51 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
     Ok(out)
 }
 
-fn print_comment(skin: &MadSkin, comment: &ReviewComment) -> anyhow::Result<()> {
-    let diff = format_comment_diff(comment)?;
-    print!("{diff}");
-    print_comment_body(skin, comment);
-    Ok(())
-}
-
-fn print_comment_body(skin: &MadSkin, comment: &ReviewComment) {
+fn write_comment_body<W: std::io::Write>(
+    mut out: W,
+    skin: &MadSkin,
+    comment: &ReviewComment,
+) -> std::io::Result<()> {
     let author = comment
         .author
         .as_ref()
         .map_or("unknown", |u| u.login.as_str());
-    println!("\u{1f4ac}  \x1b[1m{author}\x1b[0m wrote:");
-    skin.print_text(&comment.body);
-    println!();
+    writeln!(out, "\u{1f4ac}  \x1b[1m{author}\x1b[0m wrote:")?;
+    let _ = skin.write_text_on(&mut out, &comment.body);
+    writeln!(out)?;
+    Ok(())
 }
 
-fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
+fn write_comment<W: std::io::Write>(
+    mut out: W,
+    skin: &MadSkin,
+    comment: &ReviewComment,
+) -> anyhow::Result<()> {
+    let diff = format_comment_diff(comment)?;
+    write!(out, "{diff}")?;
+    write_comment_body(&mut out, skin, comment)?;
+    Ok(())
+}
+
+fn write_thread<W: std::io::Write>(
+    mut out: W,
+    skin: &MadSkin,
+    thread: &ReviewThread,
+) -> anyhow::Result<()> {
     let mut iter = thread.comments.nodes.iter();
     if let Some(first) = iter.next() {
-        print_comment(skin, first)?;
-        println!("{}", first.url);
+        write_comment(&mut out, skin, first)?;
+        writeln!(out, "{}", first.url)?;
         for c in iter {
-            print_comment_body(skin, c);
-            println!("{}", c.url);
+            write_comment_body(&mut out, skin, c)?;
+            writeln!(out, "{}", c.url)?;
         }
     }
     Ok(())
+}
+
+fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
+    write_thread(std::io::stdout().lock(), skin, thread)
 }
 
 fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
@@ -1131,5 +1148,34 @@ mod tests {
         let mut buf = Vec::new();
         write_summary(&mut buf, &summary).unwrap();
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn write_thread_emits_diff_once() {
+        let diff = "@@ -1 +1 @@\n-old\n+new\n";
+        let c1 = ReviewComment {
+            diff_hunk: diff.into(),
+            url: "http://u1".into(),
+            ..Default::default()
+        };
+        let c2 = ReviewComment {
+            diff_hunk: diff.into(),
+            url: "http://u2".into(),
+            ..Default::default()
+        };
+        let thread = ReviewThread {
+            comments: CommentConnection {
+                nodes: vec![c1, c2],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let skin = MadSkin::default();
+        let mut buf = Vec::new();
+        write_thread(&mut buf, &skin, &thread).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        println!("{out}");
+        assert_eq!(out.matches("|-old").count(), 1);
+        assert_eq!(out.matches("wrote:").count(), 2);
     }
 }
