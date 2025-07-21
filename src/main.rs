@@ -3,7 +3,6 @@
 //! `vk` fetches unresolved review comments from GitHub's GraphQL API,
 //! summarizes them by file, and prints each thread. When a thread has
 //! multiple comments on the same diff, the diff is displayed only once.
-#![allow(non_snake_case)]
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
 use ortho_config::{OrthoConfig, OrthoError, load_and_merge_subcommand_for};
@@ -20,9 +19,9 @@ use url::Url;
 #[derive(Subcommand, Deserialize, Serialize, Clone, Debug)]
 enum Commands {
     /// Show unresolved pull request comments
-    Pr(PrArgs),
+    Pr(cli_args::PrArgs),
     /// Read a GitHub issue (todo)
-    Issue(IssueArgs),
+    Issue(cli_args::IssueArgs),
 }
 
 #[derive(Parser)]
@@ -36,59 +35,63 @@ struct Cli {
     #[command(subcommand)]
     command: crate::Commands,
     #[command(flatten)]
-    global: GlobalArgs,
+    global: cli_args::GlobalArgs,
 }
 
-#[allow(non_snake_case)]
-#[derive(Parser, Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
-#[ortho_config(prefix = "VK")]
-struct GlobalArgs {
-    /// Repository used when passing only a pull request number
-    #[arg(long)]
-    repo: Option<String>,
-}
+mod cli_args {
+    #![expect(non_snake_case, reason = "clap generates non-snake-case modules")]
+    #![expect(unused_imports, reason = "clap derives import the struct internally")]
+    use super::{OrthoConfig, Parser};
+    use serde::{Deserialize, Serialize};
 
-impl GlobalArgs {
-    fn merge(&mut self, other: GlobalArgs) {
-        if let Some(repo) = other.repo {
-            self.repo = Some(repo);
+    #[derive(Parser, Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
+    #[ortho_config(prefix = "VK")]
+    pub struct GlobalArgs {
+        /// Repository used when passing only a pull request number
+        #[arg(long)]
+        pub repo: Option<String>,
+    }
+
+    impl GlobalArgs {
+        pub fn merge(&mut self, other: GlobalArgs) {
+            if let Some(repo) = other.repo {
+                self.repo = Some(repo);
+            }
         }
     }
-}
 
-#[allow(non_snake_case)]
-#[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
-#[ortho_config(prefix = "VK")]
-struct PrArgs {
-    /// Pull request URL or number
-    #[arg(required = true)]
-    // Clap marks the argument as required so parsing yields `Some(value)`. The
-    // `Option` allows `PrArgs::default()` and config merging to leave it unset.
-    reference: Option<String>,
-}
-
-impl Default for PrArgs {
-    #[allow(clippy::derivable_impls)]
-    fn default() -> Self {
-        Self { reference: None }
+    #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
+    #[ortho_config(prefix = "VK")]
+    pub struct PrArgs {
+        /// Pull request URL or number
+        #[arg(required = true)]
+        // Clap marks the argument as required so parsing yields `Some(value)`. The
+        // `Option` allows `PrArgs::default()` and config merging to leave it unset.
+        pub reference: Option<String>,
     }
-}
 
-#[allow(non_snake_case)]
-#[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
-#[ortho_config(prefix = "VK")]
-struct IssueArgs {
-    /// Issue URL or number
-    #[arg(required = true)]
-    // The argument is required and will parse to `Some`, but `Option` permits
-    // defaults or config merging to leave it unset.
-    reference: Option<String>,
-}
+    impl Default for PrArgs {
+        #[allow(clippy::derivable_impls)]
+        fn default() -> Self {
+            Self { reference: None }
+        }
+    }
 
-impl Default for IssueArgs {
-    #[allow(clippy::derivable_impls)]
-    fn default() -> Self {
-        Self { reference: None }
+    #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
+    #[ortho_config(prefix = "VK")]
+    pub struct IssueArgs {
+        /// Issue URL or number
+        #[arg(required = true)]
+        // The argument is required and will parse to `Some`, but `Option` permits
+        // defaults or config merging to leave it unset.
+        pub reference: Option<String>,
+    }
+
+    impl Default for IssueArgs {
+        #[allow(clippy::derivable_impls)]
+        fn default() -> Self {
+            Self { reference: None }
+        }
     }
 }
 
@@ -691,7 +694,7 @@ fn build_headers(token: &str) -> HeaderMap {
 }
 
 #[allow(clippy::result_large_err)]
-async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
+async fn run_pr(args: cli_args::PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, repo)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
@@ -722,7 +725,7 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
 }
 
 #[allow(clippy::result_large_err)]
-async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
+async fn run_issue(args: cli_args::IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_issue_reference(reference, repo)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
@@ -773,15 +776,15 @@ where
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), VkError> {
     let cli = Cli::parse();
-    let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
+    let mut global = cli_args::GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
     global.merge(cli.global);
     match cli.command {
         Commands::Pr(pr_cli) => {
-            let args = load_with_reference_fallback::<PrArgs>(pr_cli.clone())?;
+            let args = load_with_reference_fallback::<cli_args::PrArgs>(pr_cli.clone())?;
             run_pr(args, global.repo.as_deref()).await
         }
         Commands::Issue(issue_cli) => {
-            let args = load_with_reference_fallback::<IssueArgs>(issue_cli.clone())?;
+            let args = load_with_reference_fallback::<cli_args::IssueArgs>(issue_cli.clone())?;
             run_issue(args, global.repo.as_deref()).await
         }
     }
