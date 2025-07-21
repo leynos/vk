@@ -578,10 +578,7 @@ fn write_comment_body<W: std::io::Write>(
     skin: &MadSkin,
     comment: &ReviewComment,
 ) -> anyhow::Result<()> {
-    let author = comment
-        .author
-        .as_ref()
-        .map_or("unknown", |u| u.login.as_str());
+    let author = comment.author.as_ref().map_or("", |u| u.login.as_str());
     writeln!(out, "\u{1f4ac}  \x1b[1m{author}\x1b[0m wrote:")?;
     let _ = skin.write_text_on(&mut out, &comment.body);
     writeln!(out)?;
