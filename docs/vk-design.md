@@ -8,7 +8,7 @@ application from user experience and architecture perspectives.
 `vk` (View Komments) is a CLI tool for inspecting unresolved GitHub pull request
 comments. Users supply a pull request URL or number, and `vk` fetches the
 associated review threads through the GitHub GraphQL API. Each thread is printed
-with syntax highlighting using Termimad. Diffs appear once per thread even when
+with syntax highlighting using Termimad. Diffs appear once per thread, even when
 multiple comments reference the same code.
 
 ## User Experience

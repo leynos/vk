@@ -1174,7 +1174,6 @@ mod tests {
         let mut buf = Vec::new();
         write_thread(&mut buf, &skin, &thread).unwrap();
         let out = String::from_utf8(buf).unwrap();
-        println!("{out}");
         assert_eq!(out.matches("|-old").count(), 1);
         assert_eq!(out.matches("wrote:").count(), 2);
     }
