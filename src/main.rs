@@ -3,6 +3,7 @@
 //! `vk` fetches unresolved review comments from GitHub's GraphQL API,
 //! summarizes them by file, and prints each thread. When a thread has
 //! multiple comments on the same diff, the diff is displayed only once.
+mod cli_args;
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
@@ -37,49 +38,6 @@ struct Cli {
     command: crate::Commands,
     #[command(flatten)]
     global: GlobalArgs,
-}
-
-mod cli_args {
-    #![expect(non_snake_case, reason = "clap generates non-snake-case modules")]
-    #![expect(unused_imports, reason = "clap derives import the struct internally")]
-    use super::{OrthoConfig, Parser};
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Parser, Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
-    #[ortho_config(prefix = "VK")]
-    pub struct GlobalArgs {
-        /// Repository used when passing only a pull request number
-        #[arg(long)]
-        pub repo: Option<String>,
-    }
-
-    impl GlobalArgs {
-        pub fn merge(&mut self, other: GlobalArgs) {
-            if let Some(repo) = other.repo {
-                self.repo = Some(repo);
-            }
-        }
-    }
-
-    #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
-    #[ortho_config(prefix = "VK")]
-    pub struct PrArgs {
-        /// Pull request URL or number
-        #[arg(required = true)]
-        // Clap marks the argument as required so parsing yields `Some(value)`. The
-        // `Option` allows `PrArgs::default()` and config merging to leave it unset.
-        pub reference: Option<String>,
-    }
-
-    #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
-    #[ortho_config(prefix = "VK")]
-    pub struct IssueArgs {
-        /// Issue URL or number
-        #[arg(required = true)]
-        // The argument is required and will parse to `Some`, but `Option` permits
-        // defaults or config merging to leave it unset.
-        pub reference: Option<String>,
-    }
 }
 
 #[derive(Debug, Clone)]
