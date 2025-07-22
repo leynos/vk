@@ -3,6 +3,7 @@
 //! `vk` fetches unresolved review comments from GitHub's GraphQL API,
 //! summarizes them by file, and prints each thread. When a thread has
 //! multiple comments on the same diff, the diff is displayed only once.
+use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
 use ortho_config::{OrthoConfig, OrthoError, load_and_merge_subcommand_for};
@@ -19,9 +20,9 @@ use url::Url;
 #[derive(Subcommand, Deserialize, Serialize, Clone, Debug)]
 enum Commands {
     /// Show unresolved pull request comments
-    Pr(cli_args::PrArgs),
+    Pr(PrArgs),
     /// Read a GitHub issue (todo)
-    Issue(cli_args::IssueArgs),
+    Issue(IssueArgs),
 }
 
 #[derive(Parser)]
@@ -35,7 +36,7 @@ struct Cli {
     #[command(subcommand)]
     command: crate::Commands,
     #[command(flatten)]
-    global: cli_args::GlobalArgs,
+    global: GlobalArgs,
 }
 
 mod cli_args {
@@ -60,7 +61,7 @@ mod cli_args {
         }
     }
 
-    #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
+    #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
     #[ortho_config(prefix = "VK")]
     pub struct PrArgs {
         /// Pull request URL or number
@@ -70,14 +71,7 @@ mod cli_args {
         pub reference: Option<String>,
     }
 
-    impl Default for PrArgs {
-        #[allow(clippy::derivable_impls)]
-        fn default() -> Self {
-            Self { reference: None }
-        }
-    }
-
-    #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
+    #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
     #[ortho_config(prefix = "VK")]
     pub struct IssueArgs {
         /// Issue URL or number
@@ -85,13 +79,6 @@ mod cli_args {
         // The argument is required and will parse to `Some`, but `Option` permits
         // defaults or config merging to leave it unset.
         pub reference: Option<String>,
-    }
-
-    impl Default for IssueArgs {
-        #[allow(clippy::derivable_impls)]
-        fn default() -> Self {
-            Self { reference: None }
-        }
     }
 }
 
@@ -694,7 +681,7 @@ fn build_headers(token: &str) -> HeaderMap {
 }
 
 #[allow(clippy::result_large_err)]
-async fn run_pr(args: cli_args::PrArgs, repo: Option<&str>) -> Result<(), VkError> {
+async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, repo)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
@@ -725,7 +712,7 @@ async fn run_pr(args: cli_args::PrArgs, repo: Option<&str>) -> Result<(), VkErro
 }
 
 #[allow(clippy::result_large_err)]
-async fn run_issue(args: cli_args::IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
+async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_issue_reference(reference, repo)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
@@ -776,15 +763,15 @@ where
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), VkError> {
     let cli = Cli::parse();
-    let mut global = cli_args::GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
+    let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
     global.merge(cli.global);
     match cli.command {
         Commands::Pr(pr_cli) => {
-            let args = load_with_reference_fallback::<cli_args::PrArgs>(pr_cli.clone())?;
+            let args = load_with_reference_fallback::<PrArgs>(pr_cli.clone())?;
             run_pr(args, global.repo.as_deref()).await
         }
         Commands::Issue(issue_cli) => {
-            let args = load_with_reference_fallback::<cli_args::IssueArgs>(issue_cli.clone())?;
+            let args = load_with_reference_fallback::<IssueArgs>(issue_cli.clone())?;
             run_issue(args, global.repo.as_deref()).await
         }
     }
