@@ -42,6 +42,8 @@ pub struct PrArgs {
 }
 
 /// Parameters accepted by the `issue` sub-command.
+///
+/// Stores the URL or number of the issue to inspect.
 #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
 #[ortho_config(prefix = "VK")]
 pub struct IssueArgs {
