@@ -1,7 +1,7 @@
 //! Command-line argument structures.
 //!
-//! This module isolates clap derivations so lint expectations remain scoped and
-//! keeps `main.rs` focused on runtime logic.
+//! Isolates clap derivations so lint expectations remain scoped, keeping
+//! `main.rs` focused on runtime logic.
 #![expect(non_snake_case, reason = "clap generates non-snake-case modules")]
 #![expect(unused_imports, reason = "clap derives import the struct internally")]
 
