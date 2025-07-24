@@ -248,7 +248,7 @@ struct PageInfo {
     end_cursor: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 struct User {
     login: String,
 }
@@ -261,6 +261,38 @@ struct CommentNodeWrapper {
 #[derive(Debug, Deserialize, Default)]
 struct CommentNode {
     comments: CommentConnection,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct ReviewConnection {
+    nodes: Vec<PullRequestReview>,
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+struct PullRequestReview {
+    body: String,
+    #[serde(rename = "submittedAt")]
+    submitted_at: String,
+    state: String,
+    author: Option<User>,
+}
+
+#[derive(Deserialize)]
+struct ReviewData {
+    repository: ReviewRepo,
+}
+
+#[derive(Deserialize)]
+struct ReviewRepo {
+    #[serde(rename = "pullRequest")]
+    pull_request: ReviewPr,
+}
+
+#[derive(Deserialize)]
+struct ReviewPr {
+    reviews: ReviewConnection,
 }
 
 const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
@@ -308,6 +340,24 @@ const COMMENT_QUERY: &str = r"
               position
               path
               url
+              author { login }
+            }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    }
+";
+
+const REVIEWS_QUERY: &str = r"
+    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $number) {
+          reviews(first: 100, after: $cursor) {
+            nodes {
+              body
+              state
+              submittedAt
               author { login }
             }
             pageInfo { hasNextPage endCursor }
@@ -397,6 +447,27 @@ async fn fetch_thread_page(
     Ok((conn.nodes, conn.page_info))
 }
 
+async fn fetch_review_page(
+    client: &GraphQLClient,
+    repo: &RepoInfo,
+    number: u64,
+    cursor: Option<String>,
+) -> Result<(Vec<PullRequestReview>, PageInfo), VkError> {
+    let data: ReviewData = client
+        .run_query(
+            REVIEWS_QUERY,
+            json!({
+                "owner": repo.owner.as_str(),
+                "name": repo.name.as_str(),
+                "number": number,
+                "cursor": cursor,
+            }),
+        )
+        .await?;
+    let conn = data.repository.pull_request.reviews;
+    Ok((conn.nodes, conn.page_info))
+}
+
 async fn fetch_review_threads(
     client: &GraphQLClient,
     repo: &RepoInfo,
@@ -430,6 +501,14 @@ async fn fetch_review_threads(
         };
     }
     Ok(threads)
+}
+
+async fn fetch_reviews(
+    client: &GraphQLClient,
+    repo: &RepoInfo,
+    number: u64,
+) -> Result<Vec<PullRequestReview>, VkError> {
+    paginate(|cursor| fetch_review_page(client, repo, number, cursor)).await
 }
 
 fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Error> {
@@ -608,6 +687,51 @@ fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
     counts.into_iter().collect()
 }
 
+fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview> {
+    use std::collections::BTreeMap;
+    use std::collections::btree_map::Entry;
+
+    let mut map: BTreeMap<String, PullRequestReview> = BTreeMap::new();
+    for r in reviews {
+        let login = r
+            .author
+            .as_ref()
+            .map(|u| u.login.clone())
+            .unwrap_or_default();
+        match map.entry(login) {
+            Entry::Vacant(e) => {
+                e.insert(r);
+            }
+            Entry::Occupied(mut e) => {
+                if r.submitted_at > e.get().submitted_at {
+                    e.insert(r);
+                }
+            }
+        }
+    }
+    map.into_values().collect()
+}
+
+fn write_review<W: std::io::Write>(
+    mut out: W,
+    skin: &MadSkin,
+    review: &PullRequestReview,
+) -> anyhow::Result<()> {
+    let author = review.author.as_ref().map_or("", |u| u.login.as_str());
+    writeln!(out, "\u{1f4dd}  \x1b[1m{author}\x1b[0m {}:", review.state)?;
+    let _ = skin.write_text_on(&mut out, &review.body);
+    writeln!(out)?;
+    Ok(())
+}
+
+fn print_reviews(skin: &MadSkin, reviews: &[PullRequestReview]) {
+    for r in reviews {
+        if let Err(e) = write_review(std::io::stdout().lock(), skin, r) {
+            eprintln!("error printing review: {e}");
+        }
+    }
+}
+
 fn write_summary<W: std::io::Write>(
     mut out: W,
     summary: &[(String, usize)],
@@ -652,6 +776,7 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
 
     let client = GraphQLClient::new(&token);
     let threads = fetch_review_threads(&client, &repo, number).await?;
+    let reviews = fetch_reviews(&client, &repo, number).await?;
     if threads.is_empty() {
         println!("No unresolved comments.");
         return Ok(());
@@ -661,6 +786,9 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     print_summary(&summary);
 
     let skin = MadSkin::default();
+    let latest = latest_reviews(reviews);
+    print_reviews(&skin, &latest);
+
     for t in threads {
         if let Err(e) = print_thread(&skin, &t) {
             eprintln!("error printing thread: {e}");
