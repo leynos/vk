@@ -71,4 +71,4 @@ sequenceDiagram
 
 `vk` reads configuration files using the `figment` crate. Support for JSON5 and
 YAML formats is optional via the `json5` and `yaml` feature flags. These
-features pull in the `figment-json5` and `serde_yaml` crates respectively.
+features pull in the `figment-json5` and `serde_yaml` crates, respectively.
