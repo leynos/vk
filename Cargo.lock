@@ -1755,6 +1755,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml_ok"
+version = "0.9.36"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d600e1760786f63ca29592f8056a121603984e41dd6ccc85848996567d692458"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "serial_test"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2224,12 +2237,14 @@ dependencies = [
  "clap",
  "diffy",
  "figment",
+ "figment-json5",
  "ortho_config",
  "regex",
  "reqwest",
  "rstest",
  "serde",
  "serde_json",
+ "serde_yaml_ok",
  "serial_test",
  "tempfile",
  "termimad",

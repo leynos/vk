@@ -23,7 +23,7 @@ impl GlobalArgs {
     /// currently `None`.
     ///
     /// CLI flags have higher priority than configuration sources.
-    pub fn merge(&mut self, other: GlobalArgs) {
+    pub fn merge(&mut self, other: Self) {
         if let Some(repo) = other.repo {
             self.repo = Some(repo);
         }
