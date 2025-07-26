@@ -4,8 +4,10 @@
 //! summarizes them by file, and prints each thread. When a thread has
 //! multiple comments on the same diff, the diff is displayed only once.
 mod cli_args;
+mod html;
 mod reviews;
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
+use crate::html::collapse_details;
 use crate::reviews::{fetch_reviews, latest_reviews, print_reviews};
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
@@ -547,7 +549,8 @@ fn write_comment_body<W: std::io::Write>(
 ) -> anyhow::Result<()> {
     let author = comment.author.as_ref().map_or("", |u| u.login.as_str());
     writeln!(out, "\u{1f4ac}  \x1b[1m{author}\x1b[0m wrote:")?;
-    let _ = skin.write_text_on(&mut out, &comment.body);
+    let body = collapse_details(&comment.body);
+    let _ = skin.write_text_on(&mut out, &body);
     writeln!(out)?;
     Ok(())
 }
@@ -874,6 +877,8 @@ fn locale_is_utf8() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reviews::{PullRequestReview, write_review};
+    use chrono::Utc;
     use rstest::*;
     use std::fmt::Write;
     use std::fs;
@@ -1199,5 +1204,35 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert_eq!(out.matches("|-old").count(), 1);
         assert_eq!(out.matches("wrote:").count(), 2);
+    }
+
+    #[test]
+    fn comment_body_collapses_details() {
+        let comment = ReviewComment {
+            body: "<details><summary>note</summary>hidden</details>".into(),
+            ..Default::default()
+        };
+        let skin = MadSkin::default();
+        let mut buf = Vec::new();
+        write_comment_body(&mut buf, &skin, &comment).expect("write comment");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains("\u{25B6} note"));
+        assert!(!out.contains("hidden"));
+    }
+
+    #[test]
+    fn review_body_collapses_details() {
+        let review = PullRequestReview {
+            body: "<details><summary>hello</summary>bye</details>".into(),
+            submitted_at: Utc::now(),
+            state: "APPROVED".into(),
+            author: None,
+        };
+        let skin = MadSkin::default();
+        let mut buf = Vec::new();
+        write_review(&mut buf, &skin, &review).expect("write review");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains("\u{25B6} hello"));
+        assert!(!out.contains("bye"));
     }
 }
