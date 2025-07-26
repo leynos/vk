@@ -1,8 +1,10 @@
-//! CLI tool for inspecting GitHub pull requests and issues.
+//! Entry point for the `vk` command line tool.
 //!
 //! `vk` fetches unresolved review comments from GitHub's GraphQL API,
-//! summarizes them by file, and prints each thread. When a thread has
-//! multiple comments on the same diff, the diff is displayed only once.
+//! summarizing them by file before printing each thread. When a thread has
+//! multiple comments on the same diff, the diff is shown only once.
+//! After all comments are printed, the tool displays an `end of code review`
+//! banner so calling processes know the output has finished.
 mod cli_args;
 mod reviews;
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
@@ -635,6 +637,11 @@ fn print_summary(summary: &[(String, usize)]) {
     let _ = write_summary(std::io::stdout().lock(), summary);
 }
 
+/// Print a closing banner once all review threads have been displayed.
+fn print_end_banner() {
+    println!("========== end of code review ==========");
+}
+
 fn build_headers(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().expect("static string"));
@@ -688,6 +695,7 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
             eprintln!("error printing thread: {e}");
         }
     }
+    print_end_banner();
     Ok(())
 }
 

@@ -2,12 +2,12 @@
 
 `vk` stands for **View Komments** because `vc` was already taken back in the
 1970s, and no one argues with a greybeard. This command line tool fetches
-unresolved GitHub code review comments for a pull request and displays them with
-colourful terminal markdown using
+unresolved GitHub code review comments for a pull request and displays them
+with colourful terminal markdown using
 [Termimad](https://crates.io/crates/termimad).
 
-This tool is intended for use by AI coding agents such as Aider, OpenAI Codex or
-Claude Code (without implying association with any of these companies).
+This tool is intended for use by AI coding agents such as Aider, OpenAI Codex
+or Claude Code (without implying association with any of these companies).
 
 ## Usage
 
@@ -22,13 +22,14 @@ sets the default repository when passing only a pull request number.
 The CLI provides two subcommands:
 
 * `pr` — show unresolved pull request comments. A summary of files and comment
-  counts is printed first.
+  counts is printed first. When finished, `vk` prints an `end of code review`
+  banner.
 * `issue` — read a GitHub issue (**to do**)
 
 `vk` loads default values for subcommands from configuration files and
-environment variables. When these defaults omit the required `reference`
-field, the tool continues with the value provided on the CLI instead of
-exiting with an error.
+environment variables. When these defaults omit the required `reference` field,
+the tool continues with the value provided on the CLI instead of exiting with
+an error.
 
 If you pass just a pull request number, `vk` tries to work out which repository
 you meant. It first examines `.git/FETCH_HEAD` for a GitHub remote URL and, if
@@ -67,5 +68,5 @@ cargo install --path .
 
 ## License
 
-This project is licensed under the ISC Licence. See
-[LICENSE](LICENSE) for details.
+This project is licensed under the ISC Licence. See [LICENSE](LICENSE) for
+details.
