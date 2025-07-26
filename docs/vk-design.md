@@ -19,6 +19,7 @@ even when multiple comments reference the same code.
   reducing clutter when multiple remarks target the same line.
 - **Error visibility**: Failures encountered while printing a thread are logged
   to stderr instead of being silently discarded.
+- **Completion notice**: A final banner marks the *end of code review*.
 
 ## Architecture
 
@@ -31,7 +32,9 @@ The code centres on three printing helpers:
 
 `run_pr` fetches the latest review banner from each reviewer and all unresolved
 threads. The reviews are printed after the summary and before individual
-threads. Errors from `print_thread` are surfaced via logging.
+threads. Errors from `print_thread` are surfaced via logging. Once all threads
+have been printed, a final banner reading `end of code review` confirms
+completion.
 
 ### CLI arguments
 

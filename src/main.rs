@@ -635,6 +635,11 @@ fn print_summary(summary: &[(String, usize)]) {
     let _ = write_summary(std::io::stdout().lock(), summary);
 }
 
+/// Print a closing banner once all review threads have been displayed.
+fn print_end_banner() {
+    println!("========== end of code review ==========");
+}
+
 fn build_headers(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().expect("static string"));
@@ -688,6 +693,7 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
             eprintln!("error printing thread: {e}");
         }
     }
+    print_end_banner();
     Ok(())
 }
 
