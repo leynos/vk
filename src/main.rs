@@ -4,7 +4,9 @@
 //! summarizes them by file, and prints each thread. When a thread has
 //! multiple comments on the same diff, the diff is displayed only once.
 mod cli_args;
+mod reviews;
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
+use crate::reviews::{fetch_reviews, latest_reviews, print_reviews};
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
 use ortho_config::{OrthoConfig, OrthoError, load_and_merge_subcommand_for};
@@ -248,7 +250,7 @@ struct PageInfo {
     end_cursor: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Default, Clone)]
 struct User {
     login: String,
 }
@@ -328,7 +330,7 @@ const ISSUE_QUERY: &str = r"
     }
 ";
 
-async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
+pub(crate) async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
 where
     F: FnMut(Option<String>) -> Fut,
     Fut: std::future::Future<Output = Result<(Vec<T>, PageInfo), VkError>>,
@@ -652,6 +654,7 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
 
     let client = GraphQLClient::new(&token);
     let threads = fetch_review_threads(&client, &repo, number).await?;
+    let reviews = fetch_reviews(&client, &repo, number).await?;
     if threads.is_empty() {
         println!("No unresolved comments.");
         return Ok(());
@@ -661,6 +664,9 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     print_summary(&summary);
 
     let skin = MadSkin::default();
+    let latest = latest_reviews(reviews);
+    print_reviews(&skin, &latest);
+
     for t in threads {
         if let Err(e) = print_thread(&skin, &t) {
             eprintln!("error printing thread: {e}");

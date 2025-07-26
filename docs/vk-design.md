@@ -28,8 +28,9 @@ The code centres on three printing helpers:
 2. `write_comment` includes the diff for the first comment in a thread.
 3. `write_thread` iterates over a thread and prints each comment body in turn.
 
-`run_pr` fetches all unresolved threads and calls `print_thread`. Errors from
-`print_thread` are surfaced via logging.
+`run_pr` fetches the latest review banner from each reviewer and all unresolved
+threads. The reviews are printed after the summary and before individual
+threads. Errors from `print_thread` are surfaced via logging.
 
 ### CLI arguments
 
