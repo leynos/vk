@@ -168,9 +168,6 @@ project:
 - Run `make fmt` after any documentation changes to format all Markdown
   files and fix table markup.
 - Validate Mermaid diagrams in Markdown files by running `make nixie`.
-- Run `make fmt` after any documentation changes to format all Markdown
-  files and fix table markup.
-- Validate Markdown Mermaid diagrams using by running `make nixie`.
 - Markdown paragraphs and bullet points must be wrapped at 80 columns.
 - Code blocks must be wrapped at 120 columns.
 - Tables and headings must not be wrapped.
