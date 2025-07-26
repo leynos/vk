@@ -31,7 +31,7 @@ pub fn collapse_details(input: &str) -> String {
 fn collapse_node(node: &Handle, out: &mut String, in_details: bool) {
     match &node.data {
         NodeData::Element { name, .. } if name.local.eq_str_ignore_ascii_case("details") => {
-            if !in_details && let Some(summary) = find_summary_text(node) {
+            if let Some(summary) = summary_if_root(node, in_details) {
                 out.push('\u{25B6}');
                 out.push(' ');
                 out.push_str(&summary);
@@ -53,6 +53,14 @@ fn collapse_node(node: &Handle, out: &mut String, in_details: bool) {
     }
 }
 
+fn summary_if_root(node: &Handle, in_details: bool) -> Option<String> {
+    if in_details {
+        None
+    } else {
+        find_summary_text(node)
+    }
+}
+
 fn find_summary_text(node: &Handle) -> Option<String> {
     for child in node.children.borrow().iter() {
         if let NodeData::Element { name, .. } = &child.data
@@ -66,10 +74,13 @@ fn find_summary_text(node: &Handle) -> Option<String> {
 
 fn collect_text(node: &Handle) -> String {
     let mut text = String::new();
-    for child in node.children.borrow().iter() {
-        match &child.data {
-            NodeData::Text { contents } => text.push_str(&contents.borrow()),
-            _ => text.push_str(&collect_text(child)),
+    let mut stack = vec![node.clone()];
+    while let Some(current) = stack.pop() {
+        for child in current.children.borrow().iter() {
+            match &child.data {
+                NodeData::Text { contents } => text.push_str(&contents.borrow()),
+                _ => stack.push(child.clone()),
+            }
         }
     }
     text
