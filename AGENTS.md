@@ -21,6 +21,16 @@
   related code (e.g., models + utilities + fixtures) close together.
 - **Group by feature, not layer.** Colocate views, logic, fixtures, and helpers
   related to a domain concept rather than splitting by type.
+- **Use consistent spelling and grammar.** Comments must use en-GB-oxendict
+  ("-ize" / "-yse" / "-our") spelling and grammar, with the exception of
+  references to external APIs.
+- **Illustrate with clear examples.** Function documentation must include clear
+  examples demonstrating the usage and outcome of the function. Test documentation
+  should omit examples where the example serves only to reiterate the test logic.
+- **Keep file size managable.** No single code file may be longer than 400 lines.
+  Long switch statements or dispatch tables should be broken up by feature and
+  constituents colocated with targets. Large blocks of test data should be moved
+  to external data files.
 
 ## Documentation Maintenance
 
@@ -29,8 +39,11 @@
   choices, and architectural decisions.
 - **Update:** When new decisions are made, requirements change, libraries are
   added/removed, or architectural patterns evolve, **proactively update** the
-  relevant file(s) in the `docs/` directory to reflect the latest state. Ensure
-  the documentation remains accurate and current.
+  relevant file(s) in the `docs/` directory to reflect the latest state.
+  **Ensure the documentation remains accurate and current.**
+- Documentation must use en-GB-oxendict ("-ize" / "-yse" / "-our") spelling
+  and grammar. (EXCEPTION: the naming of the "LICENSE" file, which
+  is to be left unchanged for community consistency.)
 
 ## Change Quality & Committing
 
@@ -38,6 +51,11 @@
   subsequent commit) should represent a single logical unit of work.
 - **Quality Gates:** Before considering a change complete or proposing a commit,
   ensure it meets the following criteria:
+  - New functionality or changes in behaviour are fully validated by relevant
+    unittests and behavioural tests.
+  - Where a bug is being fixed, a unittest has been provided demonstrating the
+    behaviour being corrected both to validate the fix and to guard against
+    regression.
   - Passes all relevant unit and behavioral tests according to the guidelines
     above.
   - Passes lint checks
@@ -94,8 +112,8 @@ This repository is written in Rust and uses Cargo for building and dependency
 management. Contributors should follow these best practices when working on the
 project:
 
-- Run cargo fmt, cargo clippy -- -D warnings, and RUSTFLAGS="-D warnings" cargo
-  test before committing.
+- Run `make fmt`, `make lint`, and `make test` before committing. These targets
+  wrap `cargo fmt`, `cargo clippy`, and `cargo test` with the appropriate flags.
 - Clippy warnings MUST be disallowed.
 - Fix any warnings emitted during tests in the code itself rather than
   silencing them.
@@ -107,6 +125,8 @@ project:
   amount of data returned.
 - Write unit and behavioural tests for new functionality. Run both before and
   after making any change.
+- Every module **must** begin with a module level (`//!`) comment explaining the
+  module's purpose and utility.
 - Document public APIs using Rustdoc comments (`///`) so documentation can be
   generated with cargo doc.
 - Prefer immutable data and avoid unnecessary `mut` bindings.
@@ -114,14 +134,51 @@ project:
 - Use explicit version ranges in `Cargo.toml` and keep dependencies up-to-date.
 - Avoid `unsafe` code unless absolutely necessary and document any usage
   clearly.
+- Place function attributes **after** doc comments.
+- Do not use `return` in single-line functions.
+- Use predicate functions for conditional criteria with more than two branches.
+- Lints must not be silenced except as a **last resort**.
+- Lint rule suppressions must be tightly scoped and include a clear reason.
+- Prefer `expect` over `allow`.
+- Use `rstest` fixtures for shared setup.
+- Replace duplicated tests with `#[rstest(...)]` parameterised cases.
+- Prefer `mockall` for mocks/stubs.
+- Prefer `.expect()` over `.unwrap()`.
+- Use `concat!()` to combine long string literals rather than escaping newlines
+  with a backslash.
+
+## Dependency Management
+
+- **Mandate caret requirements for all dependencies.** All crate versions
+  specified in `Cargo.toml` must use SemVer-compatible caret requirements
+  (e.g., `some-crate = "1.2.3"`). This is Cargo's default and allows for safe,
+  non-breaking updates to minor and patch versions while preventing breaking
+  changes from new major versions. This approach is critical for ensuring
+  build stability and reproducibility.
+
+- **Prohibit unstable version specifiers.** The use of wildcard (`*`) or
+  open-ended inequality (`>=`) version requirements is strictly forbidden
+  as they introduce unacceptable risk and unpredictability. Tilde requirements
+  (`~`) should only be used where a dependency must be locked to patch-level
+  updates for a specific, documented reason.
 
 ## Markdown Guidance
 
-- Validate Markdown files using `markdownlint`.
-- Validate Markdown Mermaid diagrams using the `nixie` CLI. The tool is
-  already installed; run `nixie` directly instead of using `npx`.
+- Validate Markdown files using `make markdownlint`.
+- Run `make fmt` after any documentation changes to format all Markdown
+  files and fix table markup.
+- Validate Mermaid diagrams in Markdown files by running `make nixie`.
+- Run `make fmt` after any documentation changes to format all Markdown
+  files and fix table markup.
+- Validate Markdown Mermaid diagrams using by running `make nixie`.
+- Markdown paragraphs and bullet points must be wrapped at 80 columns.
+- Code blocks must be wrapped at 120 columns.
+- Tables and headings must not be wrapped.
+- Use dashes (`-`) for list bullets.
+- Use GitHub-flavoured Markdown footnotes (`[^1]`) for references and
+  footnotes.
 
-### Key Takeaway
+## Key Takeaway
 
 These practices help maintain a high-quality codebase and facilitate
 collaboration.
