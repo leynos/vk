@@ -1,8 +1,10 @@
-//! CLI tool for inspecting GitHub pull requests and issues.
+//! Entry point for the `vk` command line tool.
 //!
 //! `vk` fetches unresolved review comments from GitHub's GraphQL API,
-//! summarizes them by file, and prints each thread. When a thread has
-//! multiple comments on the same diff, the diff is displayed only once.
+//! summarizing them by file before printing each thread. When a thread has
+//! multiple comments on the same diff, the diff is shown only once.
+//! After all comments are printed, the tool displays an `end of code review`
+//! banner so calling processes know the output has finished.
 mod cli_args;
 mod reviews;
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
