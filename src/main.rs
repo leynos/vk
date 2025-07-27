@@ -718,6 +718,28 @@ fn build_headers(token: &str) -> HeaderMap {
     headers
 }
 
+/// Create a [`GraphQLClient`], falling back to no transcript on failure.
+///
+/// This attempts to initialize the client with the provided `transcript`.
+/// If the transcript cannot be created, it logs a warning and retries
+/// without one.
+#[allow(
+    clippy::result_large_err,
+    reason = "VkError has many variants but they are small"
+)]
+fn create_client(
+    token: &str,
+    transcript: Option<std::path::PathBuf>,
+) -> Result<GraphQLClient, VkError> {
+    match GraphQLClient::new(token, transcript) {
+        Ok(c) => Ok(c),
+        Err(e) => {
+            eprintln!("warning: failed to create transcript: {e}");
+            GraphQLClient::new(token, None).map_err(Into::into)
+        }
+    }
+}
+
 #[allow(
     clippy::result_large_err,
     reason = "VkError has many variants but they are small"
@@ -733,13 +755,7 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let client = match GraphQLClient::new(&token, global.transcript.clone()) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("warning: failed to create transcript: {e}");
-            GraphQLClient::new(&token, None)?
-        }
-    };
+    let client = create_client(&token, global.transcript.clone())?;
     let threads = fetch_review_threads(&client, &repo, number).await?;
     let reviews = fetch_reviews(&client, &repo, number).await?;
     if threads.is_empty() {
@@ -778,13 +794,7 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
         eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let client = match GraphQLClient::new(&token, global.transcript.clone()) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("warning: failed to create transcript: {e}");
-            GraphQLClient::new(&token, None)?
-        }
-    };
+    let client = create_client(&token, global.transcript.clone())?;
     let issue = fetch_issue(&client, &repo, number).await?;
 
     let skin = MadSkin::default();
