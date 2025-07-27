@@ -88,6 +88,8 @@ enum VkError {
     },
     #[error("malformed response")]
     BadResponse,
+    #[error("malformed response: {0}")]
+    BadResponseSerde(String),
     #[error("API errors: {0}")]
     ApiErrors(String),
     #[error("configuration error: {0}")]
@@ -153,7 +155,7 @@ impl GraphQLClient {
     {
         let payload = json!({ "query": query, "variables": &variables });
         let ctx = serde_json::to_string(&payload).unwrap_or_default();
-        let resp: GraphQlResponse<T> = self
+        let resp: GraphQlResponse<serde_json::Value> = self
             .client
             .post(&self.endpoint)
             .headers(self.headers.clone())
@@ -167,14 +169,16 @@ impl GraphQLClient {
             .json()
             .await
             .map_err(|e| VkError::RequestContext {
-                context: ctx,
+                context: ctx.clone(),
                 source: e,
             })?;
 
         if let Some(errs) = resp.errors {
             return Err(handle_graphql_errors(errs));
         }
-        resp.data.ok_or(VkError::BadResponse)
+
+        let value = resp.data.ok_or(VkError::BadResponse)?;
+        serde_json::from_value(value).map_err(|e| VkError::BadResponseSerde(e.to_string()))
     }
 }
 
