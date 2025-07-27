@@ -88,6 +88,8 @@ enum VkError {
     },
     #[error("malformed response")]
     BadResponse,
+    #[error("malformed response: {0}")]
+    BadResponseSerde(String),
     #[error("API errors: {0}")]
     ApiErrors(String),
     #[error("configuration error: {0}")]
@@ -176,7 +178,7 @@ impl GraphQLClient {
         }
 
         let value = resp.data.ok_or(VkError::BadResponse)?;
-        serde_json::from_value(value).map_err(|_| VkError::BadResponse)
+        serde_json::from_value(value).map_err(|e| VkError::BadResponseSerde(e.to_string()))
     }
 }
 
