@@ -92,6 +92,8 @@ enum VkError {
     BadResponseSerde(String),
     #[error("API errors: {0}")]
     ApiErrors(String),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("configuration error: {0}")]
     Config(#[from] ortho_config::OrthoError),
 }
@@ -133,27 +135,32 @@ struct GraphQLClient {
     client: reqwest::Client,
     headers: HeaderMap,
     endpoint: String,
-    transcript: Option<std::sync::Arc<std::sync::Mutex<std::fs::File>>>,
+    transcript: Option<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>,
 }
 
 impl GraphQLClient {
-    fn new(token: &str, transcript: Option<std::path::PathBuf>) -> Self {
+    fn new(token: &str, transcript: Option<std::path::PathBuf>) -> Result<Self, std::io::Error> {
         Self::with_endpoint(token, GITHUB_GRAPHQL_URL, transcript)
     }
 
-    fn with_endpoint(token: &str, endpoint: &str, transcript: Option<std::path::PathBuf>) -> Self {
-        let transcript = transcript.map(|p| {
-            std::fs::File::create(p)
-                .map(std::sync::Mutex::new)
-                .map(std::sync::Arc::new)
-                .expect("failed to create transcript")
-        });
-        Self {
+    fn with_endpoint(
+        token: &str,
+        endpoint: &str,
+        transcript: Option<std::path::PathBuf>,
+    ) -> Result<Self, std::io::Error> {
+        let transcript = match transcript {
+            Some(p) => match std::fs::File::create(p) {
+                Ok(file) => Some(std::sync::Mutex::new(std::io::BufWriter::new(file))),
+                Err(e) => return Err(e),
+            },
+            None => None,
+        };
+        Ok(Self {
             client: reqwest::Client::new(),
             headers: build_headers(token),
             endpoint: endpoint.to_string(),
             transcript,
-        }
+        })
     }
 
     async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
@@ -180,17 +187,30 @@ impl GraphQLClient {
         })?;
         if let Some(t) = &self.transcript {
             use std::io::Write as _;
-            if let Ok(mut f) = t.lock() {
-                let _ = writeln!(
-                    f,
-                    "{}",
-                    serde_json::to_string(&json!({ "request": payload, "response": body }))
-                        .unwrap_or_default()
-                );
+            match t.lock() {
+                Ok(mut f) => {
+                    if let Err(e) = writeln!(
+                        f,
+                        "{}",
+                        serde_json::to_string(&json!({ "request": payload, "response": body }))
+                            .unwrap_or_default()
+                    ) {
+                        eprintln!("warning: failed to write transcript: {e}");
+                    }
+                }
+                Err(_) => eprintln!("warning: failed to lock transcript"),
             }
         }
         let resp: GraphQlResponse<serde_json::Value> =
-            serde_json::from_str(&body).map_err(|e| VkError::BadResponseSerde(e.to_string()))?;
+            serde_json::from_str(&body).map_err(|e| {
+                let snippet = if body.len() > 500 {
+                    let preview: String = body.chars().take(500).collect();
+                    format!("{preview}...")
+                } else {
+                    body.clone()
+                };
+                VkError::BadResponseSerde(format!("{e} | response body snippet: {snippet}"))
+            })?;
 
         if let Some(errs) = resp.errors {
             return Err(handle_graphql_errors(errs));
@@ -701,7 +721,13 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let client = GraphQLClient::new(&token, global.transcript.clone());
+    let client = match GraphQLClient::new(&token, global.transcript.clone()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("warning: failed to create transcript: {e}");
+            GraphQLClient::new(&token, None)?
+        }
+    };
     let threads = fetch_review_threads(&client, &repo, number).await?;
     let reviews = fetch_reviews(&client, &repo, number).await?;
     if threads.is_empty() {
@@ -740,7 +766,13 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
         eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let client = GraphQLClient::new(&token, global.transcript.clone());
+    let client = match GraphQLClient::new(&token, global.transcript.clone()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("warning: failed to create transcript: {e}");
+            GraphQLClient::new(&token, None)?
+        }
+    };
     let issue = fetch_issue(&client, &repo, number).await?;
 
     let skin = MadSkin::default();

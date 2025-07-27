@@ -15,6 +15,35 @@ use third_wheel::{
 // Shared handler type for dynamic responses
 type Handler = Arc<Mutex<Box<dyn FnMut(&Request<Body>) -> Response<Body> + Send>>>;
 
+fn generate_ca() -> CertificateAuthority {
+    use std::process::Command as PCommand;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cert = dir.path().join("cert.pem");
+    let key = dir.path().join("key.pem");
+    let status = PCommand::new("openssl")
+        .args([
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:4096",
+            "-keyout",
+            key.to_str().expect("path"),
+            "-out",
+            cert.to_str().expect("path"),
+            "-days",
+            "1",
+            "-passout",
+            "pass:third-wheel",
+            "-subj",
+            "/C=US/ST=test/L=test/O=vk/CN=vk.test",
+        ])
+        .status()
+        .expect("run openssl");
+    assert!(status.success(), "openssl failed");
+    CertificateAuthority::load_from_pem_files_with_passphrase_on_key(cert, key, "third-wheel")
+        .expect("load ca")
+}
+
 fn start_mock_server() -> (SocketAddr, Handler) {
     let handler: Handler = Arc::new(Mutex::new(Box::new(|_req| {
         Response::builder()
@@ -23,12 +52,7 @@ fn start_mock_server() -> (SocketAddr, Handler) {
             .expect("build response")
     })));
     let handler_clone = handler.clone();
-    let ca = CertificateAuthority::load_from_pem_files_with_passphrase_on_key(
-        "tests/ca/cert.pem",
-        "tests/ca/key.pem",
-        "third-wheel",
-    )
-    .expect("load ca");
+    let ca = generate_ca();
     let mitm = mitm_layer(move |req: Request<Body>, _tw: ThirdWheel| {
         let mut h = handler_clone.lock().expect("lock handler");
         let resp = (*h)(&req);
