@@ -133,18 +133,26 @@ struct GraphQLClient {
     client: reqwest::Client,
     headers: HeaderMap,
     endpoint: String,
+    transcript: Option<std::sync::Arc<std::sync::Mutex<std::fs::File>>>,
 }
 
 impl GraphQLClient {
-    fn new(token: &str) -> Self {
-        Self::with_endpoint(token, GITHUB_GRAPHQL_URL)
+    fn new(token: &str, transcript: Option<std::path::PathBuf>) -> Self {
+        Self::with_endpoint(token, GITHUB_GRAPHQL_URL, transcript)
     }
 
-    fn with_endpoint(token: &str, endpoint: &str) -> Self {
+    fn with_endpoint(token: &str, endpoint: &str, transcript: Option<std::path::PathBuf>) -> Self {
+        let transcript = transcript.map(|p| {
+            std::fs::File::create(p)
+                .map(std::sync::Mutex::new)
+                .map(std::sync::Arc::new)
+                .expect("failed to create transcript")
+        });
         Self {
             client: reqwest::Client::new(),
             headers: build_headers(token),
             endpoint: endpoint.to_string(),
+            transcript,
         }
     }
 
@@ -155,7 +163,7 @@ impl GraphQLClient {
     {
         let payload = json!({ "query": query, "variables": &variables });
         let ctx = serde_json::to_string(&payload).unwrap_or_default();
-        let resp: GraphQlResponse<serde_json::Value> = self
+        let response = self
             .client
             .post(&self.endpoint)
             .headers(self.headers.clone())
@@ -165,13 +173,24 @@ impl GraphQLClient {
             .map_err(|e| VkError::RequestContext {
                 context: ctx.clone(),
                 source: e,
-            })?
-            .json()
-            .await
-            .map_err(|e| VkError::RequestContext {
-                context: ctx.clone(),
-                source: e,
             })?;
+        let body = response.text().await.map_err(|e| VkError::RequestContext {
+            context: ctx.clone(),
+            source: e,
+        })?;
+        if let Some(t) = &self.transcript {
+            use std::io::Write as _;
+            if let Ok(mut f) = t.lock() {
+                let _ = writeln!(
+                    f,
+                    "{}",
+                    serde_json::to_string(&json!({ "request": payload, "response": body }))
+                        .unwrap_or_default()
+                );
+            }
+        }
+        let resp: GraphQlResponse<serde_json::Value> =
+            serde_json::from_str(&body).map_err(|e| VkError::BadResponseSerde(e.to_string()))?;
 
         if let Some(errs) = resp.errors {
             return Err(handle_graphql_errors(errs));
@@ -671,9 +690,9 @@ fn build_headers(token: &str) -> HeaderMap {
     clippy::result_large_err,
     reason = "VkError has many variants but they are small"
 )]
-async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
+async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
-    let (repo, number) = parse_pr_reference(reference, repo)?;
+    let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
@@ -682,7 +701,7 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
         eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let client = GraphQLClient::new(&token);
+    let client = GraphQLClient::new(&token, global.transcript.clone());
     let threads = fetch_review_threads(&client, &repo, number).await?;
     let reviews = fetch_reviews(&client, &repo, number).await?;
     if threads.is_empty() {
@@ -710,9 +729,9 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     clippy::result_large_err,
     reason = "VkError has many variants but they are small"
 )]
-async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
+async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
-    let (repo, number) = parse_issue_reference(reference, repo)?;
+    let (repo, number) = parse_issue_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
@@ -721,7 +740,7 @@ async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
         eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let client = GraphQLClient::new(&token);
+    let client = GraphQLClient::new(&token, global.transcript.clone());
     let issue = fetch_issue(&client, &repo, number).await?;
 
     let skin = MadSkin::default();
@@ -769,11 +788,11 @@ async fn main() -> Result<(), VkError> {
     match cli.command {
         Commands::Pr(pr_cli) => {
             let args = load_with_reference_fallback::<PrArgs>(pr_cli.clone())?;
-            run_pr(args, global.repo.as_deref()).await
+            run_pr(args, &global).await
         }
         Commands::Issue(issue_cli) => {
             let args = load_with_reference_fallback::<IssueArgs>(issue_cli.clone())?;
-            run_issue(args, global.repo.as_deref()).await
+            run_issue(args, &global).await
         }
     }
 }

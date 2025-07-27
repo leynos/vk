@@ -16,6 +16,9 @@ pub struct GlobalArgs {
     /// Repository used when passing only a pull request number
     #[arg(long)]
     pub repo: Option<String>,
+    /// Write HTTP transcript to this file for debugging
+    #[arg(long)]
+    pub transcript: Option<std::path::PathBuf>,
 }
 
 impl GlobalArgs {
@@ -26,6 +29,9 @@ impl GlobalArgs {
     pub fn merge(&mut self, other: Self) {
         if let Some(repo) = other.repo {
             self.repo = Some(repo);
+        }
+        if let Some(transcript) = other.transcript {
+            self.transcript = Some(transcript);
         }
     }
 }
