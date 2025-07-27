@@ -370,11 +370,17 @@ async fn fetch_comment_page(
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewComment>, PageInfo), VkError> {
     let wrapper: CommentNodeWrapper = client
-        .run_query(COMMENT_QUERY, json!({ "id": id, "cursor": cursor }))
+        .run_query(COMMENT_QUERY, json!({ "id": id, "cursor": cursor.clone() }))
         .await?;
     let conn = wrapper
         .node
-        .ok_or_else(|| VkError::BadResponse("Missing comment node in response".into()))?
+        .ok_or_else(|| {
+            VkError::BadResponse(format!(
+                "Missing comment node in response (id: {}, cursor: {})",
+                id,
+                cursor.as_deref().unwrap_or("None")
+            ))
+        })?
         .comments;
     Ok((conn.nodes, conn.page_info))
 }
