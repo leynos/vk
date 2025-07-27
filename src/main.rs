@@ -92,6 +92,8 @@ enum VkError {
     BadResponseSerde(String),
     #[error("API errors: {0}")]
     ApiErrors(String),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("configuration error: {0}")]
     Config(#[from] ortho_config::OrthoError),
 }
@@ -133,19 +135,32 @@ struct GraphQLClient {
     client: reqwest::Client,
     headers: HeaderMap,
     endpoint: String,
+    transcript: Option<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>,
 }
 
 impl GraphQLClient {
-    fn new(token: &str) -> Self {
-        Self::with_endpoint(token, GITHUB_GRAPHQL_URL)
+    fn new(token: &str, transcript: Option<std::path::PathBuf>) -> Result<Self, std::io::Error> {
+        Self::with_endpoint(token, GITHUB_GRAPHQL_URL, transcript)
     }
 
-    fn with_endpoint(token: &str, endpoint: &str) -> Self {
-        Self {
+    fn with_endpoint(
+        token: &str,
+        endpoint: &str,
+        transcript: Option<std::path::PathBuf>,
+    ) -> Result<Self, std::io::Error> {
+        let transcript = match transcript {
+            Some(p) => match std::fs::File::create(p) {
+                Ok(file) => Some(std::sync::Mutex::new(std::io::BufWriter::new(file))),
+                Err(e) => return Err(e),
+            },
+            None => None,
+        };
+        Ok(Self {
             client: reqwest::Client::new(),
             headers: build_headers(token),
             endpoint: endpoint.to_string(),
-        }
+            transcript,
+        })
     }
 
     async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
@@ -155,7 +170,7 @@ impl GraphQLClient {
     {
         let payload = json!({ "query": query, "variables": &variables });
         let ctx = serde_json::to_string(&payload).unwrap_or_default();
-        let resp: GraphQlResponse<serde_json::Value> = self
+        let response = self
             .client
             .post(&self.endpoint)
             .headers(self.headers.clone())
@@ -165,12 +180,36 @@ impl GraphQLClient {
             .map_err(|e| VkError::RequestContext {
                 context: ctx.clone(),
                 source: e,
-            })?
-            .json()
-            .await
-            .map_err(|e| VkError::RequestContext {
-                context: ctx.clone(),
-                source: e,
+            })?;
+        let body = response.text().await.map_err(|e| VkError::RequestContext {
+            context: ctx.clone(),
+            source: e,
+        })?;
+        if let Some(t) = &self.transcript {
+            use std::io::Write as _;
+            match t.lock() {
+                Ok(mut f) => {
+                    if let Err(e) = writeln!(
+                        f,
+                        "{}",
+                        serde_json::to_string(&json!({ "request": payload, "response": body }))
+                            .unwrap_or_default()
+                    ) {
+                        eprintln!("warning: failed to write transcript: {e}");
+                    }
+                }
+                Err(_) => eprintln!("warning: failed to lock transcript"),
+            }
+        }
+        let resp: GraphQlResponse<serde_json::Value> =
+            serde_json::from_str(&body).map_err(|e| {
+                let snippet = if body.len() > 500 {
+                    let preview: String = body.chars().take(500).collect();
+                    format!("{preview}...")
+                } else {
+                    body.clone()
+                };
+                VkError::BadResponseSerde(format!("{e} | response body snippet: {snippet}"))
             })?;
 
         if let Some(errs) = resp.errors {
@@ -671,9 +710,9 @@ fn build_headers(token: &str) -> HeaderMap {
     clippy::result_large_err,
     reason = "VkError has many variants but they are small"
 )]
-async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
+async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
-    let (repo, number) = parse_pr_reference(reference, repo)?;
+    let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
@@ -682,7 +721,13 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
         eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let client = GraphQLClient::new(&token);
+    let client = match GraphQLClient::new(&token, global.transcript.clone()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("warning: failed to create transcript: {e}");
+            GraphQLClient::new(&token, None)?
+        }
+    };
     let threads = fetch_review_threads(&client, &repo, number).await?;
     let reviews = fetch_reviews(&client, &repo, number).await?;
     if threads.is_empty() {
@@ -710,9 +755,9 @@ async fn run_pr(args: PrArgs, repo: Option<&str>) -> Result<(), VkError> {
     clippy::result_large_err,
     reason = "VkError has many variants but they are small"
 )]
-async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
+async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
-    let (repo, number) = parse_issue_reference(reference, repo)?;
+    let (repo, number) = parse_issue_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
@@ -721,7 +766,13 @@ async fn run_issue(args: IssueArgs, repo: Option<&str>) -> Result<(), VkError> {
         eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let client = GraphQLClient::new(&token);
+    let client = match GraphQLClient::new(&token, global.transcript.clone()) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("warning: failed to create transcript: {e}");
+            GraphQLClient::new(&token, None)?
+        }
+    };
     let issue = fetch_issue(&client, &repo, number).await?;
 
     let skin = MadSkin::default();
@@ -769,11 +820,11 @@ async fn main() -> Result<(), VkError> {
     match cli.command {
         Commands::Pr(pr_cli) => {
             let args = load_with_reference_fallback::<PrArgs>(pr_cli.clone())?;
-            run_pr(args, global.repo.as_deref()).await
+            run_pr(args, &global).await
         }
         Commands::Issue(issue_cli) => {
             let args = load_with_reference_fallback::<IssueArgs>(issue_cli.clone())?;
-            run_issue(args, global.repo.as_deref()).await
+            run_issue(args, &global).await
         }
     }
 }
