@@ -86,8 +86,8 @@ enum VkError {
         expected: &'static str,
         found: String,
     },
-    #[error("malformed response")]
-    BadResponse,
+    #[error("bad response: {0}")]
+    BadResponse(String),
     #[error("malformed response: {0}")]
     BadResponseSerde(String),
     #[error("API errors: {0}")]
@@ -111,7 +111,7 @@ static HUNK_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid regex")
 });
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 struct GraphQlResponse<T> {
     data: Option<T>,
     errors: Option<Vec<GraphQlError>>,
@@ -212,11 +212,14 @@ impl GraphQLClient {
                 VkError::BadResponseSerde(format!("{e} | response body snippet: {snippet}"))
             })?;
 
+        let resp_debug = format!("{resp:?}");
         if let Some(errs) = resp.errors {
             return Err(handle_graphql_errors(errs));
         }
 
-        let value = resp.data.ok_or(VkError::BadResponse)?;
+        let value = resp.data.ok_or_else(|| {
+            VkError::BadResponse(format!("Missing data in response: {resp_debug}"))
+        })?;
         serde_json::from_value(value).map_err(|e| VkError::BadResponseSerde(e.to_string()))
     }
 }
@@ -406,9 +409,18 @@ async fn fetch_comment_page(
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewComment>, PageInfo), VkError> {
     let wrapper: CommentNodeWrapper = client
-        .run_query(COMMENT_QUERY, json!({ "id": id, "cursor": cursor }))
+        .run_query(COMMENT_QUERY, json!({ "id": id, "cursor": cursor.clone() }))
         .await?;
-    let conn = wrapper.node.ok_or(VkError::BadResponse)?.comments;
+    let conn = wrapper
+        .node
+        .ok_or_else(|| {
+            VkError::BadResponse(format!(
+                "Missing comment node in response (id: {}, cursor: {})",
+                id,
+                cursor.as_deref().unwrap_or("None")
+            ))
+        })?
+        .comments;
     Ok((conn.nodes, conn.page_info))
 }
 
