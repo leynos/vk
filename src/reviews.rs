@@ -1,5 +1,6 @@
 //! Helpers for fetching and displaying pull request reviews.
 
+use crate::html::collapse_details;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
@@ -116,7 +117,8 @@ pub fn write_review<W: std::io::Write>(
         .as_ref()
         .map_or("(unknown)", |u| u.login.as_str());
     writeln!(out, "\u{1f4dd}  \x1b[1m{author}\x1b[0m {}:", review.state)?;
-    if let Err(e) = skin.write_text_on(&mut out, &review.body) {
+    let body = collapse_details(&review.body);
+    if let Err(e) = skin.write_text_on(&mut out, &body) {
         eprintln!("error writing review body: {e}");
     }
     writeln!(out)?;
