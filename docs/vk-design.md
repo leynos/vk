@@ -48,6 +48,10 @@ Splitting the printing logic into reusable `write_*` functions enables testing
 without capturing stdout. The behavioural test `write_thread_emits_diff_once`
 verifies that diffs appear only once per thread.
 
+Comment bodies can include raw HTML. The helper `collapse_details` uses
+`html5ever` to parse each comment and collapse root `<details>` blocks to their
+`<summary>` text. Nested blocks are discarded to keep the output concise.
+
 ## Sequence Diagram
 
 ```mermaid

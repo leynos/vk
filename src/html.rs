@@ -31,11 +31,8 @@ pub fn collapse_details(input: &str) -> String {
 fn collapse_node(node: &Handle, out: &mut String, in_details: bool) {
     match &node.data {
         NodeData::Element { name, .. } if name.local.eq_str_ignore_ascii_case("details") => {
-            if let Some(summary) = summary_if_root(node, in_details) {
-                out.push('\u{25B6}');
-                out.push(' ');
-                out.push_str(&summary);
-                out.push('\n');
+            if should_collapse_details(node, in_details) {
+                write_collapsed_summary(node, out);
             }
             // drop children entirely when collapsing
         }
@@ -53,11 +50,16 @@ fn collapse_node(node: &Handle, out: &mut String, in_details: bool) {
     }
 }
 
-fn summary_if_root(node: &Handle, in_details: bool) -> Option<String> {
-    if in_details {
-        None
-    } else {
-        find_summary_text(node)
+fn should_collapse_details(node: &Handle, in_details: bool) -> bool {
+    !in_details && find_summary_text(node).is_some()
+}
+
+fn write_collapsed_summary(node: &Handle, out: &mut String) {
+    if let Some(summary) = find_summary_text(node) {
+        out.push('\u{25B6}');
+        out.push(' ');
+        out.push_str(&summary);
+        out.push('\n');
     }
 }
 
@@ -76,7 +78,8 @@ fn collect_text(node: &Handle) -> String {
     let mut text = String::new();
     let mut stack = vec![node.clone()];
     while let Some(current) = stack.pop() {
-        for child in current.children.borrow().iter() {
+        let children = current.children.borrow();
+        for child in children.iter().rev() {
             match &child.data {
                 NodeData::Text { contents } => text.push_str(&contents.borrow()),
                 _ => stack.push(child.clone()),
@@ -104,5 +107,31 @@ mod tests {
     fn nested_details_are_hidden() {
         let input = "<details><summary>top</summary><details><summary>inner</summary>foo</details></details>";
         assert_eq!(collapse_details(input), "\u{25B6} top\n");
+    }
+
+    #[test]
+    fn details_without_summary_removed() {
+        let input = "<details><p>foo</p></details>";
+        assert_eq!(collapse_details(input), "");
+    }
+
+    #[test]
+    fn empty_details_block() {
+        assert_eq!(collapse_details("<details></details>"), "");
+    }
+
+    #[test]
+    fn malformed_html_is_handled() {
+        let out = collapse_details("<details><summary>bad");
+        assert!(out.contains("\u{25B6} bad"));
+    }
+
+    #[test]
+    fn multiple_root_details() {
+        let input = concat!(
+            "<details><summary>one</summary>a</details>",
+            "<details><summary>two</summary>b</details>"
+        );
+        assert_eq!(collapse_details(input), "\u{25B6} one\n\u{25B6} two\n");
     }
 }
