@@ -13,6 +13,7 @@ use crate::html::collapse_details;
 use crate::reviews::{fetch_reviews, latest_reviews, print_reviews};
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
+use log::{error, warn};
 use ortho_config::{OrthoConfig, OrthoError, load_and_merge_subcommand_for};
 use regex::Regex;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
@@ -195,10 +196,10 @@ impl GraphQLClient {
                         serde_json::to_string(&json!({ "request": payload, "response": body }))
                             .unwrap_or_default()
                     ) {
-                        eprintln!("warning: failed to write transcript: {e}");
+                        warn!("failed to write transcript: {e}");
                     }
                 }
-                Err(_) => eprintln!("warning: failed to lock transcript"),
+                Err(_) => warn!("failed to lock transcript"),
             }
         }
         let resp: GraphQlResponse<serde_json::Value> =
@@ -723,18 +724,18 @@ fn build_headers(token: &str) -> HeaderMap {
 /// This attempts to initialize the client with the provided `transcript`.
 /// If the transcript cannot be created, it logs a warning and retries
 /// without one.
-#[allow(
+#[expect(
     clippy::result_large_err,
     reason = "VkError has many variants but they are small"
 )]
-fn create_client(
+fn build_graphql_client(
     token: &str,
-    transcript: Option<std::path::PathBuf>,
+    transcript: Option<&std::path::PathBuf>,
 ) -> Result<GraphQLClient, VkError> {
-    match GraphQLClient::new(token, transcript) {
+    match GraphQLClient::new(token, transcript.cloned()) {
         Ok(c) => Ok(c),
         Err(e) => {
-            eprintln!("warning: failed to create transcript: {e}");
+            warn!("failed to create transcript: {e}");
             GraphQLClient::new(token, None).map_err(Into::into)
         }
     }
@@ -749,13 +750,13 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
-        eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
+        warn!("GITHUB_TOKEN not set, using anonymous API access");
     }
     if !locale_is_utf8() {
-        eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
+        warn!("terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let client = create_client(&token, global.transcript.clone())?;
+    let client = build_graphql_client(&token, global.transcript.as_ref())?;
     let threads = fetch_review_threads(&client, &repo, number).await?;
     let reviews = fetch_reviews(&client, &repo, number).await?;
     if threads.is_empty() {
@@ -772,7 +773,7 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
 
     for t in threads {
         if let Err(e) = print_thread(&skin, &t) {
-            eprintln!("error printing thread: {e}");
+            error!("error printing thread: {e}");
         }
     }
     print_end_banner();
@@ -788,13 +789,13 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
     let (repo, number) = parse_issue_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
-        eprintln!("warning: GITHUB_TOKEN not set, using anonymous API access");
+        warn!("GITHUB_TOKEN not set, using anonymous API access");
     }
     if !locale_is_utf8() {
-        eprintln!("warning: terminal locale is not UTF-8; emojis may not render correctly");
+        warn!("terminal locale is not UTF-8; emojis may not render correctly");
     }
 
-    let client = create_client(&token, global.transcript.clone())?;
+    let client = build_graphql_client(&token, global.transcript.as_ref())?;
     let issue = fetch_issue(&client, &repo, number).await?;
 
     let skin = MadSkin::default();
@@ -836,6 +837,7 @@ where
     reason = "VkError has many variants but they are small"
 )]
 async fn main() -> Result<(), VkError> {
+    env_logger::init();
     let cli = Cli::parse();
     let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
     global.merge(cli.global);
