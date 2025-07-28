@@ -50,7 +50,7 @@ pub struct PrArgs {
 /// Parameters accepted by the `issue` sub-command.
 ///
 /// Stores the URL or number of the issue to inspect.
-#[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
+#[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
 #[ortho_config(prefix = "VK")]
 pub struct IssueArgs {
     /// Issue URL or number
@@ -58,4 +58,14 @@ pub struct IssueArgs {
     // The argument is required and will parse to `Some`, but `Option` permits
     // defaults or config merging to leave it unset.
     pub reference: Option<String>,
+}
+
+impl Default for IssueArgs {
+    #[allow(
+        clippy::derivable_impls,
+        reason = "Manual impl clarifies the absent reference state"
+    )]
+    fn default() -> Self {
+        Self { reference: None }
+    }
 }
