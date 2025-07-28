@@ -60,11 +60,11 @@ pub struct IssueArgs {
     pub reference: Option<String>,
 }
 
+#[expect(
+    clippy::derivable_impls,
+    reason = "manual impl clarifies absent reference state"
+)]
 impl Default for IssueArgs {
-    #[allow(
-        clippy::derivable_impls,
-        reason = "Manual impl clarifies the absent reference state"
-    )]
     fn default() -> Self {
         Self { reference: None }
     }

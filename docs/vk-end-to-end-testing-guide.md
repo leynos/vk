@@ -1,6 +1,8 @@
 
 # A Comprehensive Guide to End-to-End Testing for the `vk` Command-Line Tool
 
+<!-- markdownlint-disable MD033 MD038 -->
+
 ## A Primer on End-to-End Testing for the vk CLI
 
 This document provides a definitive, expert-level guide to establishing a comprehensive end-to-end (E2E) testing strategy for the `vk` command-line interface (CLI). It transforms the foundational proposal into a practical, actionable report, detailing the methodology, tools, and best practices required to ensure the tool's long-term reliability, correctness, and maintainability.
