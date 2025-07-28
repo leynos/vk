@@ -53,7 +53,7 @@ struct RepoInfo {
     name: String,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum ResourceType {
     Issues,
     PullRequest,
@@ -867,7 +867,12 @@ fn parse_reference(
             let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
             let segments: Vec<_> = segments_iter.collect();
             if segments.len() >= 4 {
-                if segments.get(2).expect("length checked") == &resource_type.as_str() {
+                let segment = segments.get(2).expect("length checked");
+                let expected = resource_type.as_str();
+                let matches = segment == &expected
+                    || (resource_type == ResourceType::PullRequest && *segment == "pulls")
+                    || (resource_type == ResourceType::Issues && *segment == "issue");
+                if matches {
                     let owner = (*segments.first().expect("length checked")).to_owned();
                     let repo_segment = segments.get(1).expect("length checked");
                     let name = repo_segment
@@ -882,8 +887,8 @@ fn parse_reference(
                     return Ok((RepoInfo { owner, name }, number));
                 }
                 return Err(VkError::WrongResourceType {
-                    expected: resource_type.as_str(),
-                    found: (*segments.get(2).expect("length checked")).to_owned(),
+                    expected,
+                    found: (*segment).to_owned(),
                 });
             }
         }
@@ -997,6 +1002,15 @@ mod tests {
         assert_eq!(repo.owner, "owner");
         assert_eq!(repo.name, "repo");
         assert_eq!(number, 7);
+    }
+
+    #[test]
+    fn parse_url_plural_segment() {
+        let (repo, number) = parse_pr_reference("https://github.com/owner/repo/pulls/13", None)
+            .expect("valid reference");
+        assert_eq!(repo.owner, "owner");
+        assert_eq!(repo.name, "repo");
+        assert_eq!(number, 13);
     }
 
     #[test]
@@ -1186,6 +1200,15 @@ mod tests {
         assert_eq!(repo.owner, "owner");
         assert_eq!(repo.name, "repo");
         assert_eq!(number, 9);
+    }
+
+    #[test]
+    fn parse_issue_url_singular() {
+        let (repo, number) = parse_issue_reference("https://github.com/owner/repo/issue/11", None)
+            .expect("valid ref");
+        assert_eq!(repo.owner, "owner");
+        assert_eq!(repo.name, "repo");
+        assert_eq!(number, 11);
     }
 
     #[test]
