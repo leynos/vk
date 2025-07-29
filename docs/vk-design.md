@@ -75,6 +75,26 @@ sequenceDiagram
     MadSkin->>Main: print c.url
 ```
 
+## GraphQL Error Handling
+
+```mermaid
+sequenceDiagram
+    participant Client as GraphQLClient
+    participant Server as GraphQL API
+    participant Serde as serde_path_to_error
+    Client->>Server: Send GraphQL query
+    Server-->>Client: Return JSON response
+    Client->>Serde: Attempt to deserialize response
+    alt Deserialization fails
+        Serde-->>Client: Return error with path
+        Client-->>Client: Format error with path and snippet
+        Client-->>Caller: Return VkError::BadResponseSerde
+    else Deserialization succeeds
+        Serde-->>Client: Return deserialized object
+        Client-->>Caller: Return object
+    end
+```
+
 ## Configuration and features
 
 `vk` reads configuration files using the `figment` crate. Support for JSON5 and
