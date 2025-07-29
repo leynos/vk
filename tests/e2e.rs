@@ -1,3 +1,9 @@
+//! End-to-end tests validate the `vk` binary using its public interface.
+//! Each test spawns a [`third-wheel`](https://crates.io/crates/third-wheel)
+//! Man-in-the-Middle proxy that intercepts outbound GitHub requests. This
+//! proxy serves canned responses from `tests/fixtures` so the suite runs in a
+//! fully hermetic and deterministic manner.
+
 use assert_cmd::Command;
 use predicates::str::contains;
 use serde_json::Value;
