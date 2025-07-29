@@ -1,4 +1,9 @@
-//! End-to-end tests validate the `vk` binary using its public interface.
+//! End-to-end tests for GraphQL error diagnostics.
+//!
+//! These tests verify that enhanced error reporting works correctly when
+//! GraphQL responses contain missing nodes, using mock HTTPS servers to
+//! simulate real-world scenarios.
+//!
 //! Each test spawns a [`third-wheel`](https://crates.io/crates/third-wheel)
 //! Man-in-the-Middle proxy that intercepts outbound GitHub requests. This
 //! proxy serves canned responses from `tests/fixtures` so the suite runs in a
@@ -9,7 +14,7 @@ use predicates::str::contains;
 use serde_json::Value;
 use std::fs;
 mod utils;
-use third_wheel::hyper::{Body, Response};
+use hyper::Response;
 use utils::start_mitm;
 
 fn load_transcript(path: &str) -> Vec<String> {
@@ -28,14 +33,14 @@ fn load_transcript(path: &str) -> Vec<String> {
 #[tokio::test]
 #[ignore = "requires recorded network transcript"]
 async fn e2e_pr_42() {
-    let (addr, handler, handle) = start_mitm();
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let mut responses = load_transcript("tests/fixtures/pr42.json").into_iter();
     *handler.lock().expect("lock handler") = Box::new(move |_req| {
         let body = responses.next().unwrap_or_else(|| "{}".to_string());
         Response::builder()
             .status(200)
             .header("Content-Type", "application/json")
-            .body(Body::from(body))
+            .body(http_body_util::Full::from(body))
             .expect("build response")
     });
 
@@ -47,11 +52,11 @@ async fn e2e_pr_42() {
         .assert()
         .success()
         .stdout(contains("end of code review"));
-    handle.abort();
+    shutdown.shutdown().await;
 }
 #[tokio::test]
 async fn e2e_missing_nodes_reports_path() {
-    let (addr, handler, handle) = start_mitm();
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     *handler.lock().expect("lock handler") = Box::new(move |_req| {
         let body = serde_json::json!({
             "data": {
@@ -68,7 +73,7 @@ async fn e2e_missing_nodes_reports_path() {
         Response::builder()
             .status(200)
             .header("Content-Type", "application/json")
-            .body(Body::from(body))
+            .body(http_body_util::Full::from(body))
             .expect("build response")
     });
 
@@ -89,5 +94,5 @@ async fn e2e_missing_nodes_reports_path() {
     .await
     .expect("command timed out")
     .expect("spawn blocking");
-    handle.abort();
+    shutdown.shutdown().await;
 }
