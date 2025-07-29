@@ -141,7 +141,9 @@ struct GraphQLClient {
 
 impl GraphQLClient {
     fn new(token: &str, transcript: Option<std::path::PathBuf>) -> Result<Self, std::io::Error> {
-        Self::with_endpoint(token, GITHUB_GRAPHQL_URL, transcript)
+        let endpoint =
+            env::var("GITHUB_GRAPHQL_URL").unwrap_or_else(|_| GITHUB_GRAPHQL_URL.to_string());
+        Self::with_endpoint(token, &endpoint, transcript)
     }
 
     fn with_endpoint(
@@ -221,7 +223,21 @@ impl GraphQLClient {
         let value = resp.data.ok_or_else(|| {
             VkError::BadResponse(format!("Missing data in response: {resp_debug}"))
         })?;
-        serde_json::from_value(value).map_err(|e| VkError::BadResponseSerde(e.to_string()))
+        match serde_path_to_error::deserialize::<_, T>(value.clone()) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                let mut snippet = serde_json::to_string_pretty(&value).unwrap_or_default();
+                if snippet.len() > 200 {
+                    snippet.truncate(200);
+                    snippet.push_str("...");
+                }
+                let path = e.path().to_string();
+                let inner = e.into_inner();
+                Err(VkError::BadResponseSerde(format!(
+                    "{inner} at {path} | snippet: {snippet}"
+                )))
+            }
+        }
     }
 }
 
@@ -1350,5 +1366,58 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("\u{25B6} hello"));
         assert!(!out.contains("bye"));
+    }
+
+    #[tokio::test]
+    async fn run_query_missing_nodes_reports_path() {
+        use third_wheel::hyper::{Body, Request, Response, Server, StatusCode, service};
+
+        let body = serde_json::json!({
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "pageInfo": { "hasNextPage": false, "endCursor": null }
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let make_svc = service::make_service_fn(move |_conn| {
+            let body = body.clone();
+            async move {
+                Ok::<_, std::convert::Infallible>(service::service_fn(
+                    move |_req: Request<Body>| {
+                        let body = body.clone();
+                        async move {
+                            Ok::<_, std::convert::Infallible>(
+                                Response::builder()
+                                    .status(StatusCode::OK)
+                                    .header("Content-Type", "application/json")
+                                    .body(Body::from(body.clone()))
+                                    .expect("resp"),
+                            )
+                        }
+                    },
+                ))
+            }
+        });
+
+        let server = Server::bind(&"127.0.0.1:0".parse().expect("addr")).serve(make_svc);
+        let addr = server.local_addr();
+        tokio::spawn(server);
+
+        let client =
+            GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None).expect("client");
+
+        let repo = RepoInfo {
+            owner: "o".into(),
+            name: "r".into(),
+        };
+        let result = fetch_review_threads(&client, &repo, 1).await;
+        let err = result.expect_err("expected error");
+        assert!(format!("{err}").contains("reviewThreads"));
     }
 }
