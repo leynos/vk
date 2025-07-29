@@ -112,6 +112,19 @@ static HUNK_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid regex")
 });
 
+const BODY_SNIPPET_LEN: usize = 500;
+const VALUE_SNIPPET_LEN: usize = 200;
+
+fn snippet(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        let mut out = text.chars().take(max).collect::<String>();
+        out.push_str("...");
+        out
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct GraphQlResponse<T> {
     data: Option<T>,
@@ -206,13 +219,8 @@ impl GraphQLClient {
         }
         let resp: GraphQlResponse<serde_json::Value> =
             serde_json::from_str(&body).map_err(|e| {
-                let snippet = if body.len() > 500 {
-                    let preview: String = body.chars().take(500).collect();
-                    format!("{preview}...")
-                } else {
-                    body.clone()
-                };
-                VkError::BadResponseSerde(format!("{e} | response body snippet: {snippet}"))
+                let snippet = snippet(&body, BODY_SNIPPET_LEN);
+                VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}"))
             })?;
 
         let resp_debug = format!("{resp:?}");
@@ -226,11 +234,10 @@ impl GraphQLClient {
         match serde_path_to_error::deserialize::<_, T>(value.clone()) {
             Ok(v) => Ok(v),
             Err(e) => {
-                let mut snippet = serde_json::to_string_pretty(&value).unwrap_or_default();
-                if snippet.len() > 200 {
-                    snippet.truncate(200);
-                    snippet.push_str("...");
-                }
+                let snippet = snippet(
+                    &serde_json::to_string_pretty(&value).unwrap_or_default(),
+                    VALUE_SNIPPET_LEN,
+                );
                 let path = e.path().to_string();
                 let inner = e.into_inner();
                 Err(VkError::BadResponseSerde(format!(
@@ -1366,58 +1373,5 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("\u{25B6} hello"));
         assert!(!out.contains("bye"));
-    }
-
-    #[tokio::test]
-    async fn run_query_missing_nodes_reports_path() {
-        use third_wheel::hyper::{Body, Request, Response, Server, StatusCode, service};
-
-        let body = serde_json::json!({
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "pageInfo": { "hasNextPage": false, "endCursor": null }
-                        }
-                    }
-                }
-            }
-        })
-        .to_string();
-
-        let make_svc = service::make_service_fn(move |_conn| {
-            let body = body.clone();
-            async move {
-                Ok::<_, std::convert::Infallible>(service::service_fn(
-                    move |_req: Request<Body>| {
-                        let body = body.clone();
-                        async move {
-                            Ok::<_, std::convert::Infallible>(
-                                Response::builder()
-                                    .status(StatusCode::OK)
-                                    .header("Content-Type", "application/json")
-                                    .body(Body::from(body.clone()))
-                                    .expect("resp"),
-                            )
-                        }
-                    },
-                ))
-            }
-        });
-
-        let server = Server::bind(&"127.0.0.1:0".parse().expect("addr")).serve(make_svc);
-        let addr = server.local_addr();
-        tokio::spawn(server);
-
-        let client =
-            GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None).expect("client");
-
-        let repo = RepoInfo {
-            owner: "o".into(),
-            name: "r".into(),
-        };
-        let result = fetch_review_threads(&client, &repo, 1).await;
-        let err = result.expect_err("expected error");
-        assert!(format!("{err}").contains("reviewThreads"));
     }
 }

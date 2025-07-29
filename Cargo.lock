@@ -2781,6 +2781,7 @@ dependencies = [
  "figment",
  "figment-json5",
  "html5ever",
+ "hyper",
  "log",
  "markup5ever_rcdom",
  "ortho_config",
