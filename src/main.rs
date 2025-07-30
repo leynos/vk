@@ -112,6 +112,19 @@ static HUNK_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid regex")
 });
 
+const BODY_SNIPPET_LEN: usize = 500;
+const VALUE_SNIPPET_LEN: usize = 200;
+
+fn snippet(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        let mut out = text.chars().take(max).collect::<String>();
+        out.push_str("...");
+        out
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct GraphQlResponse<T> {
     data: Option<T>,
@@ -141,7 +154,9 @@ struct GraphQLClient {
 
 impl GraphQLClient {
     fn new(token: &str, transcript: Option<std::path::PathBuf>) -> Result<Self, std::io::Error> {
-        Self::with_endpoint(token, GITHUB_GRAPHQL_URL, transcript)
+        let endpoint =
+            env::var("GITHUB_GRAPHQL_URL").unwrap_or_else(|_| GITHUB_GRAPHQL_URL.to_string());
+        Self::with_endpoint(token, &endpoint, transcript)
     }
 
     fn with_endpoint(
@@ -204,13 +219,8 @@ impl GraphQLClient {
         }
         let resp: GraphQlResponse<serde_json::Value> =
             serde_json::from_str(&body).map_err(|e| {
-                let snippet = if body.len() > 500 {
-                    let preview: String = body.chars().take(500).collect();
-                    format!("{preview}...")
-                } else {
-                    body.clone()
-                };
-                VkError::BadResponseSerde(format!("{e} | response body snippet: {snippet}"))
+                let snippet = snippet(&body, BODY_SNIPPET_LEN);
+                VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}"))
             })?;
 
         let resp_debug = format!("{resp:?}");
@@ -221,7 +231,20 @@ impl GraphQLClient {
         let value = resp.data.ok_or_else(|| {
             VkError::BadResponse(format!("Missing data in response: {resp_debug}"))
         })?;
-        serde_json::from_value(value).map_err(|e| VkError::BadResponseSerde(e.to_string()))
+        match serde_path_to_error::deserialize::<_, T>(value.clone()) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                let snippet = snippet(
+                    &serde_json::to_string_pretty(&value).unwrap_or_default(),
+                    VALUE_SNIPPET_LEN,
+                );
+                let path = e.path().to_string();
+                let inner = e.into_inner();
+                Err(VkError::BadResponseSerde(format!(
+                    "{inner} at {path} | snippet: {snippet}"
+                )))
+            }
+        }
     }
 }
 
@@ -1350,5 +1373,75 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("\u{25B6} hello"));
         assert!(!out.contains("bye"));
+    }
+
+    #[tokio::test]
+    async fn run_query_missing_nodes_reports_path() {
+        use third_wheel::hyper::{
+            Body, Request, Response, Server, StatusCode,
+            service::{make_service_fn, service_fn},
+        };
+
+        let body = serde_json::json!({
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "pageInfo": { "hasNextPage": false, "endCursor": null }
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let make_svc = make_service_fn(move |_conn| {
+            let body = body.clone();
+            async move {
+                Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
+                    let body = body.clone();
+                    async move {
+                        Ok::<_, std::convert::Infallible>(
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("Content-Type", "application/json")
+                                .body(Body::from(body.clone()))
+                                .expect("failed to build HTTP response"),
+                        )
+                    }
+                }))
+            }
+        });
+
+        let server = Server::bind(
+            &"127.0.0.1:0"
+                .parse()
+                .expect("failed to parse server address"),
+        )
+        .serve(make_svc);
+        let addr = server.local_addr();
+        let join = tokio::spawn(server);
+
+        let client = GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None)
+            .expect("failed to create GraphQL client");
+
+        let repo = RepoInfo {
+            owner: "o".into(),
+            name: "r".into(),
+        };
+        let result = fetch_review_threads(&client, &repo, 1).await;
+        let err = result.expect_err("expected error");
+        let err_msg = format!("{err}");
+        assert!(
+            err_msg.contains("repository.pullRequest.reviewThreads"),
+            "Error should contain full JSON path"
+        );
+        assert!(
+            err_msg.contains("snippet:"),
+            "Error should contain JSON snippet"
+        );
+
+        join.abort();
+        let _ = join.await;
     }
 }
