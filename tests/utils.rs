@@ -7,6 +7,7 @@ use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{Request, Response, body::Incoming, service::service_fn};
 use hyper_util::{rt::TokioExecutor, server::conn::auto};
+use std::io::ErrorKind;
 use std::{
     net::SocketAddr,
     sync::{Arc, Mutex},
@@ -39,7 +40,7 @@ impl ShutdownHandle {
 /// # Panics
 ///
 /// Panics if the default response cannot be constructed.
-#[allow(
+#[expect(
     clippy::integer_division_remainder_used,
     reason = "tokio::select! uses % internally"
 )]
@@ -77,7 +78,13 @@ pub async fn start_mitm() -> Result<(SocketAddr, Handler, ShutdownHandle), std::
                     }
                     Err(e) => {
                         eprintln!("accept error: {e}");
-                        break;
+                        match e.kind() {
+                            ErrorKind::ConnectionAborted
+                            | ErrorKind::ConnectionReset
+                            | ErrorKind::Interrupted
+                            | ErrorKind::WouldBlock => {}
+                            _ => break,
+                        }
                     }
                 },
                 _ = &mut rx => break,

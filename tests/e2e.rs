@@ -14,7 +14,7 @@ use predicates::str::contains;
 use serde_json::Value;
 use std::fs;
 mod utils;
-use hyper::Response;
+use hyper::{Response, StatusCode};
 use utils::start_mitm;
 
 fn load_transcript(path: &str) -> Vec<String> {
@@ -38,7 +38,7 @@ async fn e2e_pr_42() {
     *handler.lock().expect("lock handler") = Box::new(move |_req| {
         let body = responses.next().unwrap_or_else(|| "{}".to_string());
         Response::builder()
-            .status(200)
+            .status(StatusCode::OK)
             .header("Content-Type", "application/json")
             .body(http_body_util::Full::from(body))
             .expect("build response")
@@ -71,7 +71,7 @@ async fn e2e_missing_nodes_reports_path() {
         })
         .to_string();
         Response::builder()
-            .status(200)
+            .status(StatusCode::OK)
             .header("Content-Type", "application/json")
             .body(http_body_util::Full::from(body))
             .expect("build response")
