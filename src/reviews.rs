@@ -28,7 +28,13 @@ struct ReviewData {
 #[serde(rename_all = "camelCase")]
 struct RepositoryReviews {
     #[serde(rename = "pullRequest")]
-    pull_request: ReviewConnection,
+    pull_request: PullRequestReviews,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PullRequestReviews {
+    reviews: ReviewConnection,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,7 +79,7 @@ pub async fn fetch_review_page(
             }),
         )
         .await?;
-    let conn = data.repository.pull_request;
+    let conn = data.repository.pull_request.reviews;
     Ok((conn.nodes, conn.page_info))
 }
 
