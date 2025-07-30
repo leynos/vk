@@ -1,4 +1,9 @@
-//! Helpers for fetching and displaying pull request reviews.
+//! Functions for retrieving pull request reviews and presenting them in the
+//! terminal.
+//!
+//! The module defines GraphQL query structures, pagination helpers and output
+//! formatting so callers can fetch review threads through the GitHub API and
+//! display only the latest review from each author using `termimad`.
 
 use crate::html::collapse_details;
 use chrono::{DateTime, Utc};
