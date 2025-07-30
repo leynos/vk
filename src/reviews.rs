@@ -1,13 +1,20 @@
 //! Helpers for fetching and displaying pull request reviews.
+#![allow(
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate,
+    reason = "docs omitted"
+)]
 
+use crate::api::{GraphQLClient, VkError};
 use crate::html::collapse_details;
+use crate::models::{PageInfo, User};
+use crate::references::RepoInfo;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
-use termimad::MadSkin;
-
-use crate::{GraphQLClient, PageInfo, RepoInfo, User, VkError};
 use std::collections::HashMap;
+use termimad::MadSkin;
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -82,7 +89,7 @@ pub async fn fetch_reviews(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<PullRequestReview>, VkError> {
-    crate::paginate(|c| fetch_review_page(client, repo, number, c)).await
+    crate::api::paginate(|c| fetch_review_page(client, repo, number, c)).await
 }
 
 pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview> {

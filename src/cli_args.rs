@@ -3,9 +3,9 @@
 //! Isolates clap derivations so lint expectations remain scoped, keeping
 //! `main.rs` focused on runtime logic.
 #![expect(non_snake_case, reason = "clap generates non-snake-case modules")]
-#![expect(unused_imports, reason = "clap derives import the struct internally")]
 
 use clap::Parser;
+use clap::Subcommand;
 use ortho_config::OrthoConfig;
 use serde::{Deserialize, Serialize};
 
@@ -67,5 +67,61 @@ pub struct IssueArgs {
 impl Default for IssueArgs {
     fn default() -> Self {
         Self { reference: None }
+    }
+}
+
+#[derive(Subcommand, Deserialize, Serialize, Clone, Debug)]
+pub enum Commands {
+    /// Show unresolved pull request comments
+    Pr(PrArgs),
+    /// Read a GitHub issue (todo)
+    Issue(IssueArgs),
+}
+
+#[derive(Parser)]
+#[command(
+    name = "vk",
+    about = "View Komments - show unresolved PR comments",
+    subcommand_required = true,
+    arg_required_else_help = true
+)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+    #[command(flatten)]
+    pub global: GlobalArgs,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_requires_subcommand() {
+        assert!(Cli::try_parse_from(["vk"]).is_err());
+    }
+
+    #[test]
+    fn pr_subcommand_parses() {
+        let cli = Cli::try_parse_from(["vk", "pr", "123"]).expect("parse cli");
+        match cli.command {
+            Commands::Pr(args) => assert_eq!(args.reference.as_deref(), Some("123")),
+            Commands::Issue(_) => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn issue_subcommand_parses() {
+        let cli = Cli::try_parse_from(["vk", "issue", "123"]).expect("parse cli");
+        match cli.command {
+            Commands::Issue(args) => assert_eq!(args.reference.as_deref(), Some("123")),
+            Commands::Pr(_) => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn cli_loads_repo_from_flag() {
+        let cli = Cli::try_parse_from(["vk", "--repo", "foo/bar", "pr", "1"]).expect("parse cli");
+        assert_eq!(cli.global.repo.as_deref(), Some("foo/bar"));
     }
 }

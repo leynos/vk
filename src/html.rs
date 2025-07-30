@@ -1,4 +1,10 @@
 //! HTML utilities for comment rendering.
+#![allow(
+    clippy::missing_errors_doc,
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate,
+    reason = "docs omitted"
+)]
 
 use html5ever::driver::ParseOpts;
 use html5ever::parse_document;
