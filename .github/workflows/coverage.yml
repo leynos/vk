@@ -1,33 +1,37 @@
-name: Coverage
+name: CI
 
 on:
   pull_request:
     branches: [main]
 
+env:
+  SHARED_ACTIONS_SHA: e48ed26d7f53f12f56eb7bcfdfdfe4d97065ea4c
+
 jobs:
-  coverage:
+  build-test:
     runs-on: ubuntu-latest
     env:
       CARGO_TERM_COLOR: always
-
+      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+      CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: leynos/shared-actions/.github/actions/setup-rust@${{ env.SHARED_ACTIONS_SHA }}
+      - name: Format
+        run: make check-fmt
+      - name: Lint
+        run: make lint
+      - id: generate-coverage
+        uses: leynos/shared-actions/.github/actions/generate-coverage@${{ env.SHARED_ACTIONS_SHA }}
         with:
-          components: llvm-tools-preview
-
-      - uses: taiki-e/install-action@cargo-llvm-cov@v2
-
-      - name: Generate coverage
-        run: |
-          cargo llvm-cov --workspace --all-features \
-                         --lcov --output-path lcov.info \
-                         --codecov --output-path codecov.json
-
-      - uses: codecov/codecov-action@v4
+          output-path: lcov.info
+          format: lcov
+      - name: Upload coverage data to CodeScene
+        env:
+          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+        if: ${{ env.CS_ACCESS_TOKEN != '' }}
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@v1.2.1
         with:
-          files: lcov.info,codecov.json
-          fail_ci_if_error: true
-          flags: unittests
-          verbose: true
+          format: lcov
+          access-token: ${{ env.CS_ACCESS_TOKEN }}
+          installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
