@@ -77,6 +77,9 @@ sequenceDiagram
 
 ## GraphQL Error Handling
 
+The diagram below illustrates how deserialisation errors surface the JSON path
+and a response snippet, helping developers quickly locate schema mismatches.
+
 ```mermaid
 sequenceDiagram
     participant Client as GraphQLClient

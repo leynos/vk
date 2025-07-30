@@ -1374,4 +1374,74 @@ mod tests {
         assert!(out.contains("\u{25B6} hello"));
         assert!(!out.contains("bye"));
     }
+
+    #[tokio::test]
+    async fn run_query_missing_nodes_reports_path() {
+        use third_wheel::hyper::{
+            Body, Request, Response, Server, StatusCode,
+            service::{make_service_fn, service_fn},
+        };
+
+        let body = serde_json::json!({
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "pageInfo": { "hasNextPage": false, "endCursor": null }
+                        }
+                    }
+                }
+            }
+        })
+        .to_string();
+
+        let make_svc = make_service_fn(move |_conn| {
+            let body = body.clone();
+            async move {
+                Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
+                    let body = body.clone();
+                    async move {
+                        Ok::<_, std::convert::Infallible>(
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("Content-Type", "application/json")
+                                .body(Body::from(body.clone()))
+                                .expect("failed to build HTTP response"),
+                        )
+                    }
+                }))
+            }
+        });
+
+        let server = Server::bind(
+            &"127.0.0.1:0"
+                .parse()
+                .expect("failed to parse server address"),
+        )
+        .serve(make_svc);
+        let addr = server.local_addr();
+        let join = tokio::spawn(server);
+
+        let client = GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None)
+            .expect("failed to create GraphQL client");
+
+        let repo = RepoInfo {
+            owner: "o".into(),
+            name: "r".into(),
+        };
+        let result = fetch_review_threads(&client, &repo, 1).await;
+        let err = result.expect_err("expected error");
+        let err_msg = format!("{err}");
+        assert!(
+            err_msg.contains("repository.pullRequest.reviewThreads"),
+            "Error should contain full JSON path"
+        );
+        assert!(
+            err_msg.contains("snippet:"),
+            "Error should contain JSON snippet"
+        );
+
+        join.abort();
+        let _ = join.await;
+    }
 }
