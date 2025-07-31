@@ -1,33 +1,33 @@
-name: Coverage
+name: CI
 
 on:
   pull_request:
     branches: [main]
 
 jobs:
-  coverage:
+  build-test:
     runs-on: ubuntu-latest
     env:
       CARGO_TERM_COLOR: always
-
+      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+      CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-
-      - uses: taiki-e/install-action@cargo-llvm-cov@v2
-
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@c6559452842af6a83b83429129dccaf910e34562
+      - name: Format
+        run: make check-fmt
+      - name: Lint
+        run: make lint
       - name: Generate coverage
-        run: |
-          cargo llvm-cov --workspace --all-features \
-                         --lcov --output-path lcov.info \
-                         --codecov --output-path codecov.json
-
-      - uses: codecov/codecov-action@v4
+        uses: leynos/shared-actions/.github/actions/generate-coverage@c6559452842af6a83b83429129dccaf910e34562
         with:
-          files: lcov.info,codecov.json
-          fail_ci_if_error: true
-          flags: unittests
-          verbose: true
+          output-path: lcov.info
+          format: lcov
+      - name: Upload coverage data to CodeScene
+        if: ${{ env.CS_ACCESS_TOKEN != '' }}
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@c6559452842af6a83b83429129dccaf910e34562
+        with:
+          format: lcov
+          access-token: ${{ env.CS_ACCESS_TOKEN }}
+          installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
