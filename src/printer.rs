@@ -1,9 +1,4 @@
 //! Output formatting helpers.
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    reason = "docs omitted"
-)]
 
 use crate::html::collapse_details;
 use crate::models::{ReviewComment, ReviewThread};
@@ -13,41 +8,50 @@ use termimad::MadSkin;
 /// Width of the line number gutter in diff output
 const GUTTER_WIDTH: usize = 5;
 
-pub fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Error> {
-    fn parse_diff_lines<'a, I>(
-        lines: I,
-        mut old_line: Option<i32>,
-        mut new_line: Option<i32>,
-    ) -> Vec<(Option<i32>, Option<i32>, String)>
-    where
-        I: Iterator<Item = &'a str>,
-    {
-        let mut parsed = Vec::new();
-        for l in lines {
-            if l.starts_with('+') {
-                parsed.push((None, new_line, l.to_owned()));
-                if let Some(ref mut n) = new_line {
-                    *n += 1;
-                }
-            } else if l.starts_with('-') {
-                parsed.push((old_line, None, l.to_owned()));
-                if let Some(ref mut o) = old_line {
-                    *o += 1;
-                }
-            } else {
-                let text = l.strip_prefix(' ').unwrap_or(l);
-                parsed.push((old_line, new_line, format!(" {text}")));
-                if let Some(ref mut o) = old_line {
-                    *o += 1;
-                }
-                if let Some(ref mut n) = new_line {
-                    *n += 1;
-                }
+fn parse_diff_lines<'a, I>(
+    lines: I,
+    mut old_line: Option<i32>,
+    mut new_line: Option<i32>,
+) -> Vec<(Option<i32>, Option<i32>, String)>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let mut parsed = Vec::new();
+    for l in lines {
+        if l.starts_with('+') {
+            parsed.push((None, new_line, l.to_owned()));
+            if let Some(ref mut n) = new_line {
+                *n += 1;
+            }
+        } else if l.starts_with('-') {
+            parsed.push((old_line, None, l.to_owned()));
+            if let Some(ref mut o) = old_line {
+                *o += 1;
+            }
+        } else {
+            let text = l.strip_prefix(' ').unwrap_or(l);
+            parsed.push((old_line, new_line, format!(" {text}")));
+            if let Some(ref mut o) = old_line {
+                *o += 1;
+            }
+            if let Some(ref mut n) = new_line {
+                *n += 1;
             }
         }
-        parsed
     }
+    parsed
+}
 
+/// Format a diff hunk, trimming context around the commented lines.
+///
+/// # Errors
+///
+/// Returns a formatting error if writing to the output string fails.
+///
+/// # Panics
+///
+/// Panics if the internal regex fails to compile.
+pub fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Error> {
     fn num_disp(num: i32) -> String {
         let mut s = num.to_string();
         if s.len() > GUTTER_WIDTH {
@@ -98,6 +102,11 @@ pub fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::
     Ok(out)
 }
 
+/// Write a single comment body with author information.
+///
+/// # Errors
+///
+/// Returns an error if writing to `out` fails.
 pub fn write_comment_body<W: std::io::Write>(
     mut out: W,
     skin: &MadSkin,
@@ -111,6 +120,11 @@ pub fn write_comment_body<W: std::io::Write>(
     Ok(())
 }
 
+/// Write a diff and associated comment body.
+///
+/// # Errors
+///
+/// Returns an error if writing to `out` fails.
 pub fn write_comment<W: std::io::Write>(
     mut out: W,
     skin: &MadSkin,
@@ -122,6 +136,11 @@ pub fn write_comment<W: std::io::Write>(
     Ok(())
 }
 
+/// Write an entire review thread to the given writer.
+///
+/// # Errors
+///
+/// Returns an error if writing to `out` fails.
 pub fn write_thread<W: std::io::Write>(
     mut out: W,
     skin: &MadSkin,
@@ -139,10 +158,16 @@ pub fn write_thread<W: std::io::Write>(
     Ok(())
 }
 
+/// Print a review thread to stdout.
+///
+/// # Errors
+///
+/// Returns an error if printing fails.
 pub fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
     write_thread(std::io::stdout().lock(), skin, thread)
 }
 
+/// Summarize comment counts per file.
 #[must_use]
 pub fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
     use std::collections::BTreeMap;
@@ -155,6 +180,11 @@ pub fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
     counts.into_iter().collect()
 }
 
+/// Write a human-readable summary of comment counts.
+///
+/// # Errors
+///
+/// Returns any I/O errors produced while writing.
 pub fn write_summary<W: std::io::Write>(
     mut out: W,
     summary: &[(String, usize)],
@@ -171,10 +201,12 @@ pub fn write_summary<W: std::io::Write>(
     Ok(())
 }
 
+/// Print a comment summary to stdout.
 pub fn print_summary(summary: &[(String, usize)]) {
     let _ = write_summary(std::io::stdout().lock(), summary);
 }
 
+/// Indicate that all output has been printed.
 pub fn print_end_banner() {
     println!("========== end of code review ==========");
 }

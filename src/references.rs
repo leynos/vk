@@ -1,13 +1,9 @@
 //! Helpers for parsing repository references.
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    reason = "docs omitted"
-)]
 
 use regex::Regex;
 use std::path::Path;
 use std::sync::LazyLock;
+use url::Url;
 
 use crate::api::VkError;
 
@@ -40,54 +36,70 @@ static GITHUB_RE: LazyLock<Regex> = LazyLock::new(|| {
     clippy::result_large_err,
     reason = "VkError has many variants but they are small"
 )]
-fn parse_reference(
-    input: &str,
-    default_repo: Option<&str>,
-    resource_type: ResourceType,
-) -> Result<(RepoInfo, u64), VkError> {
-    if let Ok(url) = url::Url::parse(input) {
-        if url.host_str() == Some("github.com") {
-            let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
-            let segments: Vec<_> = segments_iter.collect();
-            if segments.len() >= 4 {
-                let segment = segments.get(2).expect("length checked");
-                let allowed = resource_type.allowed_segments();
-                if allowed.contains(segment) {
-                    let owner = (*segments.first().expect("length checked")).to_owned();
-                    let repo_segment = segments.get(1).expect("length checked");
-                    let name = repo_segment
-                        .strip_suffix(".git")
-                        .unwrap_or(repo_segment)
-                        .to_owned();
-                    let number: u64 = segments
-                        .get(3)
-                        .expect("length checked")
-                        .parse()
-                        .map_err(|_| VkError::InvalidRef)?;
-                    return Ok((RepoInfo { owner, name }, number));
-                }
-                return Err(VkError::WrongResourceType {
-                    expected: allowed,
-                    found: (*segment).to_owned(),
-                });
-            }
-        }
-        Err(VkError::InvalidRef)
-    } else if let Ok(number) = input.parse::<u64>() {
-        let repo = default_repo
-            .and_then(repo_from_str)
-            .or_else(repo_from_fetch_head)
-            .ok_or(VkError::RepoNotFound)?;
-        Ok((repo, number))
-    } else {
-        Err(VkError::InvalidRef)
+fn parse_github_ref(input: &str, resource_type: ResourceType) -> Result<(RepoInfo, u64), VkError> {
+    let url = Url::parse(input).map_err(|_| VkError::InvalidRef)?;
+    if url.host_str() != Some("github.com") {
+        return Err(VkError::InvalidRef);
     }
+    let segments: Vec<_> = url.path_segments().ok_or(VkError::InvalidRef)?.collect();
+    if segments.len() < 4 {
+        return Err(VkError::InvalidRef);
+    }
+    let allowed = resource_type.allowed_segments();
+    let seg = *segments.get(2).ok_or(VkError::InvalidRef)?;
+    if !allowed.contains(&seg) {
+        return Err(VkError::WrongResourceType {
+            expected: allowed,
+            found: seg.to_string(),
+        });
+    }
+    let owner = (*segments.first().ok_or(VkError::InvalidRef)?).to_owned();
+    let repo_segment = segments.get(1).ok_or(VkError::InvalidRef)?;
+    let name = repo_segment
+        .strip_suffix(".git")
+        .unwrap_or(*repo_segment)
+        .to_owned();
+    let number = segments
+        .get(3)
+        .ok_or(VkError::InvalidRef)?
+        .parse()
+        .map_err(|_| VkError::InvalidRef)?;
+    Ok((RepoInfo { owner, name }, number))
 }
 
 #[expect(
     clippy::result_large_err,
     reason = "VkError has many variants but they are small"
 )]
+fn parse_reference(
+    input: &str,
+    default_repo: Option<&str>,
+    resource_type: ResourceType,
+) -> Result<(RepoInfo, u64), VkError> {
+    match parse_github_ref(input, resource_type) {
+        Ok(r) => return Ok(r),
+        Err(VkError::InvalidRef) => { /* fall through */ }
+        Err(e) => return Err(e),
+    }
+
+    let number = input.parse::<u64>().map_err(|_| VkError::InvalidRef)?;
+    let repo = default_repo
+        .and_then(repo_from_str)
+        .or_else(repo_from_fetch_head)
+        .ok_or(VkError::RepoNotFound)?;
+    Ok((repo, number))
+}
+
+#[expect(
+    clippy::result_large_err,
+    reason = "VkError has many variants but they are small"
+)]
+/// Parse an issue reference from a URL or bare number.
+///
+/// # Errors
+///
+/// Returns `VkError::InvalidRef` if the reference cannot be parsed or
+/// `VkError::RepoNotFound` if the repository is unknown.
 pub fn parse_issue_reference(
     input: &str,
     default_repo: Option<&str>,
@@ -99,6 +111,12 @@ pub fn parse_issue_reference(
     clippy::result_large_err,
     reason = "VkError has many variants but they are small"
 )]
+/// Parse a pull request reference from a URL or bare number.
+///
+/// # Errors
+///
+/// Returns `VkError::InvalidRef` if the reference cannot be parsed or
+/// `VkError::RepoNotFound` if the repository is unknown.
 pub fn parse_pr_reference(
     input: &str,
     default_repo: Option<&str>,
@@ -106,6 +124,9 @@ pub fn parse_pr_reference(
     parse_reference(input, default_repo, ResourceType::PullRequest)
 }
 
+/// Extract repository info from `.git/FETCH_HEAD` if present.
+///
+/// Returns `None` when the file is missing, unreadable, or no GitHub URL is found.
 pub fn repo_from_fetch_head() -> Option<RepoInfo> {
     let path = Path::new(".git/FETCH_HEAD");
     let content = std::fs::read_to_string(path).ok()?;
@@ -120,6 +141,11 @@ pub fn repo_from_fetch_head() -> Option<RepoInfo> {
     None
 }
 
+/// Parse `owner/repo` style strings into `RepoInfo`.
+///
+/// # Panics
+///
+/// Panics if the input contains a slash but not two segments.
 pub fn repo_from_str(repo: &str) -> Option<RepoInfo> {
     if let Some(caps) = GITHUB_RE.captures(repo) {
         let owner = caps.name("owner")?.as_str().to_owned();

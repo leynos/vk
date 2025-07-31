@@ -6,11 +6,13 @@ use clap::Parser;
 use vk::{
     Cli, Commands, GlobalArgs, IssueArgs, PrArgs, load_with_reference_fallback, run_issue, run_pr,
 };
-#[allow(clippy::result_large_err, reason = "VkError is large")]
+#[expect(clippy::result_large_err, reason = "VkError is large")]
 #[tokio::main]
 async fn main() -> Result<(), vk::VkError> {
     env_logger::init();
     let cli = Cli::parse();
+    // Pass only the binary name so OrthoConfig loads defaults without parsing
+    // the full CLI a second time.
     let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
     global.merge(cli.global);
     match cli.command {

@@ -1,10 +1,4 @@
 //! HTML utilities for comment rendering.
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::must_use_candidate,
-    reason = "docs omitted"
-)]
 
 use html5ever::driver::ParseOpts;
 use html5ever::parse_document;
@@ -25,6 +19,7 @@ use std::default::Default;
 /// let input = "<details><summary>hi</summary><p>hidden</p></details>";
 /// assert_eq!(collapse_details(input), "\u25B6 hi\n");
 /// ```
+#[must_use]
 pub fn collapse_details(input: &str) -> String {
     let dom = parse_document(RcDom::default(), ParseOpts::default()).one(input);
     let mut out = String::new();

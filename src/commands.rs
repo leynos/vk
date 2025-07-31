@@ -1,9 +1,4 @@
 //! High level command handlers.
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    reason = "docs omitted"
-)]
 
 use crate::api::{VkError, build_graphql_client, fetch_issue, fetch_review_threads};
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
@@ -16,6 +11,11 @@ use ortho_config::{OrthoConfig, OrthoError, load_and_merge_subcommand_for};
 use std::env;
 use termimad::MadSkin;
 
+/// Fetch and display unresolved comments for a pull request.
+///
+/// # Errors
+///
+/// Returns `VkError` if any API call fails.
 pub async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
@@ -47,13 +47,16 @@ pub async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     Ok(())
 }
 
+/// Detect whether the current locale uses UTF-8 encoding.
 #[must_use]
 pub fn locale_is_utf8() -> bool {
-    let re: regex::Regex = regex::Regex::new("(?i)\\bUTF-?8\\b").expect("valid regex");
+    use std::sync::LazyLock;
+    static UTF8_REGEX: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new("(?i)\\bUTF-?8\\b").expect("valid regex"));
     env::var("LC_ALL")
         .or_else(|_| env::var("LC_CTYPE"))
         .or_else(|_| env::var("LANG"))
-        .map(|v| re.is_match(&v))
+        .map(|v| UTF8_REGEX.is_match(&v))
         .unwrap_or(false)
 }
 
@@ -67,6 +70,12 @@ fn missing_reference(err: &FigmentError) -> bool {
     clippy::result_large_err,
     reason = "configuration loading errors can be verbose"
 )]
+/// Load configuration, falling back to CLI arguments when `reference` is missing.
+///
+/// # Errors
+///
+/// Returns `OrthoError` if configuration loading fails for any reason other
+/// than a missing `reference` field.
 pub fn load_with_reference_fallback<T>(cli_args: T) -> Result<T, OrthoError>
 where
     T: OrthoConfig + serde::Serialize + Default + clap::CommandFactory + Clone,
@@ -83,6 +92,11 @@ where
         Err(e) => Err(e),
     }
 }
+/// Display the contents of a GitHub issue.
+///
+/// # Errors
+///
+/// Returns `VkError` if fetching the issue fails.
 pub async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_issue_reference(reference, global.repo.as_deref())?;
@@ -107,10 +121,18 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
+    /// # Safety
+    ///
+    /// Modifies global environment variables. Only safe when tests are run
+    /// serially to avoid race conditions.
     fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
         unsafe { std::env::set_var(key, value) }
     }
 
+    /// # Safety
+    ///
+    /// Modifies global environment variables. Only safe when tests are run
+    /// serially to avoid race conditions.
     fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
         unsafe { std::env::remove_var(key) }
     }

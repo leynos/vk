@@ -1,9 +1,4 @@
 //! GraphQL client and query helpers.
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    reason = "docs omitted for brevity"
-)]
 
 use log::warn;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
@@ -18,6 +13,7 @@ use crate::models::{
 };
 use crate::references::RepoInfo;
 
+/// Default endpoint for GitHub's GraphQL API.
 pub const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
 #[derive(Error, Debug)]
@@ -71,6 +67,7 @@ struct GraphQlError {
     message: String,
 }
 
+/// A lightweight wrapper around `reqwest::Client` configured for GitHub's GraphQL API.
 pub struct GraphQLClient {
     client: reqwest::Client,
     headers: HeaderMap,
@@ -79,6 +76,17 @@ pub struct GraphQLClient {
 }
 
 impl GraphQLClient {
+    /// Create a client using the default GitHub endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` if the transcript file cannot be created.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// let client = vk::api::GraphQLClient::new("token", None).unwrap();
+    /// ```
     pub fn new(
         token: &str,
         transcript: Option<std::path::PathBuf>,
@@ -86,26 +94,42 @@ impl GraphQLClient {
         Self::with_endpoint(token, GITHUB_GRAPHQL_URL, transcript)
     }
 
+    /// Create a client targeting a custom endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` if the transcript file or HTTP client cannot
+    /// be created. The `endpoint` is useful for tests that mock the GitHub API.
     pub fn with_endpoint(
         token: &str,
         endpoint: &str,
         transcript: Option<std::path::PathBuf>,
     ) -> Result<Self, std::io::Error> {
-        let transcript = match transcript {
-            Some(p) => match std::fs::File::create(p) {
-                Ok(file) => Some(std::sync::Mutex::new(std::io::BufWriter::new(file))),
-                Err(e) => return Err(e),
-            },
-            None => None,
-        };
+        let transcript = transcript
+            .map(|p| {
+                std::fs::File::create(p)
+                    .map(|file| std::sync::Mutex::new(std::io::BufWriter::new(file)))
+            })
+            .transpose()?;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(std::io::Error::other)?;
         Ok(Self {
-            client: reqwest::Client::new(),
+            client,
             headers: build_headers(token),
             endpoint: endpoint.to_string(),
             transcript,
         })
     }
 
+    /// Execute a GraphQL query and deserialize the response.
+    ///
+    /// # Errors
+    ///
+    /// Returns `VkError` if the request fails or the response cannot be
+    /// deserialized.
     pub async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
     where
         V: serde::Serialize,
@@ -165,6 +189,11 @@ impl GraphQLClient {
     }
 }
 
+/// Construct HTTP headers for GitHub API requests.
+///
+/// # Panics
+///
+/// Panics if static strings fail to parse as header values.
 pub fn build_headers(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().expect("static string"));
@@ -187,6 +216,11 @@ pub fn build_headers(token: &str) -> HeaderMap {
     clippy::result_large_err,
     reason = "VkError has many variants but they are small"
 )]
+/// Build a `GraphQLClient` and fall back if transcript creation fails.
+///
+/// # Errors
+///
+/// Returns `VkError` if the client or transcript file cannot be created.
 pub fn build_graphql_client(
     token: &str,
     transcript: Option<&std::path::PathBuf>,
@@ -260,6 +294,14 @@ const ISSUE_QUERY: &str = r"
     }
 ";
 
+/// Retrieve all pages from a paginated GraphQL endpoint.
+///
+/// The `fetch` closure should request a single page and return the items along
+/// with pagination info.
+///
+/// # Errors
+///
+/// Propagates any `VkError` returned by the `fetch` closure.
 pub async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
 where
     F: FnMut(Option<String>) -> Fut,
@@ -299,6 +341,11 @@ async fn fetch_comment_page(
     Ok((conn.nodes, conn.page_info))
 }
 
+/// Fetch a GitHub issue by number.
+///
+/// # Errors
+///
+/// Returns `VkError` if the request or deserialisation fails.
 pub async fn fetch_issue(
     client: &GraphQLClient,
     repo: &RepoInfo,
@@ -338,6 +385,11 @@ async fn fetch_thread_page(
     Ok((conn.nodes, conn.page_info))
 }
 
+/// Retrieve all unresolved review threads for a pull request.
+///
+/// # Errors
+///
+/// Returns `VkError` if any API call fails.
 pub async fn fetch_review_threads(
     client: &GraphQLClient,
     repo: &RepoInfo,

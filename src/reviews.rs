@@ -1,10 +1,4 @@
 //! Helpers for fetching and displaying pull request reviews.
-#![allow(
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::must_use_candidate,
-    reason = "docs omitted"
-)]
 
 use crate::api::{GraphQLClient, VkError};
 use crate::html::collapse_details;
@@ -63,6 +57,11 @@ const REVIEWS_QUERY: &str = r"
     }
 ";
 
+/// Fetch a single page of reviews from GitHub.
+///
+/// # Errors
+///
+/// Returns `VkError` if the query fails.
 pub async fn fetch_review_page(
     client: &GraphQLClient,
     repo: &RepoInfo,
@@ -84,6 +83,11 @@ pub async fn fetch_review_page(
     Ok((conn.nodes, conn.page_info))
 }
 
+/// Fetch all reviews for the specified pull request.
+///
+/// # Errors
+///
+/// Returns `VkError` if any page fails to load.
 pub async fn fetch_reviews(
     client: &GraphQLClient,
     repo: &RepoInfo,
@@ -92,6 +96,8 @@ pub async fn fetch_reviews(
     crate::api::paginate(|c| fetch_review_page(client, repo, number, c)).await
 }
 
+/// Keep only the most recent review from each author.
+#[must_use]
 pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview> {
     let mut latest: HashMap<String, PullRequestReview> = HashMap::new();
     for r in reviews {
@@ -114,6 +120,11 @@ pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview>
     latest.into_values().collect()
 }
 
+/// Write a single review body to the provided writer.
+///
+/// # Errors
+///
+/// Returns an error if writing to `out` fails.
 pub fn write_review<W: std::io::Write>(
     mut out: W,
     skin: &MadSkin,
@@ -132,6 +143,7 @@ pub fn write_review<W: std::io::Write>(
     Ok(())
 }
 
+/// Print multiple reviews to stdout.
 pub fn print_reviews(skin: &MadSkin, reviews: &[PullRequestReview]) {
     for r in reviews {
         if let Err(e) = write_review(std::io::stdout().lock(), skin, r) {
