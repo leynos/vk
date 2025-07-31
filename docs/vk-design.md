@@ -47,7 +47,8 @@ their purpose and merge semantics are clear to downstream users.
 
 Networking logic resides in [src/api/mod.rs](../src/api/mod.rs). It exposes the
 `GraphQLClient` alongside the `run_query` helper and pagination utilities used
-throughout the application.
+throughout the application. The `paginate` helper loops until `PageInfo`
+indicates completion, discarding any items fetched before an error occurs.
 
 ## Utility
 
