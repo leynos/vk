@@ -5,11 +5,11 @@
 //! multiple comments on the same diff, the diff is shown only once.
 //! After all comments are printed, the tool displays an `end of code review`
 //! banner so calling processes know the output has finished.
-mod api;
+pub mod api;
 mod cli_args;
 mod html;
 mod reviews;
-use crate::api::GraphQLClient;
+pub use crate::api::{GraphQLClient, paginate};
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use crate::html::collapse_details;
 use crate::reviews::{fetch_reviews, latest_reviews, print_reviews};
@@ -70,7 +70,7 @@ impl ResourceType {
 }
 
 #[derive(Error, Debug)]
-enum VkError {
+pub enum VkError {
     #[error("unable to determine repository")]
     RepoNotFound,
     #[error("request failed: {0}")]
@@ -187,7 +187,7 @@ struct ReviewComment {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct PageInfo {
+pub struct PageInfo {
     #[serde(rename = "hasNextPage")]
     has_next_page: bool,
     #[serde(rename = "endCursor")]
@@ -277,12 +277,9 @@ async fn fetch_comment_page(
     id: &str,
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewComment>, PageInfo), VkError> {
-    let wrapper: CommentNodeWrapper = api::run_query(
-        client,
-        COMMENT_QUERY,
-        json!({ "id": id, "cursor": cursor.clone() }),
-    )
-    .await?;
+    let wrapper: CommentNodeWrapper = client
+        .run_query(COMMENT_QUERY, json!({ "id": id, "cursor": cursor.clone() }))
+        .await?;
     let conn = wrapper
         .node
         .ok_or_else(|| {
@@ -301,16 +298,16 @@ async fn fetch_issue(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Issue, VkError> {
-    let data: IssueData = api::run_query(
-        client,
-        ISSUE_QUERY,
-        json!({
-            "owner": repo.owner.as_str(),
-            "name": repo.name.as_str(),
-            "number": number
-        }),
-    )
-    .await?;
+    let data: IssueData = client
+        .run_query(
+            ISSUE_QUERY,
+            json!({
+                "owner": repo.owner.as_str(),
+                "name": repo.name.as_str(),
+                "number": number
+            }),
+        )
+        .await?;
     Ok(data.repository.issue)
 }
 
@@ -320,17 +317,17 @@ async fn fetch_thread_page(
     number: u64,
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewThread>, PageInfo), VkError> {
-    let data: ThreadData = api::run_query(
-        client,
-        THREADS_QUERY,
-        json!({
-            "owner": repo.owner.as_str(),
-            "name": repo.name.as_str(),
-            "number": number,
-            "cursor": cursor,
-        }),
-    )
-    .await?;
+    let data: ThreadData = client
+        .run_query(
+            THREADS_QUERY,
+            json!({
+                "owner": repo.owner.as_str(),
+                "name": repo.name.as_str(),
+                "number": number,
+                "cursor": cursor,
+            }),
+        )
+        .await?;
     let conn = data.repository.pull_request.review_threads;
     Ok((conn.nodes, conn.page_info))
 }
@@ -340,8 +337,7 @@ async fn fetch_review_threads(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
-    let mut threads =
-        api::paginate(|cursor| fetch_thread_page(client, repo, number, cursor)).await?;
+    let mut threads = paginate(|cursor| fetch_thread_page(client, repo, number, cursor)).await?;
     threads.retain(|t| !t.is_resolved);
 
     for thread in &mut threads {
@@ -357,7 +353,7 @@ async fn fetch_review_threads(
         );
         let mut comments = initial.nodes;
         if initial.page_info.has_next_page {
-            let more = api::paginate(|c| fetch_comment_page(client, &thread.id, c)).await?;
+            let more = paginate(|c| fetch_comment_page(client, &thread.id, c)).await?;
             comments.extend(more);
         }
         thread.comments = CommentConnection {
