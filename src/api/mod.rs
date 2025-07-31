@@ -204,7 +204,8 @@ where
 /// Retrieve all pages from a cursor-based connection.
 ///
 /// The `fetch` closure is called repeatedly with the current cursor until the
-/// [`PageInfo`] object indicates no further pages remain.
+/// [`PageInfo`] object indicates no further pages remain. Items fetched before
+/// an error occurs are discarded.
 pub async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
 where
     F: FnMut(Option<String>) -> Fut,
