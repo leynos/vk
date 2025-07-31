@@ -8,11 +8,12 @@
 mod api;
 mod cli_args;
 mod html;
+mod printer;
 mod reviews;
 use crate::api::GraphQLClient;
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
-use crate::html::collapse_details;
-use crate::reviews::{fetch_reviews, latest_reviews, print_reviews};
+use crate::printer::{print_reviews, write_thread};
+use crate::reviews::{fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
 use log::{error, warn};
@@ -469,72 +470,6 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
     Ok(out)
 }
 
-/// Format the body of a single review comment.
-///
-/// The formatted output includes the author's login in bold followed by the
-/// markdown-rendered comment text and a trailing newline.
-///
-/// * `out` - Destination implementing [`Write`]
-/// * `skin` - Skin used for markdown formatting
-/// * `comment` - Review comment to display
-fn write_comment_body<W: std::io::Write>(
-    mut out: W,
-    skin: &MadSkin,
-    comment: &ReviewComment,
-) -> anyhow::Result<()> {
-    let author = comment.author.as_ref().map_or("", |u| u.login.as_str());
-    writeln!(out, "\u{1f4ac}  \x1b[1m{author}\x1b[0m wrote:")?;
-    let body = collapse_details(&comment.body);
-    let _ = skin.write_text_on(&mut out, &body);
-    writeln!(out)?;
-    Ok(())
-}
-
-/// Print a single review comment including its diff hunk.
-///
-/// The diff is emitted first, followed by the comment body formatted using
-/// [`write_comment_body`].
-///
-/// * `out` - Destination implementing [`Write`]
-/// * `skin` - Skin used for markdown formatting
-/// * `comment` - Review comment to display
-fn write_comment<W: std::io::Write>(
-    mut out: W,
-    skin: &MadSkin,
-    comment: &ReviewComment,
-) -> anyhow::Result<()> {
-    let diff = format_comment_diff(comment)?;
-    write!(out, "{diff}")?;
-    write_comment_body(&mut out, skin, comment)?;
-    Ok(())
-}
-
-/// Write all comments in a review thread, showing the diff only once.
-///
-/// The first comment is printed via [`write_comment`]. Subsequent comments omit
-/// the diff and are printed with [`write_comment_body`]. Each comment URL is
-/// appended on its own line.
-///
-/// * `out` - Destination implementing [`Write`]
-/// * `skin` - Skin used for markdown formatting
-/// * `thread` - Review thread to display
-fn write_thread<W: std::io::Write>(
-    mut out: W,
-    skin: &MadSkin,
-    thread: &ReviewThread,
-) -> anyhow::Result<()> {
-    let mut iter = thread.comments.nodes.iter();
-    if let Some(first) = iter.next() {
-        write_comment(&mut out, skin, first)?;
-        writeln!(out, "{}", first.url)?;
-        for c in iter {
-            write_comment_body(&mut out, skin, c)?;
-            writeln!(out, "{}", c.url)?;
-        }
-    }
-    Ok(())
-}
-
 /// Print a review thread to stdout.
 ///
 /// This simply calls [`write_thread`] with a locked `stdout` handle.
@@ -825,7 +760,8 @@ fn locale_is_utf8() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reviews::{PullRequestReview, write_review};
+    use crate::printer::{write_comment_body, write_review, write_thread};
+    use crate::reviews::PullRequestReview;
     use chrono::Utc;
     use rstest::*;
     use std::fmt::Write;
