@@ -4,12 +4,6 @@ on:
   pull_request:
     branches: [main]
 
-variables:
-  # This SHA pins shared composite actions to a specific commit for
-  # reproducibility. Update it manually when bumping shared-actions to
-  # guarantee consistent workflow behaviour.
-  SHARED_ACTIONS_SHA: e48ed26d7f53f12f56eb7bcfdfdfe4d97065ea4c
-
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -20,19 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@${{ vars.SHARED_ACTIONS_SHA }}
+        uses: leynos/shared-actions/.github/actions/setup-rust@e48ed26d7f53f12f56eb7bcfdfdfe4d97065ea4c
       - name: Format
         run: make check-fmt
       - name: Lint
         run: make lint
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@${{ vars.SHARED_ACTIONS_SHA }}
+        uses: leynos/shared-actions/.github/actions/generate-coverage@e48ed26d7f53f12f56eb7bcfdfdfe4d97065ea4c
         with:
           output-path: lcov.info
           format: lcov
       - name: Upload coverage data to CodeScene
         if: ${{ env.CS_ACCESS_TOKEN != '' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@v1.2.1
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@e48ed26d7f53f12f56eb7bcfdfdfe4d97065ea4c
         with:
           format: lcov
           access-token: ${{ env.CS_ACCESS_TOKEN }}
