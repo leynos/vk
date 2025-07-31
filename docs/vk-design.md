@@ -45,10 +45,10 @@ focused on orchestrating API calls and printing results. The public
 `GlobalArgs`, `PrArgs`, and `IssueArgs` structures are fully documented so
 their purpose and merge semantics are clear to downstream users.
 
-Networking logic resides in [src/api/mod.rs](../src/api/mod.rs) and is re-
-exported at the crate root. The module exposes the `GraphQLClient` with a
-`run_query` method, along with the `paginate` helper used throughout the
-application.
+Networking logic resides in [src/api/mod.rs](../src/api/mod.rs). It exposes the
+`GraphQLClient` alongside the `run_query` helper and pagination utilities used
+throughout the application. The `paginate` helper loops until `PageInfo`
+indicates completion, discarding any items fetched before an error occurs.
 
 ## Utility
 
