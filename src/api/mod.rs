@@ -30,7 +30,7 @@ fn snippet(text: &str, max: usize) -> String {
 }
 
 #[derive(Debug, Deserialize)]
-struct GraphQlResponse<T> {
+struct GraphQLResponse<T> {
     data: Option<T>,
     errors: Option<Vec<GraphQlError>>,
 }
@@ -71,7 +71,7 @@ fn build_headers(token: &str) -> HeaderMap {
 ///
 /// The client handles authentication headers and optional request
 /// transcription for debugging.
-pub(crate) struct GraphQLClient {
+pub struct GraphQLClient {
     client: reqwest::Client,
     headers: HeaderMap,
     endpoint: String,
@@ -83,7 +83,11 @@ impl GraphQLClient {
     ///
     /// The optional `transcript` path records each request and response
     /// for troubleshooting failed queries.
-    pub(crate) fn new(
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
+    pub fn new(
         token: &str,
         transcript: Option<std::path::PathBuf>,
     ) -> Result<Self, std::io::Error> {
@@ -96,7 +100,11 @@ impl GraphQLClient {
     ///
     /// This is primarily used in tests to point the client at a mock
     /// server.
-    pub(crate) fn with_endpoint(
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
+    pub fn with_endpoint(
         token: &str,
         endpoint: &str,
         transcript: Option<std::path::PathBuf>,
@@ -116,7 +124,13 @@ impl GraphQLClient {
         })
     }
 
-    async fn run_query_impl<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
+    /// Execute a GraphQL query using this client.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`VkError`] if the request fails or the response cannot be
+    /// deserialised.
+    pub async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
     where
         V: serde::Serialize,
         T: DeserializeOwned,
@@ -154,7 +168,7 @@ impl GraphQLClient {
                 Err(_) => warn!("failed to lock transcript"),
             }
         }
-        let resp: GraphQlResponse<serde_json::Value> =
+        let resp: GraphQLResponse<serde_json::Value> =
             serde_json::from_str(&body).map_err(|e| {
                 let snippet = snippet(&body, BODY_SNIPPET_LEN);
                 VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}"))
@@ -185,26 +199,14 @@ impl GraphQLClient {
     }
 }
 
-/// Run a GraphQL query against GitHub.
-///
-/// This helper delegates to [`GraphQLClient`] and surfaces any API or
-/// deserialisation errors via [`VkError`].
-pub async fn run_query<V, T>(
-    client: &GraphQLClient,
-    query: &str,
-    variables: V,
-) -> Result<T, VkError>
-where
-    V: serde::Serialize,
-    T: DeserializeOwned,
-{
-    client.run_query_impl(query, variables).await
-}
-
 /// Retrieve all pages from a cursor-based connection.
 ///
 /// The `fetch` closure is called repeatedly with the current cursor until the
 /// [`PageInfo`] object indicates no further pages remain.
+///
+/// # Errors
+///
+/// Propagates any [`VkError`] returned by the `fetch` closure.
 pub async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
 where
     F: FnMut(Option<String>) -> Fut,
