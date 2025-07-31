@@ -1,4 +1,9 @@
 //! Functions for retrieving pull-request reviews and presenting them in the terminal.
+#![allow(
+    clippy::missing_errors_doc,
+    clippy::must_use_candidate,
+    reason = "internal helpers"
+)]
 //!
 //! The module defines GraphQL query structures, pagination helpers, and output
 //! formatting so callers can fetch review threads through the GitHub API, then
@@ -92,7 +97,7 @@ pub async fn fetch_reviews(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<PullRequestReview>, VkError> {
-    crate::paginate(|c| fetch_review_page(client, repo, number, c)).await
+    crate::api::paginate(|c| fetch_review_page(client, repo, number, c)).await
 }
 
 pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview> {

@@ -19,6 +19,7 @@ use std::default::Default;
 /// let input = "<details><summary>hi</summary><p>hidden</p></details>";
 /// assert_eq!(collapse_details(input), "\u25B6 hi\n");
 /// ```
+#[must_use]
 pub fn collapse_details(input: &str) -> String {
     let dom = parse_document(RcDom::default(), ParseOpts::default()).one(input);
     let mut out = String::new();
