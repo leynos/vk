@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
 
-env:
+variables:
   # This SHA pins shared composite actions to a specific commit for
   # reproducibility. Update it manually when bumping shared-actions to
   # guarantee consistent workflow behaviour.
@@ -19,12 +19,13 @@ jobs:
       CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 }}
     steps:
       - uses: actions/checkout@v4
-      - uses: leynos/shared-actions/.github/actions/setup-rust@${{ vars.SHARED_ACTIONS_SHA }}
+      - name: Setup Rust
+        uses: leynos/shared-actions/.github/actions/setup-rust@${{ vars.SHARED_ACTIONS_SHA }}
       - name: Format
         run: make check-fmt
       - name: Lint
         run: make lint
-      - id: generate-coverage
+      - name: Generate coverage
         uses: leynos/shared-actions/.github/actions/generate-coverage@${{ vars.SHARED_ACTIONS_SHA }}
         with:
           output-path: lcov.info
