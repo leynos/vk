@@ -568,13 +568,18 @@ fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Erro
         format!("{s:>GUTTER_WIDTH$}")
     }
 
-    let mut lines_iter = comment.diff_hunk.lines();
+    let diff_lines: Vec<&str> = comment
+        .diff_hunk
+        .lines()
+        .map(|l| l.trim_end_matches('\r'))
+        .collect();
+    let mut lines_iter = diff_lines.iter().copied();
     let Some(header) = lines_iter.next() else {
         return Ok(String::new());
     };
 
     let lines: Vec<(Option<i32>, Option<i32>, String)> = HUNK_RE.captures(header).map_or_else(
-        || parse_diff_lines(comment.diff_hunk.lines(), None, None),
+        || parse_diff_lines(diff_lines.iter().copied(), None, None),
         |caps| {
             let old_start: i32 = caps
                 .name("old")
