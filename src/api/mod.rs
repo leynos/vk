@@ -1,0 +1,224 @@
+//! GraphQL client utilities and pagination helpers.
+//!
+//! This module wraps the GitHub GraphQL API, providing a `GraphQLClient`
+//! with convenient functions for issuing queries. It also exposes the
+//! `paginate` helper used throughout the binary for fetching all pages of
+//! a cursor-based connection.
+
+use log::warn;
+use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde_json::json;
+use std::env;
+
+use crate::VkError;
+
+const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
+
+const BODY_SNIPPET_LEN: usize = 500;
+const VALUE_SNIPPET_LEN: usize = 200;
+
+fn snippet(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        text.to_string()
+    } else {
+        let mut out = text.chars().take(max).collect::<String>();
+        out.push_str("...");
+        out
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphQlResponse<T> {
+    data: Option<T>,
+    errors: Option<Vec<GraphQlError>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GraphQlError {
+    message: String,
+}
+
+fn handle_graphql_errors(errors: Vec<GraphQlError>) -> VkError {
+    let msg = errors
+        .into_iter()
+        .map(|e| e.message)
+        .collect::<Vec<_>>()
+        .join(", ");
+    VkError::ApiErrors(msg)
+}
+
+fn build_headers(token: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, "vk".parse().expect("static string"));
+    headers.insert(
+        ACCEPT,
+        "application/vnd.github+json"
+            .parse()
+            .expect("static string"),
+    );
+    if !token.is_empty() {
+        headers.insert(
+            AUTHORIZATION,
+            format!("Bearer {token}").parse().expect("valid header"),
+        );
+    }
+    headers
+}
+
+/// Client for communicating with the GitHub GraphQL API.
+///
+/// The client handles authentication headers and optional request
+/// transcription for debugging.
+pub(crate) struct GraphQLClient {
+    client: reqwest::Client,
+    headers: HeaderMap,
+    endpoint: String,
+    transcript: Option<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>,
+}
+
+impl GraphQLClient {
+    /// Create a client using the standard GitHub endpoint.
+    ///
+    /// The optional `transcript` path records each request and response
+    /// for troubleshooting failed queries.
+    pub(crate) fn new(
+        token: &str,
+        transcript: Option<std::path::PathBuf>,
+    ) -> Result<Self, std::io::Error> {
+        let endpoint =
+            env::var("GITHUB_GRAPHQL_URL").unwrap_or_else(|_| GITHUB_GRAPHQL_URL.to_string());
+        Self::with_endpoint(token, &endpoint, transcript)
+    }
+
+    /// Create a client targeting a custom API endpoint.
+    ///
+    /// This is primarily used in tests to point the client at a mock
+    /// server.
+    pub(crate) fn with_endpoint(
+        token: &str,
+        endpoint: &str,
+        transcript: Option<std::path::PathBuf>,
+    ) -> Result<Self, std::io::Error> {
+        let transcript = match transcript {
+            Some(p) => match std::fs::File::create(p) {
+                Ok(file) => Some(std::sync::Mutex::new(std::io::BufWriter::new(file))),
+                Err(e) => return Err(e),
+            },
+            None => None,
+        };
+        Ok(Self {
+            client: reqwest::Client::new(),
+            headers: build_headers(token),
+            endpoint: endpoint.to_string(),
+            transcript,
+        })
+    }
+
+    async fn run_query_impl<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
+    where
+        V: serde::Serialize,
+        T: DeserializeOwned,
+    {
+        let payload = json!({ "query": query, "variables": &variables });
+        let ctx = serde_json::to_string(&payload).unwrap_or_default();
+        let response = self
+            .client
+            .post(&self.endpoint)
+            .headers(self.headers.clone())
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| VkError::RequestContext {
+                context: ctx.clone(),
+                source: e,
+            })?;
+        let body = response.text().await.map_err(|e| VkError::RequestContext {
+            context: ctx.clone(),
+            source: e,
+        })?;
+        if let Some(t) = &self.transcript {
+            use std::io::Write as _;
+            match t.lock() {
+                Ok(mut f) => {
+                    if let Err(e) = writeln!(
+                        f,
+                        "{}",
+                        serde_json::to_string(&json!({ "request": payload, "response": body }))
+                            .unwrap_or_default()
+                    ) {
+                        warn!("failed to write transcript: {e}");
+                    }
+                }
+                Err(_) => warn!("failed to lock transcript"),
+            }
+        }
+        let resp: GraphQlResponse<serde_json::Value> =
+            serde_json::from_str(&body).map_err(|e| {
+                let snippet = snippet(&body, BODY_SNIPPET_LEN);
+                VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}"))
+            })?;
+
+        let resp_debug = format!("{resp:?}");
+        if let Some(errs) = resp.errors {
+            return Err(handle_graphql_errors(errs));
+        }
+
+        let value = resp.data.ok_or_else(|| {
+            VkError::BadResponse(format!("Missing data in response: {resp_debug}"))
+        })?;
+        match serde_path_to_error::deserialize::<_, T>(value.clone()) {
+            Ok(v) => Ok(v),
+            Err(e) => {
+                let snippet = snippet(
+                    &serde_json::to_string_pretty(&value).unwrap_or_default(),
+                    VALUE_SNIPPET_LEN,
+                );
+                let path = e.path().to_string();
+                let inner = e.into_inner();
+                Err(VkError::BadResponseSerde(format!(
+                    "{inner} at {path} | snippet: {snippet}"
+                )))
+            }
+        }
+    }
+}
+
+/// Run a GraphQL query against GitHub.
+///
+/// This helper delegates to [`GraphQLClient`] and surfaces any API or
+/// deserialisation errors via [`VkError`].
+pub async fn run_query<V, T>(
+    client: &GraphQLClient,
+    query: &str,
+    variables: V,
+) -> Result<T, VkError>
+where
+    V: serde::Serialize,
+    T: DeserializeOwned,
+{
+    client.run_query_impl(query, variables).await
+}
+
+/// Retrieve all pages from a cursor-based connection.
+///
+/// The `fetch` closure is called repeatedly with the current cursor until the
+/// [`PageInfo`] object indicates no further pages remain.
+pub async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
+where
+    F: FnMut(Option<String>) -> Fut,
+    Fut: std::future::Future<Output = Result<(Vec<T>, crate::PageInfo), VkError>>,
+{
+    let mut items = Vec::new();
+    let mut cursor = None;
+    loop {
+        let (mut page, info) = fetch(cursor.clone()).await?;
+        items.append(&mut page);
+        if !info.has_next_page {
+            break;
+        }
+        cursor = info.end_cursor;
+    }
+    Ok(items)
+}

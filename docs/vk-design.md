@@ -45,6 +45,10 @@ focused on orchestrating API calls and printing results. The public
 `GlobalArgs`, `PrArgs`, and `IssueArgs` structures are fully documented so
 their purpose and merge semantics are clear to downstream users.
 
+Networking logic resides in [src/api/mod.rs](../src/api/mod.rs). It exposes the
+`GraphQLClient` alongside the `run_query` helper and pagination utilities used
+throughout the application.
+
 ## Utility
 
 Splitting the printing logic into reusable `write_*` functions enables testing

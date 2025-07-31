@@ -10,7 +10,8 @@ use serde::Deserialize;
 use serde_json::json;
 use termimad::MadSkin;
 
-use crate::{GraphQLClient, PageInfo, RepoInfo, User, VkError};
+use crate::api::{self, GraphQLClient};
+use crate::{PageInfo, RepoInfo, User, VkError};
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -72,17 +73,17 @@ pub async fn fetch_review_page(
     number: u64,
     cursor: Option<String>,
 ) -> Result<(Vec<PullRequestReview>, PageInfo), VkError> {
-    let data: ReviewData = client
-        .run_query(
-            REVIEWS_QUERY,
-            json!({
-                "owner": repo.owner.as_str(),
-                "name": repo.name.as_str(),
-                "number": number,
-                "cursor": cursor,
-            }),
-        )
-        .await?;
+    let data: ReviewData = api::run_query(
+        client,
+        REVIEWS_QUERY,
+        json!({
+            "owner": repo.owner.as_str(),
+            "name": repo.name.as_str(),
+            "number": number,
+            "cursor": cursor,
+        }),
+    )
+    .await?;
     let conn = data.repository.pull_request.reviews;
     Ok((conn.nodes, conn.page_info))
 }
@@ -92,7 +93,7 @@ pub async fn fetch_reviews(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<PullRequestReview>, VkError> {
-    crate::paginate(|c| fetch_review_page(client, repo, number, c)).await
+    api::paginate(|c| fetch_review_page(client, repo, number, c)).await
 }
 
 pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview> {
