@@ -1,4 +1,3 @@
-
 # A Comprehensive Guide to End-to-End Testing for the `vk` Command-Line Tool
 
 <!-- markdownlint-disable MD033 MD038 -->
@@ -154,19 +153,17 @@ tempfile = "3.8"
 
 The table below outlines the purpose of each dependency within the test suite.
 
-| Crate       | Recommended Version | Purpose in Test Suite                                                                                                                               |
-| ----------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| assert_cmd  | ~2.0                | The core test orchestrator for executing the vk binary and asserting on its behavior.8                                                              |
-| insta       | ~1.34               | For snapshot testing of the styled terminal output, handling the complexity of termimad.17 The                                                      | redactions feature is enabled to handle dynamic data. |
-| third-wheel | ~0.6                | An embedded MITM proxy to intercept and mock GitHub API calls, ensuring deterministic tests.18                                                      |
-| tokio       | ~1.0                | An async runtime required to run the third-wheel mock server concurrently with the test logic. The full feature flag is recommended for simplicity. |
-| serde_json  | ~1.0                | A utility for loading and manipulating the JSON fixture files used as mock API responses.                                                           |
-| tempfile    | ~3.8                | For creating temporary configuration files and directories to test vk's configuration logic in an isolated manner.19                                |
-|  |
+| Crate       | Recommended Version | Purpose in Test Suite                                                                                                                                |
+| ----------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| assert_cmd  | ~2.0                | The core test orchestrator for executing the vk binary and asserting on its behaviour.8                                                              |
+| insta       | ~1.34               | For snapshot testing of the styled terminal output, handling the complexity of termimad.17 The redactions feature is enabled to handle dynamic data. |
+| third-wheel | ~0.6                | An embedded MITM proxy to intercept and mock GitHub API calls, ensuring deterministic tests.18                                                       |
+| tokio       | ~1.0                | An async runtime required to run the third-wheel mock server concurrently with the test logic. The full feature flag is recommended for simplicity.  |
+| serde_json  | ~1.0                | A utility for loading and manipulating the JSON fixture files used as mock API responses.                                                            |
+| tempfile    | ~3.8                | For creating temporary configuration files and directories to test vk's configuration logic in an isolated manner.19                                 |
 
 ### Test File Organization: Following Rust Conventions
 
-Adhering to community conventions makes a project easier to navigate and
 maintain. Rust has a well-established convention for test organization:
 integration tests are placed in a top-level `tests/` directory, which resides
 alongside the `src/` directory.16 Each Rust file (
@@ -789,8 +786,8 @@ async fn test_pr_command_with_single_comment_renders_correctly() {
     // test uses a consistent and realistic data payload.
     let mock_response_body = load_fixture("pr_with_comments.json");
 
-    // Configure the mock server's behavior for this specific test.
-    // We lock the handler and provide a closure that will be executed for
+    // Configure the mock server's behaviour for this test.
+    // The handler mutex is locked and a closure assigned for
     // any incoming request.
     *handler.lock().unwrap() = Box::new(move |_req: &Request<Body>| {
         Response::builder()
@@ -809,11 +806,11 @@ async fn test_pr_command_with_single_comment_renders_correctly() {
 
     // Configure the command's environment and arguments.
     cmd
-        // Redirect vk to our mock API server. This is the crucial step
-        // for isolating the test from the network.
+        // Redirect vk to the mock API server. This step isolates the
+        // test from the network.
        .env("GITHUB_GRAPHQL_URL", &mock_server_url)
         // Provide a dummy token, as the application may require one,
-        // even if our mock server doesn't validate it.
+        // even if the mock server does not validate it.
        .env("GITHUB_TOKEN", "dummy_token")
         // Pass the command-line arguments to simulate the user's action.
        .args(&["pr", "https://github.com/leynos/vk/pull/1"]);
@@ -1052,68 +1049,68 @@ foundation of quality and confidence for future development.
  1. assert-rs/assert_cmd - Command - GitHub, accessed on July 20, 2025,
     <https://github.com/assert-rs/assert_cmd>
 
- 2. campbellC/third-wheel: A rust implementation of a man-in … - GitHub,
+ 1. campbellC/third-wheel: A rust implementation of a man-in … - GitHub,
     accessed on July 20, 2025, <https://github.com/campbellC/third-wheel>
 
- 3. Overview | Insta Snapshots, accessed on July 20, 2025,
+ 1. Overview | Insta Snapshots, accessed on July 20, 2025,
     <https://insta.rs/docs/>
 
- 4. insta - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+ 1. insta - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/insta>
 
- 5. Insta Snapshots, accessed on July 20, 2025, <https://insta.rs/>
+ 1. Insta Snapshots, accessed on July 20, 2025, <https://insta.rs/>
 
- 6. Testing - Command Line Applications in Rust, accessed on July 20, 2025,
+ 1. Testing - Command Line Applications in Rust, accessed on July 20, 2025,
     <https://rust-cli.github.io/book/tutorial/testing.html>
 
- 7. Test Organization - The Rust Programming Language, accessed on July 20,
+ 1. Test Organization - The Rust Programming Language, accessed on July 20,
     2025, <https://doc.rust-lang.org/book/ch11-03-test-organization.html>
 
- 8. insta - [crates.io](http://crates.io): Rust Package Registry, accessed on
+ 1. insta - [crates.io](http://crates.io): Rust Package Registry, accessed on
     July 20, 2025, <https://crates.io/crates/insta>
 
- 9. third-wheel - [crates.io](http://crates.io): Rust Package Registry,
+ 1. third-wheel - [crates.io](http://crates.io): Rust Package Registry,
     accessed on July 20, 2025, <https://crates.io/crates/third-wheel>
 
-10. tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+ 1. tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/tempfile>
 
-11. Should unit tests really be put in the same file as the source? - Rust
+ 1. Should unit tests really be put in the same file as the source? - Rust
     Users Forum, accessed on July 20, 2025,
     <https://users.rust-lang.org/t/should-unit-tests-really-be-put-in-the-same-file-as-the-source/62153>
 
-12. Skeleton And Principles For A Maintainable Test Suite | Luca Palmieri,
+ 1. Skeleton And Principles For A Maintainable Test Suite | Luca Palmieri,
     accessed on July 20, 2025,
     <https://lpalmieri.com/posts/skeleton-and-principles-for-a-maintainable-test-suite/>
 
-13. Command in assert_cmd::cmd - Rust - [Docs.rs](http://Docs.rs), accessed on
+ 1. Command in assert_cmd::cmd - Rust - [Docs.rs](http://Docs.rs), accessed on
     July 20, 2025,
     <https://docs.rs/assert_cmd/latest/assert_cmd/cmd/struct.Command.html>
 
-14. How I test Rust command-line apps with assert_cmd - alexwlchan, accessed on
+ 1. How I test Rust command-line apps with assert_cmd - alexwlchan, accessed on
     July 20, 2025,
     <https://alexwlchan.net/2025/testing-rust-cli-apps-with-assert-cmd/>
 
-15. assert_cmd for n00bs : r/rust - Reddit, accessed on July 20, 2025,
+ 1. assert_cmd for n00bs : r/rust - Reddit, accessed on July 20, 2025,
     <https://www.reddit.com/r/rust/comments/e2kfsr/assert_cmd_for_n00bs/>
 
-16. Snapshot Testing - Rust Project Primer, accessed on July 20, 2025,
+ 1. Snapshot Testing - Rust Project Primer, accessed on July 20, 2025,
     <https://www.rustprojectprimer.com/testing/snapshot.html>
 
-17. Snapshot testing - Advanced Rust testing - Rust Exercises, accessed on July
+ 1. Snapshot testing - Advanced Rust testing - Rust Exercises, accessed on July
     20, 2025,
     <https://rust-exercises.com/advanced-testing/02_snapshots/00_intro.html>
 
-18. insta - Rust, accessed on July 20, 2025,
+ 1. insta - Rust, accessed on July 20, 2025,
     <https://prisma.github.io/prisma-engines/doc/insta/index.html>
 
-19. tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+ 1. tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/tempfile/latest/tempfile/>
 
-20. Complete Guide To Testing Code In Rust | Zero To Mastery, accessed on July
+ 2. Complete Guide To Testing Code In Rust | Zero To Mastery, accessed on July
     20, 2025,
     <https://zerotomastery.io/blog/complete-guide-to-testing-code-in-rust/>
 
-21. Ultimate Guide to Testing and Debugging Rust Code | 2024 - Rapid
+ 3. Ultimate Guide to Testing and Debugging Rust Code | 2024 - Rapid
     Innovation, accessed on July 20, 2025,
     <https://www.rapidinnovation.io/post/testing-and-debugging-rust-code>
