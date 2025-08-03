@@ -175,9 +175,86 @@ pub fn write_review<W: std::io::Write>(
 mod tests {
     use super::*;
     use chrono::Utc;
+    use rstest::rstest;
+
+    use crate::User;
 
     #[test]
-    fn print_reviews_writes_to_buffer() {
+    fn print_reviews_formats_authors_and_states() {
+        let reviews = [
+            PullRequestReview {
+                body: "Needs work".into(),
+                submitted_at: Utc::now(),
+                state: "CHANGES_REQUESTED".into(),
+                author: Some(User {
+                    login: "alice".into(),
+                }),
+            },
+            PullRequestReview {
+                body: "Looks good".into(),
+                submitted_at: Utc::now(),
+                state: "APPROVED".into(),
+                author: None,
+            },
+        ];
+        let skin = MadSkin::default();
+        let mut buf = Vec::new();
+        print_reviews(&mut buf, &skin, &reviews).expect("print reviews");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains("alice"));
+        assert!(out.contains("(unknown)"));
+        assert!(out.contains("CHANGES_REQUESTED"));
+        assert!(out.contains("APPROVED"));
+    }
+
+    #[rstest]
+    #[case(Some("bob"), "bob", "CHANGES_REQUESTED")]
+    #[case(None, "(unknown)", "APPROVED")]
+    fn write_review_formats_banner(
+        #[case] login: Option<&str>,
+        #[case] expected_login: &str,
+        #[case] state: &str,
+    ) {
+        let review = PullRequestReview {
+            body: "Nice".into(),
+            submitted_at: Utc::now(),
+            state: state.into(),
+            author: login.map(|l| User { login: l.into() }),
+        };
+        let mut buf = Vec::new();
+        write_review(&mut buf, &MadSkin::default(), &review).expect("write review");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains(expected_login));
+        assert!(out.contains(state));
+    }
+
+    #[test]
+    fn write_review_collapses_details() {
+        let review = PullRequestReview {
+            body: "<details><summary>sum</summary>hidden</details>".into(),
+            submitted_at: Utc::now(),
+            state: "APPROVED".into(),
+            author: None,
+        };
+        let mut buf = Vec::new();
+        write_review(&mut buf, &MadSkin::default(), &review).expect("write review");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains("▶ sum"));
+        assert!(!out.contains("hidden"));
+    }
+
+    #[test]
+    fn print_reviews_propagates_writer_errors() {
+        struct FailWriter;
+        impl std::io::Write for FailWriter {
+            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("fail"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
         let review = PullRequestReview {
             body: "Nice".into(),
             submitted_at: Utc::now(),
@@ -185,9 +262,7 @@ mod tests {
             author: None,
         };
         let skin = MadSkin::default();
-        let mut buf = Vec::new();
-        print_reviews(&mut buf, &skin, &[review]).expect("print reviews");
-        let out = String::from_utf8(buf).expect("utf8");
-        assert!(out.contains("Nice"));
+        let err = print_reviews(FailWriter, &skin, &[review]).expect_err("should fail");
+        assert!(err.downcast_ref::<std::io::Error>().is_some());
     }
 }
