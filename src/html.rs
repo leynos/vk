@@ -64,16 +64,15 @@ fn write_collapsed_summary(node: &Handle, out: &mut String) {
 }
 
 fn find_summary_text(node: &Handle) -> Option<String> {
-    for child in node.children.borrow().iter() {
-        if matches!(
-            &child.data,
-            NodeData::Element { name, .. }
-                if name.local.eq_str_ignore_ascii_case("summary")
-        ) {
-            return Some(collect_text(child));
-        }
-    }
-    None
+    node.children
+        .borrow()
+        .iter()
+        .find_map(|child| match &child.data {
+            NodeData::Element { name, .. } if name.local.eq_str_ignore_ascii_case("summary") => {
+                Some(collect_text(child))
+            }
+            _ => None,
+        })
 }
 
 fn collect_text(node: &Handle) -> String {
