@@ -1,4 +1,3 @@
-
 # A Comprehensive Guide to End-to-End Testing for the `vk` Command-Line Tool
 
 <!-- markdownlint-disable MD033 MD038 -->
