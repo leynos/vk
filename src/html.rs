@@ -65,9 +65,11 @@ fn write_collapsed_summary(node: &Handle, out: &mut String) {
 
 fn find_summary_text(node: &Handle) -> Option<String> {
     for child in node.children.borrow().iter() {
-        if let NodeData::Element { name, .. } = &child.data
-            && name.local.eq_str_ignore_ascii_case("summary")
-        {
+        if matches!(
+            &child.data,
+            NodeData::Element { name, .. }
+                if name.local.eq_str_ignore_ascii_case("summary")
+        ) {
             return Some(collect_text(child));
         }
     }

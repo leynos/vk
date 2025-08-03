@@ -1,14 +1,11 @@
-//! Functions for retrieving pull-request reviews and presenting them in the terminal.
+//! Functions for retrieving pull-request reviews through the GitHub API.
 //!
-//! The module defines GraphQL query structures, pagination helpers, and output
-//! formatting so callers can fetch review threads through the GitHub API, then
-//! display only the latest review from each author using `termimad`.
+//! The module defines GraphQL query structures and pagination helpers so callers
+//! can fetch review threads and collate the latest review from each author.
 
-use crate::html::collapse_details;
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
-use termimad::MadSkin;
 
 use crate::{GraphQLClient, PageInfo, RepoInfo, User, VkError, paginate};
 use std::collections::HashMap;
@@ -115,30 +112,4 @@ pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview>
         }
     }
     latest.into_values().collect()
-}
-
-pub fn write_review<W: std::io::Write>(
-    mut out: W,
-    skin: &MadSkin,
-    review: &PullRequestReview,
-) -> anyhow::Result<()> {
-    let author = review
-        .author
-        .as_ref()
-        .map_or("(unknown)", |u| u.login.as_str());
-    writeln!(out, "\u{1f4dd}  \x1b[1m{author}\x1b[0m {}:", review.state)?;
-    let body = collapse_details(&review.body);
-    if let Err(e) = skin.write_text_on(&mut out, &body) {
-        eprintln!("error writing review body: {e}");
-    }
-    writeln!(out)?;
-    Ok(())
-}
-
-pub fn print_reviews(skin: &MadSkin, reviews: &[PullRequestReview]) {
-    for r in reviews {
-        if let Err(e) = write_review(std::io::stdout().lock(), skin, r) {
-            eprintln!("error printing review: {e}");
-        }
-    }
 }
