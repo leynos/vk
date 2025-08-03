@@ -15,8 +15,11 @@ fn write_author_line<W: std::io::Write>(
     login: Option<&str>,
     suffix: &str,
 ) -> std::io::Result<()> {
-    let login = login.unwrap_or("(unknown)");
-    writeln!(out, "{icon}  \x1b[1m{login}\x1b[0m{suffix}")
+    writeln!(
+        out,
+        "{icon}  \x1b[1m{}\x1b[0m{suffix}",
+        login.unwrap_or("(unknown)")
+    )
 }
 
 /// Format the body of a single review comment.
