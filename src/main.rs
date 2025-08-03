@@ -563,7 +563,11 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
 
     let skin = MadSkin::default();
     let latest = latest_reviews(reviews);
-    print_reviews(&skin, &latest);
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    if let Err(e) = print_reviews(&mut handle, &skin, &latest) {
+        error!("error printing review: {e}");
+    }
 
     for t in threads {
         if let Err(e) = print_thread(&skin, &t) {

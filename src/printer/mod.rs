@@ -9,6 +9,16 @@ use crate::html::collapse_details;
 use crate::reviews::PullRequestReview;
 use crate::{ReviewComment, ReviewThread};
 
+fn write_author_line<W: std::io::Write>(
+    out: &mut W,
+    icon: &str,
+    login: Option<&str>,
+    suffix: &str,
+) -> std::io::Result<()> {
+    let login = login.unwrap_or("(unknown)");
+    writeln!(out, "{icon}  \x1b[1m{login}\x1b[0m{suffix}")
+}
+
 /// Format the body of a single review comment.
 ///
 /// The author's login appears in bold followed by the rendered markdown
@@ -30,10 +40,14 @@ pub fn write_comment_body<W: std::io::Write>(
     skin: &MadSkin,
     comment: &ReviewComment,
 ) -> anyhow::Result<()> {
-    let author = comment.author.as_ref().map_or("", |u| u.login.as_str());
-    writeln!(out, "\u{1f4ac}  \x1b[1m{author}\x1b[0m wrote:")?;
+    write_author_line(
+        &mut out,
+        "\u{1f4ac}",
+        comment.author.as_ref().map(|u| u.login.as_str()),
+        " wrote:",
+    )?;
     let body = collapse_details(&comment.body);
-    let _ = skin.write_text_on(&mut out, &body);
+    skin.write_text_on(&mut out, &body)?;
     writeln!(out)?;
     Ok(())
 }
@@ -99,7 +113,7 @@ pub fn write_thread<W: std::io::Write>(
     Ok(())
 }
 
-/// Print the body of a review comment to stdout with the given skin.
+/// Print reviews to the provided writer using the given skin.
 ///
 /// Each review is printed with the reviewer's login followed by the
 /// formatted comment text.
@@ -112,14 +126,18 @@ pub fn write_thread<W: std::io::Write>(
 /// use chrono::Utc;
 /// use termimad::MadSkin;
 /// let review = PullRequestReview { body: "Looks good".into(), submitted_at: Utc::now(), state: "APPROVED".into(), author: None };
-/// print_reviews(&MadSkin::default(), &[review]);
+/// let mut buf = Vec::new();
+/// print_reviews(&mut buf, &MadSkin::default(), &[review]).unwrap();
 /// ```
-pub fn print_reviews(skin: &MadSkin, reviews: &[PullRequestReview]) {
+pub fn print_reviews<W: std::io::Write>(
+    mut out: W,
+    skin: &MadSkin,
+    reviews: &[PullRequestReview],
+) -> anyhow::Result<()> {
     for r in reviews {
-        if let Err(e) = write_review(std::io::stdout().lock(), skin, r) {
-            eprintln!("error printing review: {e}");
-        }
+        write_review(&mut out, skin, r)?;
     }
+    Ok(())
 }
 
 /// Format a single review banner to the provided writer.
@@ -140,15 +158,36 @@ pub fn write_review<W: std::io::Write>(
     skin: &MadSkin,
     review: &PullRequestReview,
 ) -> anyhow::Result<()> {
-    let author = review
-        .author
-        .as_ref()
-        .map_or("(unknown)", |u| u.login.as_str());
-    writeln!(out, "\u{1f4dd}  \x1b[1m{author}\x1b[0m {}:", review.state)?;
+    let suffix = format!(" {}:", review.state);
+    write_author_line(
+        &mut out,
+        "\u{1f4dd}",
+        review.author.as_ref().map(|u| u.login.as_str()),
+        &suffix,
+    )?;
     let body = collapse_details(&review.body);
-    if let Err(e) = skin.write_text_on(&mut out, &body) {
-        eprintln!("error writing review body: {e}");
-    }
+    skin.write_text_on(&mut out, &body)?;
     writeln!(out)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    #[test]
+    fn print_reviews_writes_to_buffer() {
+        let review = PullRequestReview {
+            body: "Nice".into(),
+            submitted_at: Utc::now(),
+            state: "APPROVED".into(),
+            author: None,
+        };
+        let skin = MadSkin::default();
+        let mut buf = Vec::new();
+        print_reviews(&mut buf, &skin, &[review]).expect("print reviews");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains("Nice"));
+    }
 }
