@@ -202,8 +202,33 @@ impl GraphQLClient {
 /// Retrieve all pages from a cursor-based connection.
 ///
 /// The `fetch` closure is called repeatedly with the current cursor until the
-/// [`PageInfo`] object indicates no further pages remain. Items fetched before
-/// an error occurs are discarded.
+/// [`PageInfo`] object indicates no further pages remain.
+///
+/// If the `fetch` closure yields an error, the function returns an [`Err`]
+/// containing only that error. Any items fetched before the failure are
+/// discarded and are not available in the error result.
+///
+/// # Examples
+/// ```
+/// use vk::{api::paginate, PageInfo};
+///
+/// # tokio::runtime::Runtime::new().expect("runtime").block_on(async {
+/// let mut calls = 0;
+/// let items = paginate(|_cursor| {
+///     calls += 1;
+///     let current = calls;
+///     async move {
+///         let (has_next_page, end_cursor) = if current == 1 {
+///             (true, Some("next".to_string()))
+///         } else {
+///             (false, None)
+///         };
+///         Ok((vec![current], PageInfo { has_next_page, end_cursor }))
+///     }
+/// }).await.expect("pagination");
+/// assert_eq!(items, vec![1, 2]);
+/// # });
+/// ```
 ///
 /// # Errors
 ///
