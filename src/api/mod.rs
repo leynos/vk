@@ -202,7 +202,8 @@ impl GraphQLClient {
 /// Retrieve all pages from a cursor-based connection.
 ///
 /// The `fetch` closure is called repeatedly with the current cursor until the
-/// [`PageInfo`] object indicates no further pages remain.
+/// [`PageInfo`] object indicates no further pages remain. Items fetched before
+/// an error occurs are discarded.
 ///
 /// # Errors
 ///
