@@ -31,57 +31,91 @@ static GITHUB_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/.]+)").expect("valid regex")
 });
 
-#[allow(
+fn strip_git_suffix(name: &str) -> &str {
+    name.strip_suffix(".git").unwrap_or(name)
+}
+
+fn parse_github_url(
+    input: &str,
+    resource: ResourceType,
+) -> Option<Result<(RepoInfo, u64), VkError>> {
+    let url = Url::parse(input).ok()?;
+    if url.host_str()? != "github.com" {
+        return None;
+    }
+    let parts: Vec<_> = url.path_segments()?.collect();
+    if parts.len() < 4 {
+        return Some(Err(VkError::InvalidRef));
+    }
+    let segment = parts.get(2).expect("length checked");
+    if !resource.allowed_segments().contains(segment) {
+        return Some(Err(VkError::WrongResourceType {
+            expected: resource.allowed_segments(),
+            found: (*segment).to_owned(),
+        }));
+    }
+    let number_str = parts.get(3).expect("length checked");
+    let Ok(number) = number_str.parse() else {
+        return Some(Err(VkError::InvalidRef));
+    };
+    let owner = parts.first().expect("length checked");
+    let repo_part = parts.get(1).expect("length checked");
+    let repo = RepoInfo {
+        owner: (*owner).into(),
+        name: strip_git_suffix(repo_part).into(),
+    };
+    Some(Ok((repo, number)))
+}
+
+fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
+    if let Some(caps) = GITHUB_RE.captures(repo) {
+        let owner = caps.name("owner")?.as_str().to_owned();
+        let name = strip_git_suffix(caps.name("repo")?.as_str()).to_owned();
+        Some(RepoInfo { owner, name })
+    } else if repo.contains('/') {
+        let mut parts = repo.splitn(2, '/');
+        let owner = parts.next().expect("split ensured one slash");
+        let name_part = parts.next().expect("split ensured two parts");
+        Some(RepoInfo {
+            owner: owner.to_owned(),
+            name: strip_git_suffix(name_part).to_owned(),
+        })
+    } else {
+        None
+    }
+}
+
+fn repo_from_fetch_head() -> Option<RepoInfo> {
+    let path = Path::new(".git/FETCH_HEAD");
+    let content = fs::read_to_string(path).ok()?;
+    content.lines().find_map(parse_repo_str)
+}
+
+#[expect(
     clippy::result_large_err,
-    reason = "VkError has many variants but they are small"
+    reason = "VkError variants are semantically small; FIXME: consider boxing large variants"
 )]
 fn parse_reference(
     input: &str,
     default_repo: Option<&str>,
     resource_type: ResourceType,
 ) -> Result<(RepoInfo, u64), VkError> {
-    if let Ok(url) = Url::parse(input) {
-        if url.host_str() == Some("github.com") {
-            let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
-            let segments: Vec<_> = segments_iter.collect();
-            if segments.len() >= 4 {
-                let segment = segments.get(2).expect("length checked");
-                let allowed = resource_type.allowed_segments();
-                if allowed.contains(segment) {
-                    let owner = (*segments.first().expect("length checked")).to_owned();
-                    let repo_segment = segments.get(1).expect("length checked");
-                    let name = repo_segment
-                        .strip_suffix(".git")
-                        .unwrap_or(repo_segment)
-                        .to_owned();
-                    let number: u64 = segments
-                        .get(3)
-                        .expect("length checked")
-                        .parse()
-                        .map_err(|_| VkError::InvalidRef)?;
-                    return Ok((RepoInfo { owner, name }, number));
-                }
-                return Err(VkError::WrongResourceType {
-                    expected: allowed,
-                    found: (*segment).to_owned(),
-                });
-            }
-        }
-        Err(VkError::InvalidRef)
-    } else if let Ok(number) = input.parse::<u64>() {
+    if let Some(res) = parse_github_url(input, resource_type) {
+        return res;
+    }
+    if let Ok(number) = input.parse::<u64>() {
         let repo = default_repo
-            .and_then(repo_from_str)
+            .and_then(parse_repo_str)
             .or_else(repo_from_fetch_head)
             .ok_or(VkError::RepoNotFound)?;
-        Ok((repo, number))
-    } else {
-        Err(VkError::InvalidRef)
+        return Ok((repo, number));
     }
+    Err(VkError::InvalidRef)
 }
 
-#[allow(
+#[expect(
     clippy::result_large_err,
-    reason = "VkError has many variants but they are small"
+    reason = "VkError variants are semantically small; FIXME: consider boxing large variants"
 )]
 pub fn parse_issue_reference(
     input: &str,
@@ -90,50 +124,15 @@ pub fn parse_issue_reference(
     parse_reference(input, default_repo, ResourceType::Issues)
 }
 
-#[allow(
+#[expect(
     clippy::result_large_err,
-    reason = "VkError has many variants but they are small"
+    reason = "VkError variants are semantically small; FIXME: consider boxing large variants"
 )]
 pub fn parse_pr_reference(
     input: &str,
     default_repo: Option<&str>,
 ) -> Result<(RepoInfo, u64), VkError> {
     parse_reference(input, default_repo, ResourceType::PullRequest)
-}
-
-fn repo_from_fetch_head() -> Option<RepoInfo> {
-    let path = Path::new(".git/FETCH_HEAD");
-    let content = fs::read_to_string(path).ok()?;
-    for line in content.lines() {
-        if let Some(caps) = GITHUB_RE.captures(line) {
-            let owner = caps.name("owner")?.as_str().to_owned();
-            let name_str = caps.name("repo")?.as_str();
-            let name = name_str.strip_suffix(".git").unwrap_or(name_str).to_owned();
-            return Some(RepoInfo { owner, name });
-        }
-    }
-    None
-}
-
-fn repo_from_str(repo: &str) -> Option<RepoInfo> {
-    if let Some(caps) = GITHUB_RE.captures(repo) {
-        let owner = caps.name("owner")?.as_str().to_owned();
-        let name = caps.name("repo")?.as_str().to_owned();
-        Some(RepoInfo { owner, name })
-    } else if repo.contains('/') {
-        let mut parts = repo.splitn(2, '/');
-        let owner = parts.next().expect("split ensured one slash");
-        let name_part = parts.next().expect("split ensured two parts");
-        Some(RepoInfo {
-            owner: owner.to_owned(),
-            name: name_part
-                .strip_suffix(".git")
-                .unwrap_or(name_part)
-                .to_owned(),
-        })
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]
@@ -188,8 +187,8 @@ mod tests {
     }
 
     #[test]
-    fn repo_from_str_git_suffix() {
-        let repo = repo_from_str("a/b.git").expect("parse repo");
+    fn parse_repo_str_git_suffix() {
+        let repo = parse_repo_str("a/b.git").expect("parse repo");
         assert_eq!(repo.owner, "a");
         assert_eq!(repo.name, "b");
     }

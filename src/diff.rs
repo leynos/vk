@@ -16,54 +16,71 @@ static HUNK_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid regex")
 });
 
+fn parse_diff_lines<'a, I>(
+    lines: I,
+    mut old_line: Option<i32>,
+    mut new_line: Option<i32>,
+) -> Vec<(Option<i32>, Option<i32>, String)>
+where
+    I: Iterator<Item = &'a str>,
+{
+    let mut parsed = Vec::new();
+    for l in lines {
+        if l.starts_with('+') {
+            parsed.push((None, new_line, l.to_owned()));
+            if let Some(ref mut n) = new_line {
+                *n += 1;
+            }
+        } else if l.starts_with('-') {
+            parsed.push((old_line, None, l.to_owned()));
+            if let Some(ref mut o) = old_line {
+                *o += 1;
+            }
+        } else {
+            let text = l.strip_prefix(' ').unwrap_or(l);
+            parsed.push((old_line, new_line, format!(" {text}")));
+            if let Some(ref mut o) = old_line {
+                *o += 1;
+            }
+            if let Some(ref mut n) = new_line {
+                *n += 1;
+            }
+        }
+    }
+    parsed
+}
+
+fn num_disp(num: i32) -> String {
+    let mut s = num.to_string();
+    if s.len() > GUTTER_WIDTH {
+        let start = s.len() - GUTTER_WIDTH;
+        s = s.split_off(start);
+    }
+    format!("{s:>GUTTER_WIDTH$}")
+}
+
 /// Format a diff hunk, annotating line numbers and truncating output.
 ///
 /// The returned string is limited to at most 20 lines centred on the
 /// comment's target line where possible.
+///
+/// # Examples
+/// ```ignore
+/// use vk::diff::format_comment_diff;
+/// # use vk::ReviewComment;
+/// let comment = ReviewComment {
+///     body: String::new(),
+///     diff_hunk: "@@ -1 +1 @@\n-line\n+line".into(),
+///     original_position: Some(1),
+///     position: Some(1),
+///     path: String::new(),
+///     url: String::new(),
+///     author: None,
+/// };
+/// let diff = format_comment_diff(&comment).unwrap();
+/// assert!(diff.contains("-line"));
+/// ```
 pub fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Error> {
-    fn parse_diff_lines<'a, I>(
-        lines: I,
-        mut old_line: Option<i32>,
-        mut new_line: Option<i32>,
-    ) -> Vec<(Option<i32>, Option<i32>, String)>
-    where
-        I: Iterator<Item = &'a str>,
-    {
-        let mut parsed = Vec::new();
-        for l in lines {
-            if l.starts_with('+') {
-                parsed.push((None, new_line, l.to_owned()));
-                if let Some(ref mut n) = new_line {
-                    *n += 1;
-                }
-            } else if l.starts_with('-') {
-                parsed.push((old_line, None, l.to_owned()));
-                if let Some(ref mut o) = old_line {
-                    *o += 1;
-                }
-            } else {
-                let text = l.strip_prefix(' ').unwrap_or(l);
-                parsed.push((old_line, new_line, format!(" {text}")));
-                if let Some(ref mut o) = old_line {
-                    *o += 1;
-                }
-                if let Some(ref mut n) = new_line {
-                    *n += 1;
-                }
-            }
-        }
-        parsed
-    }
-
-    fn num_disp(num: i32) -> String {
-        let mut s = num.to_string();
-        if s.len() > GUTTER_WIDTH {
-            let start = s.len() - GUTTER_WIDTH;
-            s = s.split_off(start);
-        }
-        format!("{s:>GUTTER_WIDTH$}")
-    }
-
     let diff_lines: Vec<&str> = comment
         .diff_hunk
         .lines()

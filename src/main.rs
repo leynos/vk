@@ -328,7 +328,7 @@ fn print_end_banner() {
 /// without one.
 #[expect(
     clippy::result_large_err,
-    reason = "VkError has many variants but they are small"
+    reason = "VkError variants are semantically small; FIXME: consider boxing large variants"
 )]
 fn build_graphql_client(
     token: &str,
@@ -343,10 +343,6 @@ fn build_graphql_client(
     }
 }
 
-#[allow(
-    clippy::result_large_err,
-    reason = "VkError has many variants but they are small"
-)]
 async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
@@ -386,10 +382,6 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     Ok(())
 }
 
-#[allow(
-    clippy::result_large_err,
-    reason = "VkError has many variants but they are small"
-)]
 async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_issue_reference(reference, global.repo.as_deref())?;
@@ -416,7 +408,7 @@ fn missing_reference(err: &FigmentError) -> bool {
         .any(|e| matches!(e.kind, FigmentKind::MissingField(ref f) if f == "reference"))
 }
 
-#[allow(
+#[expect(
     clippy::result_large_err,
     reason = "configuration loading errors can be verbose"
 )]
@@ -438,9 +430,9 @@ where
 }
 
 #[tokio::main]
-#[allow(
+#[expect(
     clippy::result_large_err,
-    reason = "VkError has many variants but they are small"
+    reason = "VkError variants are semantically small; FIXME: consider boxing large variants"
 )]
 async fn main() -> Result<(), VkError> {
     env_logger::init();
