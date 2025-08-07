@@ -5,6 +5,7 @@
 //! behaviour can be unit tested without capturing stdout.
 use termimad::MadSkin;
 
+use crate::diff::format_comment_diff;
 use crate::html::collapse_details;
 use crate::reviews::PullRequestReview;
 use crate::{ReviewComment, ReviewThread};
@@ -75,7 +76,7 @@ pub fn write_comment<W: std::io::Write>(
     skin: &MadSkin,
     comment: &ReviewComment,
 ) -> anyhow::Result<()> {
-    let diff = crate::format_comment_diff(comment)?;
+    let diff = format_comment_diff(comment)?;
     write!(out, "{diff}")?;
     write_comment_body(&mut out, skin, comment)?;
     Ok(())

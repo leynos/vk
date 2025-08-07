@@ -7,12 +7,17 @@
 //! banner so calling processes know the output has finished.
 pub mod api;
 mod cli_args;
+mod diff;
+mod graphql_queries;
 mod html;
 mod printer;
+mod ref_parser;
 mod reviews;
 pub use crate::api::{GraphQLClient, paginate};
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
+use crate::graphql_queries::{COMMENT_QUERY, ISSUE_QUERY, THREADS_QUERY};
 use crate::printer::{print_reviews, write_thread};
+use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_reference};
 use crate::reviews::{fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
 use figment::error::{Error as FigmentError, Kind as FigmentKind};
@@ -21,11 +26,10 @@ use ortho_config::{OrthoConfig, OrthoError, load_and_merge_subcommand_for};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::env;
 use std::sync::LazyLock;
-use std::{env, fs, path::Path};
 use termimad::MadSkin;
 use thiserror::Error;
-use url::Url;
 
 #[derive(Subcommand, Deserialize, Serialize, Clone, Debug)]
 enum Commands {
@@ -47,27 +51,6 @@ struct Cli {
     command: crate::Commands,
     #[command(flatten)]
     global: GlobalArgs,
-}
-
-#[derive(Debug, Clone)]
-struct RepoInfo {
-    owner: String,
-    name: String,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum ResourceType {
-    Issues,
-    PullRequest,
-}
-
-impl ResourceType {
-    fn allowed_segments(self) -> &'static [&'static str] {
-        match self {
-            Self::Issues => &["issues", "issue"],
-            Self::PullRequest => &["pull", "pulls"],
-        }
-    }
 }
 
 #[derive(Error, Debug)]
@@ -101,18 +84,8 @@ pub enum VkError {
     Config(#[from] ortho_config::OrthoError),
 }
 
-static GITHUB_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/.]+)").expect("valid regex")
-});
-
 static UTF8_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").expect("valid regex"));
-static HUNK_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"@@ -(?P<old>\d+)(?:,(?P<old_count>\d+))? \+(?P<new>\d+)(?:,(?P<new_count>\d+))? @@",
-    )
-    .expect("valid regex")
-});
 
 #[derive(Deserialize)]
 struct ThreadData {
@@ -210,69 +183,6 @@ struct CommentNode {
     comments: CommentConnection,
 }
 
-/// Width of the line number gutter in diff output
-const GUTTER_WIDTH: usize = 5;
-
-const THREADS_QUERY: &str = r"
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          reviewThreads(first: 100, after: $cursor) {
-            nodes {
-              id
-              isResolved
-              comments(first: 100) {
-                nodes {
-                  body
-                  diffHunk
-                  originalPosition
-                  position
-                  path
-                  url
-                  author { login }
-                }
-                pageInfo { hasNextPage endCursor }
-              }
-            }
-            pageInfo { hasNextPage endCursor }
-          }
-        }
-      }
-    }
-";
-
-const COMMENT_QUERY: &str = r"
-    query($id: ID!, $cursor: String) {
-      node(id: $id) {
-        ... on PullRequestReviewThread {
-          comments(first: 100, after: $cursor) {
-            nodes {
-              body
-              diffHunk
-              originalPosition
-              position
-              path
-              url
-              author { login }
-            }
-            pageInfo { hasNextPage endCursor }
-          }
-        }
-      }
-    }
-";
-
-const ISSUE_QUERY: &str = r"
-    query($owner: String!, $name: String!, $number: Int!) {
-      repository(owner: $owner, name: $name) {
-        issue(number: $number) {
-          title
-          body
-        }
-      }
-    }
-";
-
 async fn fetch_comment_page(
     client: &GraphQLClient,
     id: &str,
@@ -366,104 +276,6 @@ async fn fetch_review_threads(
         };
     }
     Ok(threads)
-}
-
-fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::Error> {
-    use std::fmt::Write;
-
-    fn parse_diff_lines<'a, I>(
-        lines: I,
-        mut old_line: Option<i32>,
-        mut new_line: Option<i32>,
-    ) -> Vec<(Option<i32>, Option<i32>, String)>
-    where
-        I: Iterator<Item = &'a str>,
-    {
-        let mut parsed = Vec::new();
-        for l in lines {
-            if l.starts_with('+') {
-                parsed.push((None, new_line, l.to_owned()));
-                if let Some(ref mut n) = new_line {
-                    *n += 1;
-                }
-            } else if l.starts_with('-') {
-                parsed.push((old_line, None, l.to_owned()));
-                if let Some(ref mut o) = old_line {
-                    *o += 1;
-                }
-            } else {
-                let text = l.strip_prefix(' ').unwrap_or(l);
-                parsed.push((old_line, new_line, format!(" {text}")));
-                if let Some(ref mut o) = old_line {
-                    *o += 1;
-                }
-                if let Some(ref mut n) = new_line {
-                    *n += 1;
-                }
-            }
-        }
-        parsed
-    }
-
-    fn num_disp(num: i32) -> String {
-        let mut s = num.to_string();
-        if s.len() > GUTTER_WIDTH {
-            let start = s.len() - GUTTER_WIDTH;
-            s = s.split_off(start);
-        }
-        format!("{s:>GUTTER_WIDTH$}")
-    }
-
-    let diff_lines: Vec<&str> = comment
-        .diff_hunk
-        .lines()
-        .map(|l| l.trim_end_matches('\r'))
-        .collect();
-    let mut lines_iter = diff_lines.iter().copied();
-    let Some(header) = lines_iter.next() else {
-        return Ok(String::new());
-    };
-
-    let lines: Vec<(Option<i32>, Option<i32>, String)> = HUNK_RE.captures(header).map_or_else(
-        || parse_diff_lines(diff_lines.iter().copied(), None, None),
-        |caps| {
-            let old_start: i32 = caps
-                .name("old")
-                .and_then(|m| m.as_str().parse().ok())
-                .unwrap_or(0);
-            let new_start: i32 = caps
-                .name("new")
-                .and_then(|m| m.as_str().parse().ok())
-                .unwrap_or(0);
-            let _old_count: usize = caps
-                .name("old_count")
-                .and_then(|m| m.as_str().parse().ok())
-                .unwrap_or(1);
-            let _new_count: usize = caps
-                .name("new_count")
-                .and_then(|m| m.as_str().parse().ok())
-                .unwrap_or(1);
-
-            parse_diff_lines(lines_iter, Some(old_start), Some(new_start))
-        },
-    );
-
-    let target_idx = lines
-        .iter()
-        .position(|(o, n, _)| comment.original_position == *o || comment.position == *n);
-    let (start, end) = target_idx.map_or_else(
-        || (0, std::cmp::min(lines.len(), 20)),
-        |idx| (idx.saturating_sub(5), std::cmp::min(lines.len(), idx + 6)),
-    );
-
-    let mut out = String::new();
-    for (o, n, text) in lines.get(start..end).unwrap_or(&[]) {
-        // Prefer the new line number, fall back to old, or blanks if neither
-        let disp = n.or(*o).map_or_else(|| " ".repeat(GUTTER_WIDTH), num_disp);
-
-        writeln!(&mut out, "{disp}|{text}")?;
-    }
-    Ok(out)
 }
 
 /// Print a review thread to stdout.
@@ -598,13 +410,13 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
     println!();
     Ok(())
 }
-
 fn missing_reference(err: &FigmentError) -> bool {
     err.clone()
         .into_iter()
         .any(|e| matches!(e.kind, FigmentKind::MissingField(ref f) if f == "reference"))
 }
-#[expect(
+
+#[allow(
     clippy::result_large_err,
     reason = "configuration loading errors can be verbose"
 )]
@@ -647,108 +459,6 @@ async fn main() -> Result<(), VkError> {
     }
 }
 
-#[allow(
-    clippy::result_large_err,
-    reason = "VkError has many variants but they are small"
-)]
-fn parse_reference(
-    input: &str,
-    default_repo: Option<&str>,
-    resource_type: ResourceType,
-) -> Result<(RepoInfo, u64), VkError> {
-    if let Ok(url) = Url::parse(input) {
-        if url.host_str() == Some("github.com") {
-            let segments_iter = url.path_segments().ok_or(VkError::InvalidRef)?;
-            let segments: Vec<_> = segments_iter.collect();
-            if segments.len() >= 4 {
-                let segment = segments.get(2).expect("length checked");
-                let allowed = resource_type.allowed_segments();
-                if allowed.contains(segment) {
-                    let owner = (*segments.first().expect("length checked")).to_owned();
-                    let repo_segment = segments.get(1).expect("length checked");
-                    let name = repo_segment
-                        .strip_suffix(".git")
-                        .unwrap_or(repo_segment)
-                        .to_owned();
-                    let number: u64 = segments
-                        .get(3)
-                        .expect("length checked")
-                        .parse()
-                        .map_err(|_| VkError::InvalidRef)?;
-                    return Ok((RepoInfo { owner, name }, number));
-                }
-                return Err(VkError::WrongResourceType {
-                    expected: allowed,
-                    found: (*segment).to_owned(),
-                });
-            }
-        }
-        Err(VkError::InvalidRef)
-    } else if let Ok(number) = input.parse::<u64>() {
-        let repo = default_repo
-            .and_then(repo_from_str)
-            .or_else(repo_from_fetch_head)
-            .ok_or(VkError::RepoNotFound)?;
-        Ok((repo, number))
-    } else {
-        Err(VkError::InvalidRef)
-    }
-}
-
-#[allow(
-    clippy::result_large_err,
-    reason = "VkError has many variants but they are small"
-)]
-fn parse_issue_reference(
-    input: &str,
-    default_repo: Option<&str>,
-) -> Result<(RepoInfo, u64), VkError> {
-    parse_reference(input, default_repo, ResourceType::Issues)
-}
-
-#[allow(
-    clippy::result_large_err,
-    reason = "VkError has many variants but they are small"
-)]
-fn parse_pr_reference(input: &str, default_repo: Option<&str>) -> Result<(RepoInfo, u64), VkError> {
-    parse_reference(input, default_repo, ResourceType::PullRequest)
-}
-
-fn repo_from_fetch_head() -> Option<RepoInfo> {
-    let path = Path::new(".git/FETCH_HEAD");
-    let content = fs::read_to_string(path).ok()?;
-    for line in content.lines() {
-        if let Some(caps) = GITHUB_RE.captures(line) {
-            let owner = caps.name("owner")?.as_str().to_owned();
-            let name_str = caps.name("repo")?.as_str();
-            let name = name_str.strip_suffix(".git").unwrap_or(name_str).to_owned();
-            return Some(RepoInfo { owner, name });
-        }
-    }
-    None
-}
-
-fn repo_from_str(repo: &str) -> Option<RepoInfo> {
-    if let Some(caps) = GITHUB_RE.captures(repo) {
-        let owner = caps.name("owner")?.as_str().to_owned();
-        let name = caps.name("repo")?.as_str().to_owned();
-        Some(RepoInfo { owner, name })
-    } else if repo.contains('/') {
-        let mut parts = repo.splitn(2, '/');
-        let owner = parts.next().expect("split ensured one slash");
-        let name_part = parts.next().expect("split ensured two parts");
-        Some(RepoInfo {
-            owner: owner.to_owned(),
-            name: name_part
-                .strip_suffix(".git")
-                .unwrap_or(name_part)
-                .to_owned(),
-        })
-    } else {
-        None
-    }
-}
-
 fn locale_is_utf8() -> bool {
     env::var("LC_ALL")
         .or_else(|_| env::var("LC_CTYPE"))
@@ -764,9 +474,6 @@ mod tests {
     use crate::reviews::PullRequestReview;
     use chrono::Utc;
     use rstest::*;
-    use std::fmt::Write;
-    use std::fs;
-    use tempfile::tempdir;
 
     fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
         // SAFETY: manipulating environment variables in tests is safe because tests run serially.
@@ -776,58 +483,6 @@ mod tests {
     fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
         // SAFETY: manipulating environment variables in tests is safe because tests run serially.
         unsafe { std::env::remove_var(key) }
-    }
-
-    #[test]
-    fn parse_url() {
-        let (repo, number) = parse_pr_reference("https://github.com/owner/repo/pull/42", None)
-            .expect("valid reference");
-        assert_eq!(repo.owner, "owner");
-        assert_eq!(repo.name, "repo");
-        assert_eq!(number, 42);
-    }
-
-    #[test]
-    fn parse_url_git_suffix() {
-        let (repo, number) = parse_pr_reference("https://github.com/owner/repo.git/pull/7", None)
-            .expect("valid reference");
-        assert_eq!(repo.owner, "owner");
-        assert_eq!(repo.name, "repo");
-        assert_eq!(number, 7);
-    }
-
-    #[test]
-    fn parse_url_plural_segment() {
-        let (repo, number) = parse_pr_reference("https://github.com/owner/repo/pulls/13", None)
-            .expect("valid reference");
-        assert_eq!(repo.owner, "owner");
-        assert_eq!(repo.name, "repo");
-        assert_eq!(number, 13);
-    }
-
-    #[test]
-    fn repo_from_fetch_head_git_suffix() {
-        let dir = tempdir().expect("tempdir");
-        let git_dir = dir.path().join(".git");
-        fs::create_dir(&git_dir).expect("create git dir");
-        fs::write(
-            git_dir.join("FETCH_HEAD"),
-            "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/foo/bar.git",
-        )
-        .expect("write FETCH_HEAD");
-        let cwd = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("chdir temp");
-        let repo = repo_from_fetch_head().expect("repo from fetch head");
-        std::env::set_current_dir(cwd).expect("restore cwd");
-        assert_eq!(repo.owner, "foo");
-        assert_eq!(repo.name, "bar");
-    }
-
-    #[test]
-    fn repo_from_str_git_suffix() {
-        let repo = repo_from_str("a/b.git").expect("parse repo");
-        assert_eq!(repo.owner, "a");
-        assert_eq!(repo.name, "b");
     }
 
     #[test]
@@ -888,71 +543,6 @@ mod tests {
     }
 
     #[test]
-    fn format_comment_diff_sample() {
-        let data = fs::read_to_string("tests/fixtures/review_comment.json").expect("fixture");
-        let comment: ReviewComment = serde_json::from_str(&data).expect("deserialize");
-        let diff = format_comment_diff(&comment).expect("diff");
-        assert!(diff.contains("-import dataclasses"));
-        assert!(diff.contains("import typing"));
-    }
-
-    #[test]
-    fn hunk_re_variants() {
-        let caps = HUNK_RE.captures("@@ -1 +2 @@").expect("regex");
-        assert_eq!(&caps["old"], "1");
-        assert!(caps.name("old_count").is_none());
-        assert_eq!(&caps["new"], "2");
-        assert!(caps.name("new_count").is_none());
-
-        let caps = HUNK_RE.captures("@@ -3,4 +5 @@").expect("regex");
-        assert_eq!(&caps["old"], "3");
-        assert_eq!(caps.name("old_count").expect("old count").as_str(), "4");
-        assert_eq!(&caps["new"], "5");
-        assert!(caps.name("new_count").is_none());
-
-        let caps = HUNK_RE.captures("@@ -7 +8,2 @@").expect("regex");
-        assert_eq!(&caps["old"], "7");
-        assert!(caps.name("old_count").is_none());
-        assert_eq!(&caps["new"], "8");
-        assert_eq!(caps.name("new_count").expect("new count").as_str(), "2");
-    }
-
-    #[test]
-    fn format_comment_diff_invalid_header() {
-        let comment = ReviewComment {
-            body: String::new(),
-            diff_hunk: "not a hunk\n-line1\n+line1".to_string(),
-            original_position: None,
-            position: None,
-            path: String::new(),
-            url: String::new(),
-            author: None,
-        };
-        let out = format_comment_diff(&comment).expect("diff");
-        assert!(out.contains("-line1"));
-        assert!(out.contains("+line1"));
-    }
-
-    #[test]
-    fn format_comment_diff_caps_output() {
-        let mut diff = String::from("@@ -1,30 +1,30 @@\n");
-        for i in 0..30 {
-            writeln!(&mut diff, " line{i}").expect("write diff line");
-        }
-        let comment = ReviewComment {
-            body: String::new(),
-            diff_hunk: diff,
-            original_position: None,
-            position: None,
-            path: String::new(),
-            url: String::new(),
-            author: None,
-        };
-        let out = format_comment_diff(&comment).expect("diff");
-        assert_eq!(out.lines().count(), 20);
-    }
-
-    #[test]
     fn cli_requires_subcommand() {
         assert!(Cli::try_parse_from(["vk"]).is_err());
     }
@@ -973,59 +563,6 @@ mod tests {
             Commands::Issue(args) => assert_eq!(args.reference.as_deref(), Some("123")),
             Commands::Pr(_) => panic!("wrong variant"),
         }
-    }
-
-    #[test]
-    fn parse_issue_url() {
-        let (repo, number) = parse_issue_reference("https://github.com/owner/repo/issues/3", None)
-            .expect("valid ref");
-        assert_eq!(repo.owner, "owner");
-        assert_eq!(repo.name, "repo");
-        assert_eq!(number, 3);
-    }
-
-    #[test]
-    fn parse_issue_url_plural() {
-        let (repo, number) = parse_issue_reference("https://github.com/owner/repo/issues/31", None)
-            .expect("valid ref");
-        assert_eq!(repo.owner, "owner");
-        assert_eq!(repo.name, "repo");
-        assert_eq!(number, 31);
-    }
-
-    #[test]
-    fn parse_issue_url_git_suffix() {
-        let (repo, number) =
-            parse_issue_reference("https://github.com/owner/repo.git/issues/9", None)
-                .expect("valid ref");
-        assert_eq!(repo.owner, "owner");
-        assert_eq!(repo.name, "repo");
-        assert_eq!(number, 9);
-    }
-
-    #[test]
-    fn parse_issue_url_singular() {
-        let (repo, number) = parse_issue_reference("https://github.com/owner/repo/issue/11", None)
-            .expect("valid ref");
-        assert_eq!(repo.owner, "owner");
-        assert_eq!(repo.name, "repo");
-        assert_eq!(number, 11);
-    }
-
-    #[test]
-    fn parse_pr_number_with_repo() {
-        let (repo, number) = parse_pr_reference("5", Some("foo/bar")).expect("valid ref");
-        assert_eq!(repo.owner, "foo");
-        assert_eq!(repo.name, "bar");
-        assert_eq!(number, 5);
-    }
-
-    #[test]
-    fn parse_issue_number_with_repo() {
-        let (repo, number) = parse_issue_reference("8", Some("baz/qux")).expect("valid ref");
-        assert_eq!(repo.owner, "baz");
-        assert_eq!(repo.name, "qux");
-        assert_eq!(number, 8);
     }
 
     #[fixture]

@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::{GraphQLClient, PageInfo, RepoInfo, User, VkError, paginate};
+use crate::{GraphQLClient, PageInfo, User, VkError, paginate, ref_parser::RepoInfo};
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Clone)]
