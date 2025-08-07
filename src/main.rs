@@ -1,31 +1,42 @@
 //! Entry point for the `vk` command line tool.
 //!
 //! `vk` fetches unresolved review comments from GitHub's GraphQL API,
-//! summarizing them by file before printing each thread. When a thread has
+//! summarising them by file before printing each thread. When a thread has
 //! multiple comments on the same diff, the diff is shown only once.
 //! After all comments are printed, the tool displays an `end of code review`
 //! banner so calling processes know the output has finished.
+
 pub mod api;
 mod cli_args;
+mod config;
 mod diff;
 mod graphql_queries;
 mod html;
+mod issues;
 mod printer;
 mod ref_parser;
+mod review_threads;
 mod reviews;
+mod summary;
+#[cfg(test)]
+mod test_utils;
+
 pub use crate::api::{GraphQLClient, paginate};
+pub use config::load_with_reference_fallback;
+pub use issues::{Issue, fetch_issue};
+pub use review_threads::{
+    CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
+};
+pub use summary::{print_end_banner, print_summary, summarize_files, write_summary};
+
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
-use crate::graphql_queries::{COMMENT_QUERY, ISSUE_QUERY, THREADS_QUERY};
 use crate::printer::{print_reviews, write_thread};
-use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_reference};
+use crate::ref_parser::{parse_issue_reference, parse_pr_reference};
 use crate::reviews::{fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
-use figment::error::{Error as FigmentError, Kind as FigmentKind};
 use log::{error, warn};
-use ortho_config::{OrthoConfig, OrthoError, load_and_merge_subcommand_for};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::env;
 use std::sync::LazyLock;
 use termimad::MadSkin;
@@ -87,197 +98,6 @@ pub enum VkError {
 static UTF8_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").expect("valid regex"));
 
-#[derive(Deserialize)]
-struct ThreadData {
-    repository: Repository,
-}
-
-#[derive(Deserialize)]
-struct Repository {
-    #[serde(rename = "pullRequest")]
-    pull_request: PullRequest,
-}
-
-#[derive(Deserialize)]
-struct PullRequest {
-    #[serde(rename = "reviewThreads")]
-    review_threads: ReviewThreadConnection,
-}
-
-#[derive(Deserialize)]
-struct IssueData {
-    repository: IssueRepository,
-}
-
-#[derive(Deserialize)]
-struct IssueRepository {
-    issue: Issue,
-}
-
-#[derive(Deserialize)]
-struct Issue {
-    title: String,
-    body: String,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct ReviewThreadConnection {
-    nodes: Vec<ReviewThread>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct ReviewThread {
-    id: String,
-    #[serde(rename = "isResolved")]
-    #[allow(
-        dead_code,
-        reason = "GraphQL query requires this field but it is unused"
-    )]
-    is_resolved: bool,
-    comments: CommentConnection,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct CommentConnection {
-    nodes: Vec<ReviewComment>,
-    #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct ReviewComment {
-    body: String,
-    #[serde(rename = "diffHunk")]
-    diff_hunk: String,
-    #[serde(rename = "originalPosition")]
-    original_position: Option<i32>,
-    position: Option<i32>,
-    #[allow(dead_code, reason = "stored for completeness; not displayed yet")]
-    path: String,
-    url: String,
-    author: Option<User>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct PageInfo {
-    #[serde(rename = "hasNextPage")]
-    has_next_page: bool,
-    #[serde(rename = "endCursor")]
-    end_cursor: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Default, Clone)]
-struct User {
-    login: String,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct CommentNodeWrapper {
-    node: Option<CommentNode>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct CommentNode {
-    comments: CommentConnection,
-}
-
-async fn fetch_comment_page(
-    client: &GraphQLClient,
-    id: &str,
-    cursor: Option<String>,
-) -> Result<(Vec<ReviewComment>, PageInfo), VkError> {
-    let wrapper: CommentNodeWrapper = client
-        .run_query(COMMENT_QUERY, json!({ "id": id, "cursor": cursor.clone() }))
-        .await?;
-    let conn = wrapper
-        .node
-        .ok_or_else(|| {
-            VkError::BadResponse(format!(
-                "Missing comment node in response (id: {}, cursor: {})",
-                id,
-                cursor.as_deref().unwrap_or("None")
-            ))
-        })?
-        .comments;
-    Ok((conn.nodes, conn.page_info))
-}
-
-async fn fetch_issue(
-    client: &GraphQLClient,
-    repo: &RepoInfo,
-    number: u64,
-) -> Result<Issue, VkError> {
-    let data: IssueData = client
-        .run_query(
-            ISSUE_QUERY,
-            json!({
-                "owner": repo.owner.as_str(),
-                "name": repo.name.as_str(),
-                "number": number
-            }),
-        )
-        .await?;
-    Ok(data.repository.issue)
-}
-
-async fn fetch_thread_page(
-    client: &GraphQLClient,
-    repo: &RepoInfo,
-    number: u64,
-    cursor: Option<String>,
-) -> Result<(Vec<ReviewThread>, PageInfo), VkError> {
-    let data: ThreadData = client
-        .run_query(
-            THREADS_QUERY,
-            json!({
-                "owner": repo.owner.as_str(),
-                "name": repo.name.as_str(),
-                "number": number,
-                "cursor": cursor,
-            }),
-        )
-        .await?;
-    let conn = data.repository.pull_request.review_threads;
-    Ok((conn.nodes, conn.page_info))
-}
-
-async fn fetch_review_threads(
-    client: &GraphQLClient,
-    repo: &RepoInfo,
-    number: u64,
-) -> Result<Vec<ReviewThread>, VkError> {
-    let mut threads = paginate(|cursor| fetch_thread_page(client, repo, number, cursor)).await?;
-    threads.retain(|t| !t.is_resolved);
-
-    for thread in &mut threads {
-        let initial = std::mem::replace(
-            &mut thread.comments,
-            CommentConnection {
-                nodes: Vec::new(),
-                page_info: PageInfo {
-                    has_next_page: false,
-                    end_cursor: None,
-                },
-            },
-        );
-        let mut comments = initial.nodes;
-        if initial.page_info.has_next_page {
-            let more = paginate(|c| fetch_comment_page(client, &thread.id, c)).await?;
-            comments.extend(more);
-        }
-        thread.comments = CommentConnection {
-            nodes: comments,
-            page_info: PageInfo {
-                has_next_page: false,
-                end_cursor: None,
-            },
-        };
-    }
-    Ok(threads)
-}
-
 /// Print a review thread to stdout.
 ///
 /// This simply calls [`write_thread`] with a locked `stdout` handle.
@@ -285,45 +105,9 @@ fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
     write_thread(std::io::stdout().lock(), skin, thread)
 }
 
-fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
-    use std::collections::BTreeMap;
-    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
-    for t in threads {
-        for c in &t.comments.nodes {
-            *counts.entry(c.path.clone()).or_default() += 1;
-        }
-    }
-    counts.into_iter().collect()
-}
-
-fn write_summary<W: std::io::Write>(
-    mut out: W,
-    summary: &[(String, usize)],
-) -> std::io::Result<()> {
-    if summary.is_empty() {
-        return Ok(());
-    }
-    writeln!(out, "Summary:")?;
-    for (path, count) in summary {
-        let label = if *count == 1 { "comment" } else { "comments" };
-        writeln!(out, "{path}: {count} {label}")?;
-    }
-    writeln!(out)?;
-    Ok(())
-}
-
-fn print_summary(summary: &[(String, usize)]) {
-    let _ = write_summary(std::io::stdout().lock(), summary);
-}
-
-/// Print a closing banner once all review threads have been displayed.
-fn print_end_banner() {
-    println!("========== end of code review ==========");
-}
-
 /// Create a [`GraphQLClient`], falling back to no transcript on failure.
 ///
-/// This attempts to initialize the client with the provided `transcript`.
+/// This attempts to initialise the client with the provided `transcript`.
 /// If the transcript cannot be created, it logs a warning and retries
 /// without one.
 #[expect(
@@ -402,32 +186,6 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
     println!();
     Ok(())
 }
-fn missing_reference(err: &FigmentError) -> bool {
-    err.clone()
-        .into_iter()
-        .any(|e| matches!(e.kind, FigmentKind::MissingField(ref f) if f == "reference"))
-}
-
-#[expect(
-    clippy::result_large_err,
-    reason = "configuration loading errors can be verbose"
-)]
-fn load_with_reference_fallback<T>(cli_args: T) -> Result<T, OrthoError>
-where
-    T: OrthoConfig + serde::Serialize + Default + clap::CommandFactory + Clone,
-{
-    match load_and_merge_subcommand_for::<T>(&cli_args) {
-        Ok(v) => Ok(v),
-        Err(OrthoError::Gathering(e)) => {
-            if missing_reference(&e) {
-                Ok(cli_args)
-            } else {
-                Err(OrthoError::Gathering(e))
-            }
-        }
-        Err(e) => Err(e),
-    }
-}
 
 #[tokio::main]
 #[expect(
@@ -464,26 +222,15 @@ mod tests {
     use super::*;
     use crate::printer::{write_comment_body, write_review, write_thread};
     use crate::reviews::PullRequestReview;
+    use crate::test_utils::{remove_var, set_var};
     use chrono::Utc;
-    use rstest::*;
-
-    fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
-        // SAFETY: manipulating environment variables in tests is safe because tests run serially.
-        unsafe { std::env::set_var(key, value) }
-    }
-
-    fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
-        // SAFETY: manipulating environment variables in tests is safe because tests run serially.
-        unsafe { std::env::remove_var(key) }
-    }
+    use serial_test::serial;
 
     #[test]
     fn cli_loads_repo_from_flag() {
         let cli = Cli::try_parse_from(["vk", "--repo", "foo/bar", "pr", "1"]).expect("parse cli");
         assert_eq!(cli.global.repo.as_deref(), Some("foo/bar"));
     }
-
-    use serial_test::serial;
 
     #[test]
     #[serial]
@@ -557,67 +304,6 @@ mod tests {
         }
     }
 
-    #[fixture]
-    fn review_comment(#[default("test.rs")] path: &str) -> ReviewComment {
-        ReviewComment {
-            path: path.into(),
-            ..Default::default()
-        }
-    }
-
-    #[rstest]
-    #[case(vec![], vec![])]
-    #[case(
-        vec![ReviewThread {
-            comments: CommentConnection {
-                nodes: vec![review_comment("a.rs"), review_comment("b.rs")],
-                ..Default::default()
-            },
-            ..Default::default()
-        }],
-        vec![("a.rs".into(), 1), ("b.rs".into(), 1)]
-    )]
-    #[case(
-        vec![ReviewThread {
-            comments: CommentConnection {
-                nodes: vec![
-                    review_comment("a.rs"),
-                    review_comment("a.rs"),
-                    review_comment("b.rs"),
-                ],
-                ..Default::default()
-            },
-            ..Default::default()
-        }],
-        vec![("a.rs".into(), 2), ("b.rs".into(), 1)]
-    )]
-    fn summarize_files_counts_comments(
-        #[case] threads: Vec<ReviewThread>,
-        #[case] expected: Vec<(String, usize)>,
-    ) {
-        let summary = summarize_files(&threads);
-        assert_eq!(summary, expected);
-    }
-
-    #[test]
-    fn write_summary_outputs_text() {
-        let summary = vec![("a.rs".into(), 2), ("b.rs".into(), 1)];
-        let mut buf = Vec::new();
-        write_summary(&mut buf, &summary).expect("write summary");
-        let out = String::from_utf8(buf).expect("utf8");
-        assert!(out.contains("Summary:"));
-        assert!(out.contains("a.rs: 2 comments"));
-        assert!(out.contains("b.rs: 1 comment"));
-    }
-
-    #[test]
-    fn write_summary_handles_empty() {
-        let summary: Vec<(String, usize)> = Vec::new();
-        let mut buf = Vec::new();
-        write_summary(&mut buf, &summary).expect("write summary");
-        assert!(buf.is_empty());
-    }
-
     #[test]
     fn write_thread_emits_diff_once() {
         let diff = "@@ -1 +1 @@\n-old\n+new\n";
@@ -674,75 +360,5 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("\u{25B6} hello"));
         assert!(!out.contains("bye"));
-    }
-
-    #[tokio::test]
-    async fn run_query_missing_nodes_reports_path() {
-        use third_wheel::hyper::{
-            Body, Request, Response, Server, StatusCode,
-            service::{make_service_fn, service_fn},
-        };
-
-        let body = serde_json::json!({
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "pageInfo": { "hasNextPage": false, "endCursor": null }
-                        }
-                    }
-                }
-            }
-        })
-        .to_string();
-
-        let make_svc = make_service_fn(move |_conn| {
-            let body = body.clone();
-            async move {
-                Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
-                    let body = body.clone();
-                    async move {
-                        Ok::<_, std::convert::Infallible>(
-                            Response::builder()
-                                .status(StatusCode::OK)
-                                .header("Content-Type", "application/json")
-                                .body(Body::from(body.clone()))
-                                .expect("failed to build HTTP response"),
-                        )
-                    }
-                }))
-            }
-        });
-
-        let server = Server::bind(
-            &"127.0.0.1:0"
-                .parse()
-                .expect("failed to parse server address"),
-        )
-        .serve(make_svc);
-        let addr = server.local_addr();
-        let join = tokio::spawn(server);
-
-        let client = GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None)
-            .expect("failed to create GraphQL client");
-
-        let repo = RepoInfo {
-            owner: "o".into(),
-            name: "r".into(),
-        };
-        let result = fetch_review_threads(&client, &repo, 1).await;
-        let err = result.expect_err("expected error");
-        let err_msg = format!("{err}");
-        assert!(
-            err_msg.contains("repository.pullRequest.reviewThreads"),
-            "Error should contain full JSON path"
-        );
-        assert!(
-            err_msg.contains("snippet:"),
-            "Error should contain JSON snippet"
-        );
-
-        join.abort();
-        let _ = join.await;
     }
 }
