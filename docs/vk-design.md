@@ -88,38 +88,37 @@ and related page information as modelled in the GraphQL schema.
 ```mermaid
 classDiagram
     class ReviewThread {
-        +String id
-        +bool is_resolved
-        +CommentConnection comments
+        +ID! id
+        +Boolean! isResolved
+        +CommentConnection! comments
     }
     class CommentConnection {
-        +Vec~ReviewComment~ nodes
-        +PageInfo page_info
+        +[ReviewComment!]! nodes
+        +PageInfo! pageInfo
     }
     class ReviewComment {
-        +String body
-        +String diff_hunk
-        +Option<i32> original_position
-        +Option<i32> position
-        +String path
-        +String url
-        +Option<User> author
+        +String! body
+        +String! diffHunk
+        +Int originalPosition
+        +Int position
+        +String! path
+        +String! url
+        +User author
     }
     class PageInfo {
-        +bool has_next_page
-        +Option<String> end_cursor
+        +Boolean! hasNextPage
+        +String endCursor
     }
     class User {
-        +String login
+        +String! login
     }
     ReviewThread --> CommentConnection : comments
     CommentConnection --> ReviewComment : nodes
     ReviewComment --> User : author
-    ReviewThread --> PageInfo : page_info
-    CommentConnection --> PageInfo : page_info
+    CommentConnection --> PageInfo : pageInfo
 
-    class review_threads {
-        +fetch_review_threads(client, repo, number)
+    class ReviewThreadsService {
+        +fetchReviewThreads(client: GraphQLClient, repo: String, number: Int)
     }
 ```
 
