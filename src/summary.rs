@@ -30,7 +30,11 @@ pub fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
             *counts.entry(c.path.clone()).or_default() += 1;
         }
     }
-    counts.into_iter().collect()
+    let mut v: Vec<_> = counts.into_iter().collect();
+    // Sort by descending count to surface files with the most discussion.
+    // Break ties alphabetically for stable output.
+    v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    v
 }
 
 /// Write a preformatted summary to any writer.

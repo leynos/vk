@@ -4,7 +4,7 @@
 //! line tool, which fetches unresolved review comments from GitHub's GraphQL
 //! API. The core functionality is delegated to specialised modules:
 //! `review_threads` for fetching review data, `issues` for issue retrieval,
-//! `summary` for comment summarisation, and `config` for configuration
+//! `summary` for summarising comments, and `config` for configuration
 //! management. When a thread has multiple comments on the same diff, the diff
 //! is shown only once. After all comments are printed, the tool displays an
 //! `end of code review` banner so calling processes know the output has

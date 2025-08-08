@@ -1,10 +1,11 @@
 //! Common utilities for manipulating environment variables in tests.
 
+use std::sync::{Mutex, OnceLock};
+
 /// Set an environment variable for testing.
 ///
 /// Environment manipulation is process-wide and therefore not thread-safe.
-/// Callers must ensure tests using these helpers run serially, for example by
-/// applying `#[serial]` from the `serial_test` crate to the test itself.
+/// A global mutex serialises modifications so parallel tests do not race.
 ///
 /// # Examples
 ///
@@ -16,14 +17,25 @@
 /// remove_var("MY_VAR");
 /// ```
 pub fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
-    // SAFETY: Tests using this helper run serially.
+    let _guard = env_lock();
+    // SAFETY: The global mutex serialises access to the environment.
     unsafe { std::env::set_var(key, value) };
 }
 
 /// Remove an environment variable set during testing.
 ///
-/// Callers must ensure tests using these helpers run serially.
+/// The global mutex serialises modifications so parallel tests do not race.
 pub fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
-    // SAFETY: Tests using this helper run serially.
+    let _guard = env_lock();
+    // SAFETY: The global mutex serialises access to the environment.
     unsafe { std::env::remove_var(key) };
+}
+
+static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    ENV_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("env lock")
 }
