@@ -112,13 +112,13 @@ classDiagram
     class User {
         +String! login
     }
-    ReviewThread --> CommentConnection : comments
-    CommentConnection --> ReviewComment : nodes
-    ReviewComment --> User : author
-    CommentConnection --> PageInfo : pageInfo
+    ReviewThread "1" --> "1" CommentConnection : comments
+    CommentConnection "1" --> "0..*" ReviewComment : nodes
+    ReviewComment "0..1" --> "1" User : author
+    CommentConnection "1" --> "1" PageInfo : pageInfo
 
-    class ReviewThreadsService {
-        +fetchReviewThreads(client: GraphQLClient, repo: String, number: Int)
+    class ReviewThreadsService <<service>> {
+        +fetchReviewThreads(client: GraphQLClient, repo: String, number: Int): [ReviewThread!]!
     }
 ```
 
