@@ -28,8 +28,8 @@ struct PullRequest {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct CommentNodeWrapper {
-    node: Option<CommentNode>,
+struct NodeWrapper<T> {
+    node: Option<T>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -37,33 +37,23 @@ struct CommentNode {
     comments: CommentConnection,
 }
 
-/// Connection wrapper around [`ReviewThread`] nodes.
 #[derive(Debug, Deserialize, Default)]
-struct ReviewThreadConnection {
-    nodes: Vec<ReviewThread>,
+pub struct Connection<T> {
+    pub nodes: Vec<T>,
     #[serde(rename = "pageInfo")]
-    page_info: PageInfo,
+    pub page_info: PageInfo,
 }
+
+type ReviewThreadConnection = Connection<ReviewThread>;
+pub type CommentConnection = Connection<ReviewComment>;
 
 /// Details of a single review thread.
 #[derive(Debug, Deserialize, Default)]
 pub struct ReviewThread {
     pub id: String,
     #[serde(rename = "isResolved")]
-    #[allow(
-        dead_code,
-        reason = "GraphQL query requires this field but it is unused"
-    )]
     pub is_resolved: bool,
     pub comments: CommentConnection,
-}
-
-/// Collection of comments within a review thread.
-#[derive(Debug, Deserialize, Default)]
-pub struct CommentConnection {
-    pub nodes: Vec<ReviewComment>,
-    #[serde(rename = "pageInfo")]
-    pub page_info: PageInfo,
 }
 
 /// A single review comment.
@@ -75,7 +65,6 @@ pub struct ReviewComment {
     #[serde(rename = "originalPosition")]
     pub original_position: Option<i32>,
     pub position: Option<i32>,
-    #[allow(dead_code, reason = "stored for completeness; not displayed yet")]
     pub path: String,
     pub url: String,
     pub author: Option<User>,
@@ -101,7 +90,7 @@ async fn fetch_comment_page(
     id: &str,
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewComment>, PageInfo), VkError> {
-    let wrapper: CommentNodeWrapper = client
+    let wrapper: NodeWrapper<CommentNode> = client
         .run_query(COMMENT_QUERY, json!({ "id": id, "cursor": cursor.clone() }))
         .await?;
     let conn = wrapper
@@ -148,6 +137,7 @@ pub async fn fetch_review_threads(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
+    // GitHub's API lacks filtering for unresolved threads, so filter client-side.
     let mut threads = paginate(|cursor| fetch_thread_page(client, repo, number, cursor)).await?;
     threads.retain(|t| !t.is_resolved);
 

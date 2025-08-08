@@ -72,7 +72,9 @@ pub fn write_summary<W: std::io::Write>(
 
 /// Print the summary directly to stdout.
 pub fn print_summary(summary: &[(String, usize)]) {
-    let _ = write_summary(std::io::stdout().lock(), summary);
+    if let Err(e) = write_summary(std::io::stdout().lock(), summary) {
+        eprintln!("Failed to write summary: {e}");
+    }
 }
 
 /// Print a closing banner once all review threads have been displayed.
