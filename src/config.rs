@@ -7,7 +7,8 @@ use figment::error::{Error as FigmentError, Kind as FigmentKind};
 use ortho_config::{OrthoConfig, OrthoError, load_and_merge_subcommand_for};
 
 fn missing_reference(err: &FigmentError) -> bool {
-    // FigmentError yields its causes only by value; clone to inspect without ownership.
+    // FigmentError implements `IntoIterator` only for owned values; clone so the
+    // borrowed error isn't moved when checking its causes.
     err.clone()
         .into_iter()
         .any(|e| matches!(e.kind, FigmentKind::MissingField(ref f) if f == "reference"))
