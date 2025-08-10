@@ -96,11 +96,14 @@ async fn fetch_comment_page(
     let conn = wrapper
         .node
         .ok_or_else(|| {
-            VkError::BadResponse(format!(
-                "Missing comment node in response (id: {}, cursor: {})",
-                id,
-                cursor.as_deref().unwrap_or("None")
-            ))
+            VkError::BadResponse(
+                format!(
+                    "Missing comment node in response (id: {}, cursor: {})",
+                    id,
+                    cursor.as_deref().unwrap_or("None")
+                )
+                .into_boxed_str(),
+            )
         })?
         .comments;
     Ok((conn.nodes, conn.page_info))

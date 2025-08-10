@@ -73,30 +73,48 @@ pub enum VkError {
     #[error("unable to determine repository")]
     RepoNotFound,
     #[error("request failed: {0}")]
-    Request(#[from] reqwest::Error),
+    Request(#[from] Box<reqwest::Error>),
     #[error("request failed when running {context}: {source}")]
     RequestContext {
-        context: String,
+        context: Box<str>,
         #[source]
-        source: reqwest::Error,
+        source: Box<reqwest::Error>,
     },
     #[error("invalid reference")]
     InvalidRef,
     #[error("expected URL path segment in {expected:?}, found '{found}'")]
     WrongResourceType {
         expected: &'static [&'static str],
-        found: String,
+        found: Box<str>,
     },
     #[error("bad response: {0}")]
-    BadResponse(String),
+    BadResponse(Box<str>),
     #[error("malformed response: {0}")]
-    BadResponseSerde(String),
+    BadResponseSerde(Box<str>),
     #[error("API errors: {0}")]
-    ApiErrors(String),
+    ApiErrors(Box<str>),
     #[error("io error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(#[from] Box<std::io::Error>),
     #[error("configuration error: {0}")]
-    Config(#[from] ortho_config::OrthoError),
+    Config(#[from] Box<ortho_config::OrthoError>),
+}
+
+impl From<reqwest::Error> for VkError {
+    fn from(source: reqwest::Error) -> Self {
+        Self::Request(Box::new(source))
+    }
+}
+
+impl From<std::io::Error> for VkError {
+    fn from(source: std::io::Error) -> Self {
+        Self::Io(Box::new(source))
+    }
+}
+
+impl From<ortho_config::OrthoError> for VkError {
+    fn from(source: ortho_config::OrthoError) -> Self {
+        Self::Config(Box::new(source))
+    }
 }
 
 static UTF8_RE: LazyLock<Regex> =
@@ -114,10 +132,6 @@ fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
 /// This attempts to initialise the client with the provided `transcript`.
 /// If the transcript cannot be created, it logs a warning and retries
 /// without one.
-#[expect(
-    clippy::result_large_err,
-    reason = "VkError variants are semantically small; FIXME: consider boxing large variants"
-)]
 fn build_graphql_client(
     token: &str,
     transcript: Option<&std::path::PathBuf>,
@@ -192,10 +206,6 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
 }
 
 #[tokio::main]
-#[expect(
-    clippy::result_large_err,
-    reason = "VkError variants are semantically small; FIXME: consider boxing large variants"
-)]
 async fn main() -> Result<(), VkError> {
     env_logger::init();
     let cli = Cli::parse();

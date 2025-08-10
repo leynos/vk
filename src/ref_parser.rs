@@ -51,7 +51,7 @@ fn parse_github_url(
     if !resource.allowed_segments().contains(segment) {
         return Some(Err(VkError::WrongResourceType {
             expected: resource.allowed_segments(),
-            found: (*segment).to_owned(),
+            found: (*segment).into(),
         }));
     }
     let number_str = parts.get(3).expect("length checked");
@@ -91,10 +91,6 @@ fn repo_from_fetch_head() -> Option<RepoInfo> {
     content.lines().find_map(parse_repo_str)
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "VkError variants are semantically small; FIXME: consider boxing large variants"
-)]
 fn parse_reference(
     input: &str,
     default_repo: Option<&str>,
@@ -113,10 +109,6 @@ fn parse_reference(
     Err(VkError::InvalidRef)
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "VkError variants are semantically small; FIXME: consider boxing large variants"
-)]
 pub fn parse_issue_reference(
     input: &str,
     default_repo: Option<&str>,
@@ -124,10 +116,6 @@ pub fn parse_issue_reference(
     parse_reference(input, default_repo, ResourceType::Issues)
 }
 
-#[expect(
-    clippy::result_large_err,
-    reason = "VkError variants are semantically small; FIXME: consider boxing large variants"
-)]
 pub fn parse_pr_reference(
     input: &str,
     default_repo: Option<&str>,
