@@ -11,6 +11,7 @@
 //! finished.
 
 pub mod api;
+mod boxed;
 mod cli_args;
 mod config;
 mod diff;
@@ -69,6 +70,12 @@ struct Cli {
 }
 
 #[derive(Error, Debug)]
+/// Error type for the `vk` binary.
+///
+/// String payloads and external errors are boxed to keep the enum small. A
+/// `Cow<'static, str>` would avoid allocations for static strings but would
+/// enlarge the type and still allocate for dynamic values, so boxing is
+/// preferred.
 pub enum VkError {
     #[error("unable to determine repository")]
     RepoNotFound,
@@ -99,23 +106,19 @@ pub enum VkError {
     Config(#[from] Box<ortho_config::OrthoError>),
 }
 
-impl From<reqwest::Error> for VkError {
-    fn from(source: reqwest::Error) -> Self {
-        Self::Request(Box::new(source))
-    }
+macro_rules! boxed_error_from {
+    ($source:ty, $variant:ident) => {
+        impl From<$source> for VkError {
+            fn from(source: $source) -> Self {
+                Self::$variant(Box::new(source))
+            }
+        }
+    };
 }
 
-impl From<std::io::Error> for VkError {
-    fn from(source: std::io::Error) -> Self {
-        Self::Io(Box::new(source))
-    }
-}
-
-impl From<ortho_config::OrthoError> for VkError {
-    fn from(source: ortho_config::OrthoError) -> Self {
-        Self::Config(Box::new(source))
-    }
-}
+boxed_error_from!(reqwest::Error, Request);
+boxed_error_from!(std::io::Error, Io);
+boxed_error_from!(ortho_config::OrthoError, Config);
 
 static UTF8_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").expect("valid regex"));

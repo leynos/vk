@@ -6,6 +6,7 @@
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::boxed::BoxedStr;
 use crate::graphql_queries::{COMMENT_QUERY, THREADS_QUERY};
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, VkError, paginate};
@@ -102,7 +103,7 @@ async fn fetch_comment_page(
                     id,
                     cursor.as_deref().unwrap_or("None")
                 )
-                .into_boxed_str(),
+                .boxed(),
             )
         })?
         .comments;

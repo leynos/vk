@@ -31,9 +31,9 @@ where
             if missing_reference(&e) {
                 Ok(cli_args)
             } else {
-                Err(Box::new(OrthoError::Gathering(e)))
+                Err(OrthoError::Gathering(e).into())
             }
         }
-        Err(e) => Err(Box::new(e)),
+        Err(e) => Err(e.into()),
     }
 }
