@@ -80,6 +80,48 @@ sequenceDiagram
     MadSkin->>Main: print c.url
 ```
 
+## Class Diagram
+
+The diagram below outlines the relationships between review threads, comments,
+and related page information as modelled in the GraphQL schema.
+
+```mermaid
+classDiagram
+    class ReviewThread {
+        +ID! id
+        +Boolean! isResolved
+        +CommentConnection! comments
+    }
+    class CommentConnection {
+        +[ReviewComment!]! nodes
+        +PageInfo! pageInfo
+    }
+    class ReviewComment {
+        +String! body
+        +String! diffHunk
+        +Int originalPosition
+        +Int position
+        +String! path
+        +String! url
+        +User author
+    }
+    class PageInfo {
+        +Boolean! hasNextPage
+        +String endCursor
+    }
+    class User {
+        +String! login
+    }
+    ReviewThread "1" --> "1" CommentConnection : comments
+    CommentConnection "1" --> "0..*" ReviewComment : nodes
+    ReviewComment "0..*" --> "0..1" User : author
+    CommentConnection "1" --> "1" PageInfo : pageInfo
+
+    class ReviewThreadsService <<service>> {
+        +fetchReviewThreads(client: GraphQLClient, repo: String, number: Int): [ReviewThread!]!
+    }
+```
+
 ## GraphQL Error Handling
 
 The diagram below illustrates how deserialisation errors surface the JSON path
