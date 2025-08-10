@@ -42,6 +42,7 @@ use log::{error, warn};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::io::ErrorKind;
 use std::sync::LazyLock;
 use termimad::MadSkin;
 use thiserror::Error;
@@ -158,15 +159,33 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
     if let Err(e) = print_reviews(&mut handle, &skin, &latest) {
+        if e.chain().any(|c| {
+            c.downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == ErrorKind::BrokenPipe)
+        }) {
+            return Ok(());
+        }
         error!("error printing review: {e}");
     }
 
     for t in threads {
         if let Err(e) = print_thread(&skin, &t) {
+            if e.chain().any(|c| {
+                c.downcast_ref::<std::io::Error>()
+                    .is_some_and(|io| io.kind() == ErrorKind::BrokenPipe)
+            }) {
+                return Ok(());
+            }
             error!("error printing thread: {e}");
         }
     }
-    print_end_banner();
+
+    if let Err(e) = print_end_banner() {
+        if e.kind() == ErrorKind::BrokenPipe {
+            return Ok(());
+        }
+        error!("error printing end banner: {e}");
+    }
     Ok(())
 }
 
