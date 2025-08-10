@@ -114,7 +114,7 @@ classDiagram
     }
     ReviewThread "1" --> "1" CommentConnection : comments
     CommentConnection "1" --> "0..*" ReviewComment : nodes
-    ReviewComment "0..1" --> "1" User : author
+    ReviewComment "0..*" --> "0..1" User : author
     CommentConnection "1" --> "1" PageInfo : pageInfo
 
     class ReviewThreadsService <<service>> {
