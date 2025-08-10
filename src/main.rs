@@ -30,6 +30,7 @@ pub use config::load_with_reference_fallback;
 pub use issues::{Issue, fetch_issue};
 pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
+    filter_threads_by_files,
 };
 pub use summary::{print_end_banner, print_summary, summarize_files, write_summary};
 
@@ -143,7 +144,10 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     }
 
     let client = build_graphql_client(&token, global.transcript.as_ref())?;
-    let threads = fetch_review_threads(&client, &repo, number).await?;
+    let threads = filter_threads_by_files(
+        fetch_review_threads(&client, &repo, number).await?,
+        &args.files,
+    );
     let reviews = fetch_reviews(&client, &repo, number).await?;
     if threads.is_empty() {
         println!("No unresolved comments.");
@@ -294,7 +298,23 @@ mod tests {
     fn pr_subcommand_parses() {
         let cli = Cli::try_parse_from(["vk", "pr", "123"]).expect("parse cli");
         match cli.command {
-            Commands::Pr(args) => assert_eq!(args.reference.as_deref(), Some("123")),
+            Commands::Pr(args) => {
+                assert_eq!(args.reference.as_deref(), Some("123"));
+                assert!(args.files.is_empty());
+            }
+            Commands::Issue(_) => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn pr_subcommand_parses_files() {
+        let cli =
+            Cli::try_parse_from(["vk", "pr", "123", "src/lib.rs", "README.md"]).expect("parse cli");
+        match cli.command {
+            Commands::Pr(args) => {
+                assert_eq!(args.reference.as_deref(), Some("123"));
+                assert_eq!(args.files, ["src/lib.rs", "README.md"]);
+            }
             Commands::Issue(_) => panic!("wrong variant"),
         }
     }
