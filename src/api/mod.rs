@@ -137,8 +137,7 @@ impl GraphQLClient {
         T: DeserializeOwned,
     {
         let payload = json!({ "query": query, "variables": &variables });
-        let ctx = serde_json::to_string(&payload).unwrap_or_default();
-        let ctx_box = ctx.clone().boxed();
+        let ctx_box = serde_json::to_string(&payload).unwrap_or_default().boxed();
         let response = self
             .client
             .post(&self.endpoint)

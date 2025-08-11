@@ -106,6 +106,7 @@ pub enum VkError {
     Config(#[from] Box<ortho_config::OrthoError>),
 }
 
+/// Implement `From<$source>` for `VkError` by boxing the source into `$variant`.
 macro_rules! boxed_error_from {
     ($source:ty, $variant:ident) => {
         impl From<$source> for VkError {
