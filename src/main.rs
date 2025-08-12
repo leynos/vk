@@ -132,6 +132,17 @@ fn build_graphql_client(
     }
 }
 
+fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
+    err.chain().any(|c| {
+        c.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == ErrorKind::BrokenPipe)
+    })
+}
+
+fn is_broken_pipe_io(err: &std::io::Error) -> bool {
+    err.kind() == ErrorKind::BrokenPipe
+}
+
 async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
@@ -159,10 +170,7 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
     if let Err(e) = print_reviews(&mut handle, &skin, &latest) {
-        if e.chain().any(|c| {
-            c.downcast_ref::<std::io::Error>()
-                .is_some_and(|io| io.kind() == ErrorKind::BrokenPipe)
-        }) {
+        if caused_by_broken_pipe(&e) {
             return Ok(());
         }
         error!("error printing review: {e}");
@@ -170,10 +178,7 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
 
     for t in threads {
         if let Err(e) = print_thread(&skin, &t) {
-            if e.chain().any(|c| {
-                c.downcast_ref::<std::io::Error>()
-                    .is_some_and(|io| io.kind() == ErrorKind::BrokenPipe)
-            }) {
+            if caused_by_broken_pipe(&e) {
                 return Ok(());
             }
             error!("error printing thread: {e}");
@@ -181,7 +186,7 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     }
 
     if let Err(e) = print_end_banner() {
-        if e.kind() == ErrorKind::BrokenPipe {
+        if is_broken_pipe_io(&e) {
             return Ok(());
         }
         error!("error printing end banner: {e}");

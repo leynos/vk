@@ -4,7 +4,7 @@
 //! human-readable summary to any writer or directly to stdout.
 
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 
 use crate::review_threads::ReviewThread;
 
@@ -78,6 +78,9 @@ pub fn write_summary<W: std::io::Write>(
 /// Print the summary directly to stdout.
 pub fn print_summary(summary: &[(String, usize)]) {
     if let Err(e) = write_summary(std::io::stdout().lock(), summary) {
+        if e.kind() == ErrorKind::BrokenPipe {
+            return;
+        }
         eprintln!("Failed to write summary: {e}");
     }
 }

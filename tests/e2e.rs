@@ -14,6 +14,7 @@ use assert_cmd::prelude::*;
 use predicates::str::contains;
 use serde_json::Value;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 mod utils;
@@ -124,13 +125,11 @@ async fn pr_exits_cleanly_on_broken_pipe() {
                 .stdout(Stdio::piped())
                 .spawn()
                 .expect("spawn vk");
-            let mut head = Command::new("head")
-                .arg("-n")
-                .arg("1")
-                .stdin(child.stdout.take().expect("take stdout"))
-                .spawn()
-                .expect("spawn head");
-            head.wait().expect("wait head");
+            let stdout = child.stdout.take().expect("take stdout");
+            let mut reader = BufReader::new(stdout);
+            let mut line = String::new();
+            let _ = reader.read_line(&mut line);
+            drop(reader);
             child.wait().expect("wait vk")
         }),
     )
