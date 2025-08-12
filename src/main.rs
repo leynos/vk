@@ -54,10 +54,11 @@ enum Commands {
     Issue(IssueArgs),
 }
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(
     name = "vk",
     about = "View Komments - show unresolved PR comments",
+    version,
     subcommand_required = true,
     arg_required_else_help = true
 )]
@@ -306,6 +307,13 @@ mod tests {
             Commands::Issue(args) => assert_eq!(args.reference.as_deref(), Some("123")),
             Commands::Pr(_) => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn version_flag_displays_version() {
+        let err = Cli::try_parse_from(["vk", "--version"]).expect_err("display version");
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
+        assert!(err.to_string().contains(env!("CARGO_PKG_VERSION")));
     }
 
     #[test]

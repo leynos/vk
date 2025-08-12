@@ -15,6 +15,12 @@ or Claude Code (without implying association with any of these companies).
 vk pr <pull-request-url-or-number>
 ```
 
+Print the current version and exit with:
+
+```bash
+vk --version
+```
+
 `vk` now uses [OrthoConfig](https://github.com/leynos/ortho-config) v0.2.0 for
 configuration. A global `--repo` option or the `VK_REPO` environment variable
 sets the default repository when passing only a pull request number.
