@@ -43,6 +43,7 @@ use log::{error, warn};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::env;
+use std::io::ErrorKind;
 use std::sync::LazyLock;
 use termimad::MadSkin;
 use thiserror::Error;
@@ -55,10 +56,11 @@ enum Commands {
     Issue(IssueArgs),
 }
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(
     name = "vk",
     about = "View Komments - show unresolved PR comments",
+    version,
     subcommand_required = true,
     arg_required_else_help = true
 )]
@@ -132,6 +134,17 @@ fn build_graphql_client(
     }
 }
 
+fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
+    err.chain().any(|c| {
+        c.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == ErrorKind::BrokenPipe)
+    })
+}
+
+fn is_broken_pipe_io(err: &std::io::Error) -> bool {
+    err.kind() == ErrorKind::BrokenPipe
+}
+
 async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
@@ -162,15 +175,27 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
     if let Err(e) = print_reviews(&mut handle, &skin, &latest) {
+        if caused_by_broken_pipe(&e) {
+            return Ok(());
+        }
         error!("error printing review: {e}");
     }
 
     for t in threads {
         if let Err(e) = print_thread(&skin, &t) {
+            if caused_by_broken_pipe(&e) {
+                return Ok(());
+            }
             error!("error printing thread: {e}");
         }
     }
-    print_end_banner();
+
+    if let Err(e) = print_end_banner() {
+        if is_broken_pipe_io(&e) {
+            return Ok(());
+        }
+        error!("error printing end banner: {e}");
+    }
     Ok(())
 }
 
@@ -326,6 +351,13 @@ mod tests {
             Commands::Issue(args) => assert_eq!(args.reference.as_deref(), Some("123")),
             Commands::Pr(_) => panic!("wrong variant"),
         }
+    }
+
+    #[test]
+    fn version_flag_displays_version() {
+        let err = Cli::try_parse_from(["vk", "--version"]).expect_err("display version");
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
+        assert!(err.to_string().contains(env!("CARGO_PKG_VERSION")));
     }
 
     #[test]

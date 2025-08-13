@@ -17,6 +17,12 @@ vk pr <pull-request-url-or-number> [FILE ...]
 
 Specify file paths to show only comments for those files.
 
+Print the current version and exit with:
+
+```bash
+vk --version
+```
+
 `vk` now uses [OrthoConfig](https://github.com/leynos/ortho-config) v0.2.0 for
 configuration. A global `--repo` option or the `VK_REPO` environment variable
 sets the default repository when passing only a pull request number.

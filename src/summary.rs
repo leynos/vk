@@ -4,6 +4,7 @@
 //! human-readable summary to any writer or directly to stdout.
 
 use std::collections::BTreeMap;
+use std::io::{ErrorKind, Write};
 
 use crate::review_threads::ReviewThread;
 
@@ -77,13 +78,31 @@ pub fn write_summary<W: std::io::Write>(
 /// Print the summary directly to stdout.
 pub fn print_summary(summary: &[(String, usize)]) {
     if let Err(e) = write_summary(std::io::stdout().lock(), summary) {
+        if e.kind() == ErrorKind::BrokenPipe {
+            return;
+        }
         eprintln!("Failed to write summary: {e}");
     }
 }
 
 /// Print a closing banner once all review threads have been displayed.
-pub fn print_end_banner() {
-    println!("========== end of code review ==========");
+///
+/// # Errors
+///
+/// Returns an error if writing to stdout fails.
+///
+/// # Examples
+///
+/// ```
+/// use vk::summary::print_end_banner;
+/// print_end_banner().unwrap();
+/// ```
+pub fn print_end_banner() -> std::io::Result<()> {
+    writeln!(
+        std::io::stdout().lock(),
+        "========== end of code review =========="
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
