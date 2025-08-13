@@ -8,6 +8,16 @@ use std::borrow::Cow;
 /// Extension trait to convert string-like types into `Box<str>` without clutter.
 pub trait BoxedStr {
     /// Box this value as `Box<str>` without intermediate `String` allocation.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use crate::boxed::BoxedStr;
+    ///
+    /// let boxed: Box<str> = String::from("hi").boxed();
+    /// assert_eq!(&*boxed, "hi");
+    /// ```
+    #[must_use]
     fn boxed(self) -> Box<str>;
 }
 
@@ -53,7 +63,7 @@ mod tests {
     #[case("hi")]
     #[case(Cow::Borrowed("hi"))]
     #[case(Cow::Owned(String::from("hi")))]
-    fn boxes_string_like_inputs(#[case] input: impl BoxedStr + AsRef<str>) {
+    fn boxes_string_like_inputs(#[case] input: impl BoxedStr) {
         assert_eq!(&*input.boxed(), "hi");
     }
 
