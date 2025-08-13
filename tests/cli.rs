@@ -14,11 +14,10 @@ use std::process::Command;
 mod utils;
 use utils::start_mitm;
 
-type ThreadHandler = Box<dyn FnMut(&Request<Incoming>) -> Response<Full<Bytes>> + Send>;
-
-/// Build a handler returning an empty `reviewThreads` payload.
-fn empty_review_threads_handler() -> ThreadHandler {
-    Box::new(move |_req| {
+/// Build a closure returning an empty `reviewThreads` payload.
+fn create_empty_review_handler()
+-> impl Fn(&Request<Incoming>) -> Response<Full<Bytes>> + Send + 'static {
+    move |_req| {
         let body = json!({
             "data": {
                 "repository": {
@@ -37,7 +36,7 @@ fn empty_review_threads_handler() -> ThreadHandler {
             .header("Content-Type", "application/json")
             .body(Full::from(body))
             .expect("build response")
-    })
+    }
 }
 
 #[rstest]
@@ -55,7 +54,7 @@ async fn pr_empty_state(
     #[case] expected_output: &'static str,
 ) {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
-    *handler.lock().expect("lock handler") = empty_review_threads_handler();
+    *handler.lock().expect("lock handler") = Box::new(create_empty_review_handler());
 
     let output = expected_output.to_string();
 
