@@ -12,8 +12,10 @@ or Claude Code (without implying association with any of these companies).
 ## Usage
 
 ```bash
-vk pr <pull-request-url-or-number>
+vk pr <pull-request-url-or-number> [FILE ...]
 ```
+
+Specify file paths to show only comments for those files.
 
 Print the current version and exit with:
 
@@ -29,7 +31,8 @@ The CLI provides two subcommands:
 
 * `pr` — show unresolved pull request comments. A summary of files and comment
   counts is printed first. When finished, `vk` prints an `end of code review`
-  banner.
+  banner. Pass file paths after the pull request to restrict output to those
+  paths.
 * `issue` — read a GitHub issue (**to do**)
 
 `vk` loads default values for subcommands from configuration files and
@@ -56,6 +59,7 @@ detailed guide to creating one.
 
 ```bash
 vk pr https://github.com/leynos/mxd/pull/31
+vk pr https://github.com/leynos/mxd/pull/31 src/main.rs
 ```
 
 ## Troubleshooting

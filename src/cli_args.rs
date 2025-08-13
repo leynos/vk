@@ -45,6 +45,10 @@ pub struct PrArgs {
     // Clap marks the argument as required so parsing yields `Some(value)`. The
     // `Option` allows `PrArgs::default()` and config merging to leave it unset.
     pub reference: Option<String>,
+    /// Only show comments for these files
+    #[arg(value_name = "FILE", num_args = 0..)]
+    #[serde(default)]
+    pub files: Vec<String>,
 }
 
 /// Parameters accepted by the `issue` sub-command.

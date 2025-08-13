@@ -1,10 +1,13 @@
-//! Helpers for fetching pull request review threads from the GitHub API.
+//! Helpers for fetching and filtering pull request review threads from the
+//! GitHub API.
 //!
 //! The module defines GraphQL response structures and helpers to retrieve all
-//! unresolved review threads along with their comments.
+//! unresolved review threads along with their comments. It also provides
+//! utilities for filtering threads by file path.
 
 use serde::Deserialize;
 use serde_json::json;
+use std::collections::HashSet;
 
 use crate::graphql_queries::{COMMENT_QUERY, THREADS_QUERY};
 use crate::ref_parser::RepoInfo;
@@ -168,6 +171,56 @@ pub async fn fetch_review_threads(
     Ok(threads)
 }
 
+/// Filter review threads to those whose first comment matches one of `files`.
+///
+/// Returns the original collection when `files` is empty.
+///
+/// # Examples
+///
+/// ```
+/// use vk::review_threads::{
+///     filter_threads_by_files, CommentConnection, ReviewComment, ReviewThread,
+/// };
+/// let threads = vec![
+///     ReviewThread {
+///         comments: CommentConnection {
+///             nodes: vec![ReviewComment { path: "src/lib.rs".into(), ..Default::default() }],
+///             ..Default::default()
+///         },
+///         ..Default::default()
+///     },
+///     ReviewThread {
+///         comments: CommentConnection {
+///             nodes: vec![ReviewComment { path: "README.md".into(), ..Default::default() }],
+///             ..Default::default()
+///         },
+///         ..Default::default()
+///     },
+/// ];
+/// let filtered = filter_threads_by_files(threads, &[String::from("README.md")]);
+/// assert_eq!(filtered.len(), 1);
+/// let path = filtered
+///     .first()
+///     .and_then(|t| t.comments.nodes.first())
+///     .map(|c| c.path.as_str());
+/// assert_eq!(path, Some("README.md"));
+/// ```
+pub fn filter_threads_by_files(threads: Vec<ReviewThread>, files: &[String]) -> Vec<ReviewThread> {
+    if files.is_empty() {
+        return threads;
+    }
+    let set: HashSet<&str> = files.iter().map(String::as_str).collect();
+    threads
+        .into_iter()
+        .filter(|t| {
+            t.comments
+                .nodes
+                .first()
+                .is_some_and(|c| set.contains(c.path.as_str()))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +295,39 @@ mod tests {
 
         join.abort();
         let _ = join.await;
+    }
+
+    #[test]
+    fn filter_threads_by_files_retains_matches() {
+        let threads = vec![
+            ReviewThread {
+                comments: CommentConnection {
+                    nodes: vec![ReviewComment {
+                        path: "src/lib.rs".into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ReviewThread {
+                comments: CommentConnection {
+                    nodes: vec![ReviewComment {
+                        path: "README.md".into(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ];
+        let files = vec![String::from("README.md")];
+        let filtered = filter_threads_by_files(threads, &files);
+        assert_eq!(filtered.len(), 1);
+        let path = filtered
+            .first()
+            .and_then(|t| t.comments.nodes.first())
+            .map(|c| c.path.as_str());
+        assert_eq!(path, Some("README.md"));
     }
 }
