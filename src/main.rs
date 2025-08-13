@@ -161,11 +161,16 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         fetch_review_threads(&client, &repo, number).await?,
         &args.files,
     );
-    let reviews = fetch_reviews(&client, &repo, number).await?;
+    // Avoid fetching reviews when there are no unresolved threads.
     if threads.is_empty() {
-        println!("No unresolved comments.");
+        if args.files.is_empty() {
+            println!("No unresolved comments.");
+        } else {
+            println!("No unresolved comments for the specified files.");
+        }
         return Ok(());
     }
+    let reviews = fetch_reviews(&client, &repo, number).await?;
 
     let summary = summarize_files(&threads);
     print_summary(&summary);
