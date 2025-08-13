@@ -13,6 +13,7 @@ use serde_json::json;
 use std::env;
 
 use crate::VkError;
+use crate::boxed::BoxedStr;
 
 const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
@@ -46,7 +47,7 @@ fn handle_graphql_errors(errors: Vec<GraphQlError>) -> VkError {
         .map(|e| e.message)
         .collect::<Vec<_>>()
         .join(", ");
-    VkError::ApiErrors(msg)
+    VkError::ApiErrors(msg.boxed())
 }
 
 fn build_headers(token: &str) -> HeaderMap {
@@ -136,7 +137,7 @@ impl GraphQLClient {
         T: DeserializeOwned,
     {
         let payload = json!({ "query": query, "variables": &variables });
-        let ctx = serde_json::to_string(&payload).unwrap_or_default();
+        let ctx_box = serde_json::to_string(&payload).unwrap_or_default().boxed();
         let response = self
             .client
             .post(&self.endpoint)
@@ -145,12 +146,12 @@ impl GraphQLClient {
             .send()
             .await
             .map_err(|e| VkError::RequestContext {
-                context: ctx.clone(),
-                source: e,
+                context: ctx_box.clone(),
+                source: e.into(),
             })?;
         let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: ctx.clone(),
-            source: e,
+            context: ctx_box.clone(),
+            source: e.into(),
         })?;
         if let Some(t) = &self.transcript {
             use std::io::Write as _;
@@ -171,7 +172,7 @@ impl GraphQLClient {
         let resp: GraphQLResponse<serde_json::Value> =
             serde_json::from_str(&body).map_err(|e| {
                 let snippet = snippet(&body, BODY_SNIPPET_LEN);
-                VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}"))
+                VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}").boxed())
             })?;
 
         let resp_debug = format!("{resp:?}");
@@ -180,7 +181,7 @@ impl GraphQLClient {
         }
 
         let value = resp.data.ok_or_else(|| {
-            VkError::BadResponse(format!("Missing data in response: {resp_debug}"))
+            VkError::BadResponse(format!("Missing data in response: {resp_debug}").boxed())
         })?;
         match serde_path_to_error::deserialize::<_, T>(value.clone()) {
             Ok(v) => Ok(v),
@@ -191,9 +192,9 @@ impl GraphQLClient {
                 );
                 let path = e.path().to_string();
                 let inner = e.into_inner();
-                Err(VkError::BadResponseSerde(format!(
-                    "{inner} at {path} | snippet: {snippet}"
-                )))
+                Err(VkError::BadResponseSerde(
+                    format!("{inner} at {path} | snippet: {snippet}").boxed(),
+                ))
             }
         }
     }
@@ -276,7 +277,7 @@ mod tests {
                         },
                     ))
                 } else {
-                    Err(VkError::ApiErrors("boom".to_string()))
+                    Err(VkError::ApiErrors("boom".into()))
                 }
             }
         })

@@ -19,13 +19,9 @@ fn missing_reference(err: &FigmentError) -> bool {
 ///
 /// # Errors
 ///
-/// Returns an [`OrthoError`] if configuration gathering fails for reasons other
-/// than a missing reference field.
-#[expect(
-    clippy::result_large_err,
-    reason = "configuration loading errors can be verbose"
-)]
-pub fn load_with_reference_fallback<T>(cli_args: T) -> Result<T, OrthoError>
+/// Returns a boxed [`OrthoError`] if configuration gathering fails for reasons
+/// other than a missing reference field.
+pub fn load_with_reference_fallback<T>(cli_args: T) -> Result<T, Box<OrthoError>>
 where
     T: OrthoConfig + serde::Serialize + Default + clap::CommandFactory + Clone,
 {
@@ -35,9 +31,9 @@ where
             if missing_reference(&e) {
                 Ok(cli_args)
             } else {
-                Err(OrthoError::Gathering(e))
+                Err(OrthoError::Gathering(e).into())
             }
         }
-        Err(e) => Err(e),
+        Err(e) => Err(e.into()),
     }
 }

@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashSet;
 
+use crate::boxed::BoxedStr;
 use crate::graphql_queries::{COMMENT_QUERY, THREADS_QUERY};
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, VkError, paginate};
@@ -99,11 +100,14 @@ async fn fetch_comment_page(
     let conn = wrapper
         .node
         .ok_or_else(|| {
-            VkError::BadResponse(format!(
-                "Missing comment node in response (id: {}, cursor: {})",
-                id,
-                cursor.as_deref().unwrap_or("None")
-            ))
+            VkError::BadResponse(
+                format!(
+                    "Missing comment node in response (id: {}, cursor: {})",
+                    id,
+                    cursor.as_deref().unwrap_or("None")
+                )
+                .boxed(),
+            )
         })?
         .comments;
     Ok((conn.nodes, conn.page_info))
