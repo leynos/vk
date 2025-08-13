@@ -168,6 +168,13 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         } else {
             println!("No unresolved comments for the specified files.");
         }
+        // Preserve the end-of-review banner for consumers that parse it.
+        if let Err(e) = print_end_banner() {
+            if is_broken_pipe_io(&e) {
+                return Ok(());
+            }
+            error!("error printing end banner: {e}");
+        }
         return Ok(());
     }
     let reviews = fetch_reviews(&client, &repo, number).await?;
