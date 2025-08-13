@@ -12,18 +12,21 @@ pub trait BoxedStr {
 }
 
 impl BoxedStr for String {
+    #[inline]
     fn boxed(self) -> Box<str> {
         self.into_boxed_str()
     }
 }
 
 impl BoxedStr for &str {
+    #[inline]
     fn boxed(self) -> Box<str> {
         self.into()
     }
 }
 
 impl BoxedStr for Cow<'_, str> {
+    #[inline]
     fn boxed(self) -> Box<str> {
         match self {
             Cow::Borrowed(s) => s.into(),
@@ -33,6 +36,7 @@ impl BoxedStr for Cow<'_, str> {
 }
 
 impl BoxedStr for Box<str> {
+    #[inline]
     fn boxed(self) -> Box<str> {
         self
     }
@@ -41,28 +45,16 @@ impl BoxedStr for Box<str> {
 #[cfg(test)]
 mod tests {
     use super::BoxedStr;
+    use rstest::rstest;
     use std::borrow::Cow;
 
-    #[test]
-    fn string_is_boxed() {
-        assert_eq!(&*String::from("hi").boxed(), "hi");
-    }
-
-    #[test]
-    fn str_is_boxed() {
-        assert_eq!(&*"hi".boxed(), "hi");
-    }
-
-    #[test]
-    fn cow_borrowed_is_boxed() {
-        let cow = Cow::Borrowed("hi");
-        assert_eq!(&*cow.boxed(), "hi");
-    }
-
-    #[test]
-    fn cow_owned_is_boxed() {
-        let cow: Cow<'_, str> = Cow::Owned(String::from("hi"));
-        assert_eq!(&*cow.boxed(), "hi");
+    #[rstest]
+    #[case(String::from("hi"))]
+    #[case("hi")]
+    #[case(Cow::Borrowed("hi"))]
+    #[case(Cow::Owned(String::from("hi")))]
+    fn boxes_string_like_inputs(#[case] input: impl BoxedStr + AsRef<str>) {
+        assert_eq!(&*input.boxed(), "hi");
     }
 
     #[test]
