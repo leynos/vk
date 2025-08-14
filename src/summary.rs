@@ -250,6 +250,16 @@ mod tests {
     }
 
     #[test]
+    fn write_start_banner_outputs_text() {
+        let mut buf = Vec::new();
+        write_start_banner(&mut buf).expect("write start banner");
+        assert_eq!(
+            String::from_utf8(buf).expect("utf8"),
+            format!("{START_BANNER}\n"),
+        );
+    }
+
+    #[test]
     fn write_end_banner_propagates_io_errors() {
         use std::io::{self, Write};
 

@@ -46,7 +46,7 @@ use log::{error, warn};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::sync::LazyLock;
 use termimad::MadSkin;
 use thiserror::Error;
@@ -189,20 +189,28 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         warn!("terminal locale is not UTF-8; emojis may not render correctly");
     }
 
+    // Emit the start banner as the first line of output.
+    if handle_banner(print_start_banner, "start") {
+        return Ok(());
+    }
+
     let client = build_graphql_client(&token, global.transcript.as_ref())?;
     let threads = filter_threads_by_files(
         fetch_review_threads(&client, &repo, number).await?,
         &args.files,
     );
-    if handle_banner(print_start_banner, "start") {
-        return Ok(());
-    }
     // Avoid fetching reviews when there are no unresolved threads.
     if threads.is_empty() {
-        if args.files.is_empty() {
-            println!("No unresolved comments.");
+        let msg = if args.files.is_empty() {
+            "No unresolved comments."
         } else {
-            println!("No unresolved comments for the specified files.");
+            "No unresolved comments for the specified files."
+        };
+        if let Err(e) = writeln!(std::io::stdout().lock(), "{msg}") {
+            if is_broken_pipe_io(&e) {
+                return Ok(());
+            }
+            error!("error writing empty state: {e}");
         }
         // Preserve the end-of-review banner for consumers that parse it.
         if handle_banner(print_end_banner, "end") {
