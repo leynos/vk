@@ -131,9 +131,9 @@ classDiagram
 
 GraphQL requests are retried when a network error occurs or the response lacks
 data. Retry behaviour is configurable through `RetryConfig`, covering the
-number of attempts, base delay, and jitter fraction. By default the client
+number of attempts, base delay, and jitter fraction. By default, the client
 attempts a query up to five times, waiting `200ms * 2^attempt` plus up to the
-same backoff again of random jitter, scaling jitter with the backoff so
+same backoff again of random jitter, scaling jitter with the backoff, so
 concurrent callers spread out as delays grow. Because `run_query` only returns
 after a full page has been fetched, `paginate` never appends partial results,
 preserving order and avoiding duplicates.

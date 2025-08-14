@@ -45,7 +45,7 @@ fn start_server(responses: Vec<String>) -> TestClient {
             }))
         }
     });
-    let server = Server::bind(&"127.0.0.1:0".parse().expect("addr")).serve(svc);
+    let server = Server::bind(&"127.0.0.1:0".parse().expect("parse addr")).serve(svc);
     let addr = server.local_addr();
     let join = tokio::spawn(async move {
         let _ = server.await;
@@ -57,7 +57,7 @@ fn start_server(responses: Vec<String>) -> TestClient {
     };
     let client =
         GraphQLClient::with_endpoint_retry("token", &format!("http://{addr}"), None, retry)
-            .expect("client");
+            .expect("create client");
     TestClient { client, join }
 }
 

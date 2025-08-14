@@ -1,8 +1,8 @@
 //! Tests for review thread fetching helpers.
 
 use super::*;
+use crate::api::{GraphQLClient, RetryConfig};
 use crate::ref_parser::RepoInfo;
-use crate::{GraphQLClient, api::RetryConfig};
 use rstest::{fixture, rstest};
 use tokio::{task::JoinHandle, time::Duration};
 

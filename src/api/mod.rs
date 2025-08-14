@@ -29,7 +29,10 @@ pub struct RetryConfig {
     pub attempts: u32,
     /// Base delay for the exponential backoff.
     pub base_delay: Duration,
-    /// Jitter fraction of the backoff interval (1/128 fixed point).
+    /// Jitter fraction of the backoff interval as a fixed-point value.
+    ///
+    /// The actual fraction is `jitter_factor / 128`; 128 means 100% jitter
+    /// (up to the full backoff duration).
     pub jitter_factor: u32,
 }
 
