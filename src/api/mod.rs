@@ -180,10 +180,17 @@ impl GraphQLClient {
         Duration::from_millis(backoff_ms + jitter)
     }
 
-    async fn send_once<T>(&self, payload: &serde_json::Value) -> Result<T, VkError>
-    where
-        T: DeserializeOwned,
-    {
+    /// Execute an HTTP request and return the raw response body.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`VkError::RequestContext`] if the request fails or the
+    /// response body cannot be read.
+    async fn execute_single_request(
+        &self,
+        payload: &serde_json::Value,
+        ctx: &str,
+    ) -> Result<String, VkError> {
         let response = self
             .client
             .post(&self.endpoint)
@@ -192,17 +199,17 @@ impl GraphQLClient {
             .send()
             .await
             .map_err(|e| VkError::RequestContext {
-                context: serde_json::to_string(payload)
-                    .expect("serialising GraphQL request payload")
-                    .boxed(),
+                context: ctx.to_owned().boxed(),
                 source: e.into(),
             })?;
-        let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: serde_json::to_string(payload)
-                .expect("serialising GraphQL request payload")
-                .boxed(),
+        response.text().await.map_err(|e| VkError::RequestContext {
+            context: ctx.to_owned().boxed(),
             source: e.into(),
-        })?;
+        })
+    }
+
+    /// Write the request and response to the transcript if enabled.
+    fn log_transcript(&self, payload: &serde_json::Value, body: &str) {
         if let Some(t) = &self.transcript {
             use std::io::Write as _;
             match t.lock() {
@@ -219,11 +226,22 @@ impl GraphQLClient {
                 Err(_) => warn!("failed to lock transcript"),
             }
         }
-        let resp: GraphQLResponse<serde_json::Value> =
-            serde_json::from_str(&body).map_err(|e| {
-                let snippet = snippet(&body, BODY_SNIPPET_LEN);
-                VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}").boxed())
-            })?;
+    }
+
+    /// Parse a GraphQL response body into the desired type.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`VkError`] if the body cannot be deserialised or contains
+    /// GraphQL errors.
+    fn process_graphql_response<T>(body: &str) -> Result<T, VkError>
+    where
+        T: DeserializeOwned,
+    {
+        let resp: GraphQLResponse<serde_json::Value> = serde_json::from_str(body).map_err(|e| {
+            let snippet = snippet(body, BODY_SNIPPET_LEN);
+            VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}").boxed())
+        })?;
         let resp_debug = format!("{resp:?}");
         if let Some(errs) = resp.errors {
             return Err(handle_graphql_errors(errs));
@@ -248,6 +266,11 @@ impl GraphQLClient {
         }
     }
 
+    /// Sleep for an exponential backoff with jitter.
+    async fn perform_retry_delay(&self, attempt: u32, rng: &mut impl Rng) {
+        sleep(self.jittered_backoff(attempt, rng)).await;
+    }
+
     /// Execute a GraphQL query using this client.
     ///
     /// # Errors
@@ -264,15 +287,24 @@ impl GraphQLClient {
         T: DeserializeOwned,
     {
         let payload = json!({ "query": query, "variables": &variables });
+        let ctx = serde_json::to_string(&payload)
+            .expect("serialising GraphQL request payload")
+            .boxed();
         let mut rng = rand::thread_rng();
         let mut last_err = None;
         for attempt in 0..self.retry.attempts {
-            match self.send_once::<T>(&payload).await {
+            let res = async {
+                let body = self.execute_single_request(&payload, &ctx).await?;
+                self.log_transcript(&payload, &body);
+                Self::process_graphql_response::<T>(&body)
+            }
+            .await;
+            match res {
                 Ok(v) => return Ok(v),
                 Err(e) => {
                     if attempt + 1 < self.retry.attempts && Self::should_retry(&e) {
                         warn!("retrying GraphQL query after error: {e}");
-                        sleep(self.jittered_backoff(attempt, &mut rng)).await;
+                        self.perform_retry_delay(attempt, &mut rng).await;
                         last_err = Some(e);
                     } else {
                         return Err(e);
