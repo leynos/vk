@@ -131,13 +131,22 @@ impl GraphQLClient {
     ///
     /// Returns a [`VkError`] if the request fails or the response cannot be
     /// deserialised.
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialising the request payload fails.
     pub async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
     where
         V: serde::Serialize,
         T: DeserializeOwned,
     {
         let payload = json!({ "query": query, "variables": &variables });
-        let ctx_box = serde_json::to_string(&payload).unwrap_or_default().boxed();
+        let build_context = || {
+            // Serialise lazily so we only pay when an error occurs.
+            serde_json::to_string(&payload)
+                .expect("serialising GraphQL request payload")
+                .boxed()
+        };
         let response = self
             .client
             .post(&self.endpoint)
@@ -146,11 +155,11 @@ impl GraphQLClient {
             .send()
             .await
             .map_err(|e| VkError::RequestContext {
-                context: ctx_box.clone(),
+                context: build_context(),
                 source: e.into(),
             })?;
         let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: ctx_box.clone(),
+            context: build_context(),
             source: e.into(),
         })?;
         if let Some(t) = &self.transcript {
