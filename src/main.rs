@@ -8,7 +8,10 @@
 //! management. When a thread has multiple comments on the same diff, the diff
 //! is shown only once. Output is framed by a `code review` banner at the start
 //! and an `end of code review` banner at the end so calling processes can
-//! reliably detect boundaries.
+//! reliably detect boundaries. The module re-exports banner helpers
+//! [`print_start_banner`] and [`print_end_banner`] alongside summary utilities
+//! [`print_summary`], [`summarize_files`], and [`write_summary`] so consumers can
+//! reuse the framing and summarisation logic.
 
 pub mod api;
 mod boxed;
@@ -39,8 +42,8 @@ pub use summary::{
 
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use crate::printer::{print_reviews, write_thread};
-use crate::ref_parser::{parse_issue_reference, parse_pr_reference};
-use crate::reviews::{fetch_reviews, latest_reviews};
+use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_reference};
+use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
 use log::{error, warn};
 use regex::Regex;
@@ -178,7 +181,11 @@ where
     false
 }
 
-async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
+/// Prepare PR context, validate environment and print the start banner.
+fn setup_pr_output(
+    args: &PrArgs,
+    global: &GlobalArgs,
+) -> Result<(RepoInfo, u64, GraphQLClient), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
@@ -188,38 +195,45 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     if !locale_is_utf8() {
         warn!("terminal locale is not UTF-8; emojis may not render correctly");
     }
-
-    // Emit the start banner as the first line of output.
     if handle_banner(print_start_banner, "start") {
-        return Ok(());
+        return Err(VkError::Io(Box::new(std::io::Error::new(
+            ErrorKind::BrokenPipe,
+            "broken pipe",
+        ))));
     }
-
     let client = build_graphql_client(&token, global.transcript.as_ref())?;
-    let threads = filter_threads_by_files(
-        fetch_review_threads(&client, &repo, number).await?,
-        &args.files,
-    );
-    // Avoid fetching reviews when there are no unresolved threads.
-    if threads.is_empty() {
-        let msg = if args.files.is_empty() {
-            "No unresolved comments."
-        } else {
-            "No unresolved comments for the specified files."
-        };
-        if let Err(e) = writeln!(std::io::stdout().lock(), "{msg}") {
-            if is_broken_pipe_io(&e) {
-                return Ok(());
-            }
-            error!("error writing empty state: {e}");
-        }
-        // Preserve the end-of-review banner for consumers that parse it.
-        if handle_banner(print_end_banner, "end") {
+    Ok((repo, number, client))
+}
+
+/// Print an appropriate message when no threads match and append the end banner.
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "returns Result for interface symmetry"
+)]
+fn handle_empty_threads(files: &[String]) -> Result<(), VkError> {
+    let msg = if files.is_empty() {
+        "No unresolved comments."
+    } else {
+        "No unresolved comments for the specified files."
+    };
+    if let Err(e) = writeln!(std::io::stdout().lock(), "{msg}") {
+        if is_broken_pipe_io(&e) {
             return Ok(());
         }
+        error!("error writing empty state: {e}");
+    }
+    if handle_banner(print_end_banner, "end") {
         return Ok(());
     }
-    let reviews = fetch_reviews(&client, &repo, number).await?;
+    Ok(())
+}
 
+/// Render the summary, reviews and threads, then print the closing banner.
+#[allow(clippy::unnecessary_wraps, reason = "future error cases may emerge")]
+fn generate_pr_output(
+    threads: Vec<ReviewThread>,
+    reviews: Vec<PullRequestReview>,
+) -> Result<(), VkError> {
     let summary = summarize_files(&threads);
     print_summary(&summary);
 
@@ -247,6 +261,27 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         return Ok(());
     }
     Ok(())
+}
+
+async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
+    let (repo, number, client) = match setup_pr_output(&args, global) {
+        Ok(v) => v,
+        Err(VkError::Io(e)) if e.kind() == ErrorKind::BrokenPipe => return Ok(()),
+        Err(e) => return Err(e),
+    };
+
+    let threads = filter_threads_by_files(
+        fetch_review_threads(&client, &repo, number).await?,
+        &args.files,
+    );
+
+    if threads.is_empty() {
+        handle_empty_threads(&args.files)?;
+        return Ok(());
+    }
+
+    let reviews = fetch_reviews(&client, &repo, number).await?;
+    generate_pr_output(threads, reviews)
 }
 
 async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> {

@@ -250,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn write_start_banner_outputs_text() {
+    fn write_start_banner_outputs_exact_text() {
         let mut buf = Vec::new();
         write_start_banner(&mut buf).expect("write start banner");
         assert_eq!(
