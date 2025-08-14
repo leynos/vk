@@ -160,9 +160,14 @@ pub async fn fetch_review_threads(
             },
         );
         let mut comments = initial.nodes;
-        if initial.page_info.has_next_page {
-            let more = paginate(|c| fetch_comment_page(client, &thread.id, c)).await?;
+        let mut cursor = initial.page_info.end_cursor;
+        while let Some(c) = cursor.clone() {
+            let (more, info) = fetch_comment_page(client, &thread.id, Some(c)).await?;
             comments.extend(more);
+            if !info.has_next_page {
+                break;
+            }
+            cursor = info.end_cursor;
         }
         thread.comments = CommentConnection {
             nodes: comments,
@@ -224,114 +229,5 @@ pub fn filter_threads_by_files(threads: Vec<ReviewThread>, files: &[String]) -> 
         })
         .collect()
 }
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::GraphQLClient;
-    use crate::ref_parser::RepoInfo;
-
-    #[tokio::test]
-    async fn run_query_missing_nodes_reports_path() {
-        use third_wheel::hyper::{
-            Body, Request, Response, Server, StatusCode,
-            service::{make_service_fn, service_fn},
-        };
-
-        let body = serde_json::json!({
-            "data": {
-                "repository": {
-                    "pullRequest": {
-                        "reviewThreads": {
-                            "pageInfo": { "hasNextPage": false, "endCursor": null }
-                        }
-                    }
-                }
-            }
-        })
-        .to_string();
-
-        let make_svc = make_service_fn(move |_conn| {
-            let body = body.clone();
-            async move {
-                Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
-                    let body = body.clone();
-                    async move {
-                        Ok::<_, std::convert::Infallible>(
-                            Response::builder()
-                                .status(StatusCode::OK)
-                                .header("Content-Type", "application/json")
-                                .body(Body::from(body.clone()))
-                                .expect("failed to build HTTP response"),
-                        )
-                    }
-                }))
-            }
-        });
-
-        let server = Server::bind(
-            &"127.0.0.1:0"
-                .parse()
-                .expect("failed to parse server address"),
-        )
-        .serve(make_svc);
-        let addr = server.local_addr();
-        let join = tokio::spawn(server);
-
-        let client = GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None)
-            .expect("failed to create GraphQL client");
-
-        let repo = RepoInfo {
-            owner: "o".into(),
-            name: "r".into(),
-        };
-        let result = fetch_review_threads(&client, &repo, 1).await;
-        let err = result.expect_err("expected error");
-        let err_msg = format!("{err}");
-        assert!(
-            err_msg.contains("repository.pullRequest.reviewThreads"),
-            "Error should contain full JSON path",
-        );
-        assert!(
-            err_msg.contains("snippet:"),
-            "Error should contain JSON snippet",
-        );
-
-        join.abort();
-        let _ = join.await;
-    }
-
-    #[test]
-    fn filter_threads_by_files_retains_matches() {
-        let threads = vec![
-            ReviewThread {
-                comments: CommentConnection {
-                    nodes: vec![ReviewComment {
-                        path: "src/lib.rs".into(),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            ReviewThread {
-                comments: CommentConnection {
-                    nodes: vec![ReviewComment {
-                        path: "README.md".into(),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        ];
-        let files = vec![String::from("README.md")];
-        let filtered = filter_threads_by_files(threads, &files);
-        assert_eq!(filtered.len(), 1);
-        let path = filtered
-            .first()
-            .and_then(|t| t.comments.nodes.first())
-            .map(|c| c.path.as_str());
-        assert_eq!(path, Some("README.md"));
-    }
-}
+mod tests;
