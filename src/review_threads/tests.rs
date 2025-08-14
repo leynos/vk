@@ -6,6 +6,10 @@ use crate::ref_parser::RepoInfo;
 use rstest::{fixture, rstest};
 use tokio::task::JoinHandle;
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 use third_wheel::hyper::{
     Body, Request, Response, Server, StatusCode,
     service::{make_service_fn, service_fn},
@@ -18,19 +22,16 @@ use third_wheel::hyper::{
 struct TestClient {
     client: GraphQLClient,
     join: JoinHandle<()>,
+    hits: Arc<AtomicUsize>,
 }
 
 fn start_server(responses: Vec<String>) -> TestClient {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
     let responses = Arc::new(responses);
     let counter = Arc::new(AtomicUsize::new(0));
+    let svc_counter = Arc::clone(&counter);
     let svc = make_service_fn(move |_conn| {
         let responses = Arc::clone(&responses);
-        let counter = Arc::clone(&counter);
+        let counter = Arc::clone(&svc_counter);
         async move {
             Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
                 let idx = counter.fetch_add(1, Ordering::SeqCst);
@@ -57,7 +58,11 @@ fn start_server(responses: Vec<String>) -> TestClient {
     });
     let client = GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None)
         .expect("create client");
-    TestClient { client, join }
+    TestClient {
+        client,
+        join,
+        hits: counter,
+    }
 }
 
 #[fixture]
@@ -127,7 +132,7 @@ async fn run_query_missing_nodes_reports_path(
     repo: RepoInfo,
     #[future] missing_nodes_client: TestClient,
 ) {
-    let TestClient { client, join } = missing_nodes_client.await;
+    let TestClient { client, join, .. } = missing_nodes_client.await;
     let result = fetch_review_threads(&client, &repo, 1).await;
     let err = result.expect_err("expected error");
     let err_msg = format!("{err}");
@@ -183,7 +188,7 @@ async fn threads_with_many_comments_do_not_duplicate_first_page(
     repo: RepoInfo,
     #[future] pagination_client: TestClient,
 ) {
-    let TestClient { client, join } = pagination_client.await;
+    let TestClient { client, join, .. } = pagination_client.await;
     let threads = fetch_review_threads(&client, &repo, 1)
         .await
         .expect("fetch threads");
@@ -199,6 +204,48 @@ async fn threads_with_many_comments_do_not_duplicate_first_page(
         bodies,
         (0..=100).map(|i| format!("c{i}")).collect::<Vec<_>>()
     );
+    join.abort();
+    let _ = join.await;
+}
+
+#[fixture]
+async fn retry_client() -> TestClient {
+    let page1 = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [{
+                "id": "t1",
+                "isResolved": false,
+                "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+            }],
+            "pageInfo": {"hasNextPage": true, "endCursor": "c1"},
+        }}}}
+    })
+    .to_string();
+    let error = "{}".to_string();
+    let page2 = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [{
+                "id": "t2",
+                "isResolved": false,
+                "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+            }],
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
+        }}}}
+    })
+    .to_string();
+    start_server(vec![page1, error, page2])
+}
+
+#[rstest]
+#[tokio::test]
+async fn retries_bad_page_and_preserves_order(repo: RepoInfo, #[future] retry_client: TestClient) {
+    let TestClient { client, join, hits } = retry_client.await;
+    let threads = fetch_review_threads(&client, &repo, 1)
+        .await
+        .expect("fetch threads");
+    let ids: Vec<_> = threads.iter().map(|t| t.id.as_str()).collect();
+    assert_eq!(ids, ["t1", "t2"]);
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
     join.abort();
     let _ = join.await;
 }
