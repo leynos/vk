@@ -1,10 +1,10 @@
 //! Tests for review thread fetching helpers.
 
 use super::*;
-use crate::GraphQLClient;
 use crate::ref_parser::RepoInfo;
+use crate::{GraphQLClient, api::RetryConfig};
 use rstest::{fixture, rstest};
-use tokio::task::JoinHandle;
+use tokio::{task::JoinHandle, time::Duration};
 
 use std::sync::{
     Arc,
@@ -56,8 +56,14 @@ fn start_server(responses: Vec<String>) -> TestClient {
     let join = tokio::spawn(async move {
         let _ = server.await;
     });
-    let client = GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None)
-        .expect("create client");
+    let retry = RetryConfig {
+        base_delay: Duration::from_millis(1),
+        jitter_factor: 0,
+        ..RetryConfig::default()
+    };
+    let client =
+        GraphQLClient::with_endpoint_retry("token", &format!("http://{addr}"), None, retry)
+            .expect("create client");
     TestClient {
         client,
         join,
