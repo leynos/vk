@@ -180,8 +180,7 @@ impl GraphQLClient {
         Duration::from_millis(backoff_ms + jitter)
     }
 
-    #[allow(clippy::borrowed_box, reason = "avoids reallocating context string")]
-    async fn send_once<T>(&self, payload: &serde_json::Value, ctx: &Box<str>) -> Result<T, VkError>
+    async fn send_once<T>(&self, payload: &serde_json::Value) -> Result<T, VkError>
     where
         T: DeserializeOwned,
     {
@@ -193,11 +192,15 @@ impl GraphQLClient {
             .send()
             .await
             .map_err(|e| VkError::RequestContext {
-                context: ctx.clone(),
+                context: serde_json::to_string(payload)
+                    .expect("serialising GraphQL request payload")
+                    .boxed(),
                 source: e.into(),
             })?;
         let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: ctx.clone(),
+            context: serde_json::to_string(payload)
+                .expect("serialising GraphQL request payload")
+                .boxed(),
             source: e.into(),
         })?;
         if let Some(t) = &self.transcript {
@@ -208,7 +211,7 @@ impl GraphQLClient {
                         f,
                         "{}",
                         serde_json::to_string(&json!({ "request": payload, "response": body }))
-                            .unwrap_or_default(),
+                            .expect("serialising GraphQL transcript"),
                     ) {
                         warn!("failed to write transcript: {e}");
                     }
@@ -232,7 +235,8 @@ impl GraphQLClient {
             Ok(v) => Ok(v),
             Err(e) => {
                 let snippet = snippet(
-                    &serde_json::to_string_pretty(&value).unwrap_or_default(),
+                    &serde_json::to_string_pretty(&value)
+                        .expect("serialising JSON snippet for error"),
                     VALUE_SNIPPET_LEN,
                 );
                 let path = e.path().to_string();
@@ -260,11 +264,10 @@ impl GraphQLClient {
         T: DeserializeOwned,
     {
         let payload = json!({ "query": query, "variables": &variables });
-        let ctx_box = serde_json::to_string(&payload).unwrap_or_default().boxed();
         let mut rng = rand::thread_rng();
         let mut last_err = None;
         for attempt in 0..self.retry.attempts {
-            match self.send_once::<T>(&payload, &ctx_box).await {
+            match self.send_once::<T>(&payload).await {
                 Ok(v) => return Ok(v),
                 Err(e) => {
                     if attempt + 1 < self.retry.attempts && Self::should_retry(&e) {
