@@ -131,6 +131,11 @@ impl GraphQLClient {
     ///
     /// Returns a [`VkError`] if the request fails or the response cannot be
     /// deserialised.
+    ///
+    /// # Panics
+    ///
+    /// Panics if serialising the response for an error snippet fails. This is
+    /// not expected as serialising a `Value` cannot fail.
     pub async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
     where
         V: serde::Serialize,
@@ -187,7 +192,8 @@ impl GraphQLClient {
             Ok(v) => Ok(v),
             Err(e) => {
                 let snippet = snippet(
-                    &serde_json::to_string_pretty(&value).unwrap_or_default(),
+                    &serde_json::to_string_pretty(&value)
+                        .expect("serialising JSON snippet for error"),
                     VALUE_SNIPPET_LEN,
                 );
                 let path = e.path().to_string();
