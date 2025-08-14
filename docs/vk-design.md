@@ -21,7 +21,8 @@ even when multiple comments reference the same code.
   reducing clutter when multiple remarks target the same line.
 - **Error visibility**: Failures encountered while printing a thread are logged
   to stderr instead of being silently discarded.
-- **Completion notice**: A final banner marks the *end of code review*.
+- **Banners**: Output opens with a `code review` banner and ends with an
+  `end of code review` banner, framing the printed threads.
 
 ## Architecture
 
@@ -32,11 +33,12 @@ The code centres on three printing helpers:
 2. `write_comment` includes the diff for the first comment in a thread.
 3. `write_thread` iterates over a thread and prints each comment body in turn.
 
-`run_pr` fetches the latest review banner from each reviewer and all unresolved
-threads. The reviews are printed after the summary and before individual
-threads. Errors from `print_thread` are surfaced via logging. Once all threads
-have been printed, a final banner reading `end of code review` confirms
-completion.
+`run_pr` fetches the latest review from each reviewer and all unresolved
+threads. After printing a `code review` banner and a summary, the reviews are
+printed before individual threads. Broken pipe errors terminate output early;
+other errors from `print_thread` and banner printing are surfaced via logging.
+Once all threads have been printed, a final banner reading `end of code review`
+confirms completion.
 
 ### CLI arguments
 
@@ -122,7 +124,7 @@ classDiagram
     ReviewComment "0..*" --> "0..1" User : author
     CommentConnection "1" --> "1" PageInfo : pageInfo
 
-    class ReviewThreadsService <<service>> {
+    class ReviewThreadsService {
         +fetchReviewThreads(client: GraphQLClient, repo: String, number: Int): [ReviewThread!]!
     }
 ```

@@ -11,6 +11,8 @@ use rstest::rstest;
 use serde_json::json;
 use std::process::Command;
 
+use predicates::prelude::*;
+
 mod utils;
 use utils::start_mitm;
 
@@ -42,11 +44,11 @@ fn create_empty_review_handler()
 #[rstest]
 #[case(
     Vec::new(),
-    "No unresolved comments.\n========== end of code review ==========\n"
+    "========== code review ==========\nNo unresolved comments.\n========== end of code review ==========\n"
 )]
 #[case(
     vec!["no_such_file.rs"],
-    "No unresolved comments for the specified files.\n========== end of code review ==========\n",
+    "========== code review ==========\nNo unresolved comments for the specified files.\n========== end of code review ==========\n",
 )]
 #[tokio::test]
 async fn pr_empty_state(
@@ -69,6 +71,64 @@ async fn pr_empty_state(
         }
 
         cmd.assert().success().stdout(output);
+    })
+    .await
+    .expect("spawn blocking");
+
+    shutdown.shutdown().await;
+}
+
+#[tokio::test]
+async fn pr_outputs_banner_when_threads_present() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let threads_body = json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [{
+                "id": "t1",
+                "isResolved": false,
+                "comments": {
+                    "nodes": [{
+                        "body": "Looks good",
+                        "diffHunk": "@@ -1 +1 @@\n-old\n+new\n",
+                        "originalPosition": null,
+                        "position": null,
+                        "path": "file.rs",
+                        "url": "http://example.com",
+                        "author": {"login": "alice"}
+                    }],
+                    "pageInfo": {"hasNextPage": false, "endCursor": null}
+                }
+            }],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    let reviews_body = json!({
+        "data": {"repository": {"pullRequest": {"reviews": {
+            "nodes": [],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    let mut responses = vec![threads_body, reviews_body].into_iter();
+    *handler.lock().expect("lock handler") = Box::new(move |_req| {
+        let body = responses.next().expect("response");
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::from(body))
+            .expect("build response")
+    });
+
+    tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::cargo_bin("vk").expect("binary");
+        cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
+            .env("GITHUB_TOKEN", "dummy")
+            .args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
+        cmd.assert().success().stdout(
+            predicate::str::starts_with("========== code review ==========\n")
+                .and(predicate::str::contains("Looks good")),
+        );
     })
     .await
     .expect("spawn blocking");

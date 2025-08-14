@@ -6,9 +6,12 @@
 //! `review_threads` for fetching review data, `issues` for issue retrieval,
 //! `summary` for summarising comments, and `config` for configuration
 //! management. When a thread has multiple comments on the same diff, the diff
-//! is shown only once. After all comments are printed, the tool displays an
-//! `end of code review` banner so calling processes know the output has
-//! finished.
+//! is shown only once. Output is framed by a `code review` banner at the start
+//! and an `end of code review` banner at the end so calling processes can
+//! reliably detect boundaries. The module re-exports banner helpers
+//! [`print_start_banner`] and [`print_end_banner`] alongside summary utilities
+//! [`print_summary`], [`summarize_files`], and [`write_summary`] so consumers can
+//! reuse the framing and summarisation logic.
 
 pub mod api;
 mod boxed;
@@ -33,18 +36,20 @@ pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
     filter_threads_by_files,
 };
-pub use summary::{print_end_banner, print_summary, summarize_files, write_summary};
+pub use summary::{
+    print_end_banner, print_start_banner, print_summary, summarize_files, write_summary,
+};
 
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use crate::printer::{print_reviews, write_thread};
-use crate::ref_parser::{parse_issue_reference, parse_pr_reference};
-use crate::reviews::{fetch_reviews, latest_reviews};
+use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_reference};
+use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
 use log::{error, warn};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::sync::LazyLock;
 use termimad::MadSkin;
 use thiserror::Error;
@@ -163,7 +168,24 @@ fn is_broken_pipe_io(err: &std::io::Error) -> bool {
     err.kind() == ErrorKind::BrokenPipe
 }
 
-async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
+fn handle_banner<F>(print: F, label: &str) -> bool
+where
+    F: FnOnce() -> std::io::Result<()>,
+{
+    if let Err(e) = print() {
+        if is_broken_pipe_io(&e) {
+            return true;
+        }
+        error!("error printing {label} banner: {e}");
+    }
+    false
+}
+
+/// Prepare PR context, validate environment and print the start banner.
+fn setup_pr_output(
+    args: &PrArgs,
+    global: &GlobalArgs,
+) -> Result<(RepoInfo, u64, GraphQLClient), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
@@ -173,30 +195,45 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     if !locale_is_utf8() {
         warn!("terminal locale is not UTF-8; emojis may not render correctly");
     }
-
+    if handle_banner(print_start_banner, "start") {
+        return Err(VkError::Io(Box::new(std::io::Error::new(
+            ErrorKind::BrokenPipe,
+            "broken pipe",
+        ))));
+    }
     let client = build_graphql_client(&token, global.transcript.as_ref())?;
-    let threads = filter_threads_by_files(
-        fetch_review_threads(&client, &repo, number).await?,
-        &args.files,
-    );
-    // Avoid fetching reviews when there are no unresolved threads.
-    if threads.is_empty() {
-        if args.files.is_empty() {
-            println!("No unresolved comments.");
-        } else {
-            println!("No unresolved comments for the specified files.");
+    Ok((repo, number, client))
+}
+
+/// Print an appropriate message when no threads match and append the end banner.
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "returns Result for interface symmetry"
+)]
+fn handle_empty_threads(files: &[String]) -> Result<(), VkError> {
+    let msg = if files.is_empty() {
+        "No unresolved comments."
+    } else {
+        "No unresolved comments for the specified files."
+    };
+    if let Err(e) = writeln!(std::io::stdout().lock(), "{msg}") {
+        if is_broken_pipe_io(&e) {
+            return Ok(());
         }
-        // Preserve the end-of-review banner for consumers that parse it.
-        if let Err(e) = print_end_banner() {
-            if is_broken_pipe_io(&e) {
-                return Ok(());
-            }
-            error!("error printing end banner: {e}");
-        }
+        error!("error writing empty state: {e}");
+    }
+    if handle_banner(print_end_banner, "end") {
         return Ok(());
     }
-    let reviews = fetch_reviews(&client, &repo, number).await?;
+    Ok(())
+}
 
+/// Render the summary, reviews and threads, then print the closing banner.
+#[allow(clippy::unnecessary_wraps, reason = "future error cases may emerge")]
+fn generate_pr_output(
+    threads: Vec<ReviewThread>,
+    reviews: Vec<PullRequestReview>,
+) -> Result<(), VkError> {
     let summary = summarize_files(&threads);
     print_summary(&summary);
 
@@ -220,13 +257,31 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         }
     }
 
-    if let Err(e) = print_end_banner() {
-        if is_broken_pipe_io(&e) {
-            return Ok(());
-        }
-        error!("error printing end banner: {e}");
+    if handle_banner(print_end_banner, "end") {
+        return Ok(());
     }
     Ok(())
+}
+
+async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
+    let (repo, number, client) = match setup_pr_output(&args, global) {
+        Ok(v) => v,
+        Err(VkError::Io(e)) if e.kind() == ErrorKind::BrokenPipe => return Ok(()),
+        Err(e) => return Err(e),
+    };
+
+    let threads = filter_threads_by_files(
+        fetch_review_threads(&client, &repo, number).await?,
+        &args.files,
+    );
+
+    if threads.is_empty() {
+        handle_empty_threads(&args.files)?;
+        return Ok(());
+    }
+
+    let reviews = fetch_reviews(&client, &repo, number).await?;
+    generate_pr_output(threads, reviews)
 }
 
 async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> {
@@ -442,5 +497,18 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("\u{25B6} hello"));
         assert!(!out.contains("bye"));
+    }
+
+    #[test]
+    fn handle_banner_returns_true_on_broken_pipe() {
+        let broken_pipe =
+            || -> std::io::Result<()> { Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)) };
+        assert!(super::handle_banner(broken_pipe, "start"));
+    }
+
+    #[test]
+    fn handle_banner_logs_and_returns_false_on_other_errors() {
+        let other_err = || -> std::io::Result<()> { Err(std::io::Error::other("boom")) };
+        assert!(!super::handle_banner(other_err, "end"));
     }
 }
