@@ -33,7 +33,9 @@ pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
     filter_threads_by_files,
 };
-pub use summary::{print_end_banner, print_summary, summarize_files, write_summary};
+pub use summary::{
+    print_end_banner, print_start_banner, print_summary, summarize_files, write_summary,
+};
 
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use crate::printer::{print_reviews, write_thread};
@@ -179,6 +181,12 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         fetch_review_threads(&client, &repo, number).await?,
         &args.files,
     );
+    if let Err(e) = print_start_banner() {
+        if is_broken_pipe_io(&e) {
+            return Ok(());
+        }
+        error!("error printing start banner: {e}");
+    }
     // Avoid fetching reviews when there are no unresolved threads.
     if threads.is_empty() {
         if args.files.is_empty() {

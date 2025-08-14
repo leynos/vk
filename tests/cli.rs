@@ -42,11 +42,11 @@ fn create_empty_review_handler()
 #[rstest]
 #[case(
     Vec::new(),
-    "No unresolved comments.\n========== end of code review ==========\n"
+    "========== code review ==========\nNo unresolved comments.\n========== end of code review ==========\n"
 )]
 #[case(
     vec!["no_such_file.rs"],
-    "No unresolved comments for the specified files.\n========== end of code review ==========\n",
+    "========== code review ==========\nNo unresolved comments for the specified files.\n========== end of code review ==========\n",
 )]
 #[tokio::test]
 async fn pr_empty_state(

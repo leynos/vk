@@ -85,6 +85,26 @@ pub fn print_summary(summary: &[(String, usize)]) {
     }
 }
 
+/// Print a banner marking the start of code review output.
+///
+/// # Errors
+///
+/// Returns an error if writing to stdout fails.
+///
+/// # Examples
+///
+/// ```
+/// use vk::summary::print_start_banner;
+/// print_start_banner().unwrap();
+/// ```
+pub fn print_start_banner() -> std::io::Result<()> {
+    writeln!(
+        std::io::stdout().lock(),
+        "========== code review =========="
+    )?;
+    Ok(())
+}
+
 /// Print a closing banner once all review threads have been displayed.
 ///
 /// # Errors
