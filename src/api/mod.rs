@@ -6,11 +6,13 @@
 //! a cursor-based connection.
 
 use log::warn;
+use rand::Rng;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use std::env;
+use tokio::time::{Duration, sleep};
 
 use crate::VkError;
 use crate::boxed::BoxedStr;
@@ -19,6 +21,30 @@ const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
 const BODY_SNIPPET_LEN: usize = 500;
 const VALUE_SNIPPET_LEN: usize = 200;
+
+/// Configuration for retrying failed GraphQL requests.
+#[derive(Clone, Copy)]
+pub struct RetryConfig {
+    /// Total number of attempts including the initial request.
+    pub attempts: u32,
+    /// Base delay for the exponential backoff.
+    pub base_delay: Duration,
+    /// Jitter fraction of the backoff interval as a fixed-point value.
+    ///
+    /// The actual fraction is `jitter_factor / 128`; 128 means 100% jitter
+    /// (up to the full backoff duration).
+    pub jitter_factor: u32,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            attempts: 5,
+            base_delay: Duration::from_millis(200),
+            jitter_factor: 128,
+        }
+    }
+}
 
 fn snippet(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
@@ -77,6 +103,7 @@ pub struct GraphQLClient {
     headers: HeaderMap,
     endpoint: String,
     transcript: Option<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>,
+    retry: RetryConfig,
 }
 
 impl GraphQLClient {
@@ -94,7 +121,7 @@ impl GraphQLClient {
     ) -> Result<Self, std::io::Error> {
         let endpoint =
             env::var("GITHUB_GRAPHQL_URL").unwrap_or_else(|_| GITHUB_GRAPHQL_URL.to_string());
-        Self::with_endpoint(token, &endpoint, transcript)
+        Self::with_endpoint_retry(token, &endpoint, transcript, RetryConfig::default())
     }
 
     /// Create a client targeting a custom API endpoint.
@@ -110,6 +137,20 @@ impl GraphQLClient {
         endpoint: &str,
         transcript: Option<std::path::PathBuf>,
     ) -> Result<Self, std::io::Error> {
+        Self::with_endpoint_retry(token, endpoint, transcript, RetryConfig::default())
+    }
+
+    /// Create a client targeting a custom API endpoint with custom retry settings.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
+    pub fn with_endpoint_retry(
+        token: &str,
+        endpoint: &str,
+        transcript: Option<std::path::PathBuf>,
+        retry: RetryConfig,
+    ) -> Result<Self, std::io::Error> {
         let transcript = match transcript {
             Some(p) => match std::fs::File::create(p) {
                 Ok(file) => Some(std::sync::Mutex::new(std::io::BufWriter::new(file))),
@@ -122,37 +163,56 @@ impl GraphQLClient {
             headers: build_headers(token),
             endpoint: endpoint.to_string(),
             transcript,
+            retry,
         })
     }
 
-    /// Execute a GraphQL query using this client.
+    fn should_retry(err: &VkError) -> bool {
+        match err {
+            VkError::RequestContext { .. } | VkError::Request(_) => true,
+            VkError::BadResponse(msg) => msg.starts_with("Missing data in response"),
+            _ => false,
+        }
+    }
+
+    fn jittered_backoff(&self, attempt: u32, rng: &mut impl Rng) -> Duration {
+        let backoff = self.retry.base_delay * 2u32.pow(attempt);
+        let backoff_ms = u64::try_from(backoff.as_millis()).expect("delay fits in u64");
+        let jitter_max = (backoff_ms * u64::from(self.retry.jitter_factor)) >> 7;
+        let jitter = rng.gen_range(0..=jitter_max);
+        Duration::from_millis(backoff_ms + jitter)
+    }
+
+    /// Execute an HTTP request and return the raw response body.
     ///
     /// # Errors
     ///
-    /// Returns a [`VkError`] if the request fails or the response cannot be
-    /// deserialised.
-    pub async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
-    where
-        V: serde::Serialize,
-        T: DeserializeOwned,
-    {
-        let payload = json!({ "query": query, "variables": &variables });
-        let ctx_box = serde_json::to_string(&payload).unwrap_or_default().boxed();
+    /// Returns a [`VkError::RequestContext`] if the request fails or the
+    /// response body cannot be read.
+    async fn execute_single_request(
+        &self,
+        payload: &serde_json::Value,
+        ctx: &str,
+    ) -> Result<String, VkError> {
         let response = self
             .client
             .post(&self.endpoint)
             .headers(self.headers.clone())
-            .json(&payload)
+            .json(payload)
             .send()
             .await
             .map_err(|e| VkError::RequestContext {
-                context: ctx_box.clone(),
+                context: ctx.to_owned().boxed(),
                 source: e.into(),
             })?;
-        let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: ctx_box.clone(),
+        response.text().await.map_err(|e| VkError::RequestContext {
+            context: ctx.to_owned().boxed(),
             source: e.into(),
-        })?;
+        })
+    }
+
+    /// Write the request and response to the transcript if enabled.
+    fn log_transcript(&self, payload: &serde_json::Value, body: &str) {
         if let Some(t) = &self.transcript {
             use std::io::Write as _;
             match t.lock() {
@@ -161,7 +221,7 @@ impl GraphQLClient {
                         f,
                         "{}",
                         serde_json::to_string(&json!({ "request": payload, "response": body }))
-                            .unwrap_or_default()
+                            .expect("serialising GraphQL transcript"),
                     ) {
                         warn!("failed to write transcript: {e}");
                     }
@@ -169,17 +229,26 @@ impl GraphQLClient {
                 Err(_) => warn!("failed to lock transcript"),
             }
         }
-        let resp: GraphQLResponse<serde_json::Value> =
-            serde_json::from_str(&body).map_err(|e| {
-                let snippet = snippet(&body, BODY_SNIPPET_LEN);
-                VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}").boxed())
-            })?;
+    }
 
+    /// Parse a GraphQL response body into the desired type.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`VkError`] if the body cannot be deserialised or contains
+    /// GraphQL errors.
+    fn process_graphql_response<T>(body: &str) -> Result<T, VkError>
+    where
+        T: DeserializeOwned,
+    {
+        let resp: GraphQLResponse<serde_json::Value> = serde_json::from_str(body).map_err(|e| {
+            let snippet = snippet(body, BODY_SNIPPET_LEN);
+            VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}").boxed())
+        })?;
         let resp_debug = format!("{resp:?}");
         if let Some(errs) = resp.errors {
             return Err(handle_graphql_errors(errs));
         }
-
         let value = resp.data.ok_or_else(|| {
             VkError::BadResponse(format!("Missing data in response: {resp_debug}").boxed())
         })?;
@@ -187,7 +256,8 @@ impl GraphQLClient {
             Ok(v) => Ok(v),
             Err(e) => {
                 let snippet = snippet(
-                    &serde_json::to_string_pretty(&value).unwrap_or_default(),
+                    &serde_json::to_string_pretty(&value)
+                        .expect("serialising JSON snippet for error"),
                     VALUE_SNIPPET_LEN,
                 );
                 let path = e.path().to_string();
@@ -197,6 +267,55 @@ impl GraphQLClient {
                 ))
             }
         }
+    }
+
+    /// Sleep for an exponential backoff with jitter.
+    async fn perform_retry_delay(&self, attempt: u32, rng: &mut impl Rng) {
+        sleep(self.jittered_backoff(attempt, rng)).await;
+    }
+
+    /// Execute a GraphQL query using this client.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`VkError`] if the request fails or the response cannot be
+    /// deserialised.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the configured backoff exceeds `u64::MAX` milliseconds.
+    pub async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
+    where
+        V: serde::Serialize,
+        T: DeserializeOwned,
+    {
+        let payload = json!({ "query": query, "variables": &variables });
+        let ctx = serde_json::to_string(&payload)
+            .expect("serialising GraphQL request payload")
+            .boxed();
+        let mut rng = rand::thread_rng();
+        let mut last_err = None;
+        for attempt in 0..self.retry.attempts {
+            let res = async {
+                let body = self.execute_single_request(&payload, &ctx).await?;
+                self.log_transcript(&payload, &body);
+                Self::process_graphql_response::<T>(&body)
+            }
+            .await;
+            match res {
+                Ok(v) => return Ok(v),
+                Err(e) => {
+                    if attempt + 1 < self.retry.attempts && Self::should_retry(&e) {
+                        warn!("retrying GraphQL query after error: {e}");
+                        self.perform_retry_delay(attempt, &mut rng).await;
+                        last_err = Some(e);
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| VkError::BadResponse("retry loop exhausted".boxed())))
     }
 }
 
@@ -255,35 +374,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::PageInfo;
-    use std::cell::RefCell;
-
-    #[tokio::test]
-    async fn paginate_discards_items_on_error() {
-        let seen = RefCell::new(Vec::new());
-
-        let result: Result<Vec<i32>, VkError> = paginate(|cursor| {
-            let seen = &seen;
-            async move {
-                if cursor.is_none() {
-                    seen.borrow_mut().push(1);
-                    Ok((
-                        vec![1],
-                        PageInfo {
-                            has_next_page: true,
-                            end_cursor: Some("next".to_string()),
-                        },
-                    ))
-                } else {
-                    Err(VkError::ApiErrors("boom".into()))
-                }
-            }
-        })
-        .await;
-
-        assert!(result.is_err());
-        assert_eq!(seen.borrow().as_slice(), &[1]);
-    }
-}
+mod tests;
