@@ -161,7 +161,7 @@ pub async fn fetch_review_threads(
         );
         let mut comments = initial.nodes;
         let mut cursor = initial.page_info.end_cursor;
-        while let Some(c) = cursor.clone() {
+        while let Some(c) = cursor.take() {
             let (more, info) = fetch_comment_page(client, &thread.id, Some(c)).await?;
             comments.extend(more);
             if !info.has_next_page {
