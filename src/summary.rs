@@ -1,12 +1,18 @@
-//! Utilities for generating and printing review summaries.
+//! Utilities for generating and printing review summaries and banners.
 //!
 //! Functions in this module collate review comments by file path and render a
-//! human-readable summary to any writer or directly to stdout.
+//! human-readable summary to any writer or directly to stdout. Banner helpers
+//! frame output with start and end markers.
 
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Write};
 
 use crate::review_threads::ReviewThread;
+
+/// Banner printed at the start of a code review.
+pub const START_BANNER: &str = "========== code review ==========";
+/// Banner printed at the end of a code review.
+pub const END_BANNER: &str = "========== end of code review ==========";
 
 /// Produce a count of comments per file path.
 ///
@@ -56,8 +62,8 @@ pub fn summarize_files(threads: &[ReviewThread]) -> Vec<(String, usize)> {
 /// };
 /// let summary = summarize_files(&[thread]);
 /// let mut out = Vec::new();
-/// write_summary(&mut out, &summary).unwrap();
-/// assert!(String::from_utf8(out).unwrap().contains("a.rs: 1 comment"));
+/// write_summary(&mut out, &summary).expect("write summary");
+/// assert!(String::from_utf8(out).expect("utf8").contains("a.rs: 1 comment"));
 /// ```
 pub fn write_summary<W: std::io::Write>(
     mut out: W,
@@ -100,10 +106,10 @@ fn write_banner<W: Write>(mut out: W, text: &str) -> std::io::Result<()> {
 /// ```
 /// use vk::summary::write_start_banner;
 /// let mut out = Vec::new();
-/// write_start_banner(&mut out).unwrap();
+/// write_start_banner(&mut out).expect("write start banner");
 /// ```
 pub fn write_start_banner<W: Write>(out: W) -> std::io::Result<()> {
-    write_banner(out, "========== code review ==========")
+    write_banner(out, START_BANNER)
 }
 
 /// Print a banner marking the start of code review output.
@@ -116,7 +122,7 @@ pub fn write_start_banner<W: Write>(out: W) -> std::io::Result<()> {
 ///
 /// ```
 /// use vk::summary::print_start_banner;
-/// print_start_banner().unwrap();
+/// print_start_banner().expect("print start banner");
 /// ```
 pub fn print_start_banner() -> std::io::Result<()> {
     write_start_banner(std::io::stdout().lock())
@@ -134,10 +140,10 @@ pub fn print_start_banner() -> std::io::Result<()> {
 /// ```
 /// use vk::summary::write_end_banner;
 /// let mut out = Vec::new();
-/// write_end_banner(&mut out).unwrap();
+/// write_end_banner(&mut out).expect("write end banner");
 /// ```
 pub fn write_end_banner<W: Write>(out: W) -> std::io::Result<()> {
-    write_banner(out, "========== end of code review ==========")
+    write_banner(out, END_BANNER)
 }
 
 /// Print a closing banner once all review threads have been displayed.
@@ -150,7 +156,7 @@ pub fn write_end_banner<W: Write>(out: W) -> std::io::Result<()> {
 ///
 /// ```
 /// use vk::summary::print_end_banner;
-/// print_end_banner().unwrap();
+/// print_end_banner().expect("print end banner");
 /// ```
 pub fn print_end_banner() -> std::io::Result<()> {
     write_end_banner(std::io::stdout().lock())
@@ -240,6 +246,26 @@ mod tests {
 
         let mut writer = ErrorWriter;
         let err = write_start_banner(&mut writer).expect_err("expect error");
+        assert_eq!(err.to_string(), "Simulated stdout write error");
+    }
+
+    #[test]
+    fn write_end_banner_propagates_io_errors() {
+        use std::io::{self, Write};
+
+        struct ErrorWriter;
+        impl Write for ErrorWriter {
+            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+                Err(io::Error::other("Simulated stdout write error"))
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut writer = ErrorWriter;
+        let err = write_end_banner(&mut writer).expect_err("expect error");
         assert_eq!(err.to_string(), "Simulated stdout write error");
     }
 }

@@ -6,9 +6,9 @@
 //! `review_threads` for fetching review data, `issues` for issue retrieval,
 //! `summary` for summarising comments, and `config` for configuration
 //! management. When a thread has multiple comments on the same diff, the diff
-//! is shown only once. After all comments are printed, the tool displays an
-//! `end of code review` banner so calling processes know the output has
-//! finished.
+//! is shown only once. Output is framed by a `code review` banner at the start
+//! and an `end of code review` banner at the end so calling processes can
+//! reliably detect boundaries.
 
 pub mod api;
 mod boxed;
@@ -454,5 +454,18 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("\u{25B6} hello"));
         assert!(!out.contains("bye"));
+    }
+
+    #[test]
+    fn handle_banner_returns_true_on_broken_pipe() {
+        let broken_pipe =
+            || -> std::io::Result<()> { Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)) };
+        assert!(super::handle_banner(broken_pipe, "start"));
+    }
+
+    #[test]
+    fn handle_banner_logs_and_returns_false_on_other_errors() {
+        let other_err = || -> std::io::Result<()> { Err(std::io::Error::other("boom")) };
+        assert!(!super::handle_banner(other_err, "end"));
     }
 }

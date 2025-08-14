@@ -30,7 +30,7 @@ sets the default repository when passing only a pull request number.
 The CLI provides two subcommands:
 
 * `pr` — show unresolved pull request comments. Output begins with a
-  `code review` banner followed by a summary of files and comment counts. When
+  `code review` banner, followed by a summary of files and comment counts. When
   finished, `vk` prints an `end of code review` banner. Pass file paths after
   the pull request to restrict output to those paths.
 * `issue` — read a GitHub issue (**to do**)
