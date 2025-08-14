@@ -278,4 +278,14 @@ mod tests {
         let err = write_end_banner(&mut writer).expect_err("expect error");
         assert_eq!(err.to_string(), "Simulated stdout write error");
     }
+
+    #[test]
+    fn write_end_banner_outputs_exact_text() {
+        let mut buf = Vec::new();
+        write_end_banner(&mut buf).expect("write end banner");
+        assert_eq!(
+            String::from_utf8(buf).expect("utf8"),
+            format!("{END_BANNER}\n"),
+        );
+    }
 }

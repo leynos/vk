@@ -29,8 +29,8 @@ sets the default repository when passing only a pull request number.
 
 The CLI provides two subcommands:
 
-- `pr` — show unresolved pull request comments. It begins with a `code review`
-  banner, summarises files and comment counts, then prints an
+- `pr` — show unresolved pull request comments. It begins with a
+  `code review banner`, summarizes files and comment counts, then prints an
   `end of code review` banner. Pass file paths after the pull request to
   restrict output to those paths.
 - `issue` — read a GitHub issue (**to do**)
