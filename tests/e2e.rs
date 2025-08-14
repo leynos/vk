@@ -34,21 +34,24 @@ fn load_transcript(path: &str) -> Vec<String> {
         .collect()
 }
 
+/// Build a default empty `comments` payload.
+fn empty_comments_fallback() -> String {
+    serde_json::json!({
+        "data": {"node": {"comments": {
+            "nodes": [],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}
+    })
+    .to_string()
+}
+
 #[tokio::test]
 #[ignore = "requires recorded network transcript"]
 async fn e2e_pr_42() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let mut responses = load_transcript("tests/fixtures/pr42.json").into_iter();
     *handler.lock().expect("lock handler") = Box::new(move |_req| {
-        let body = responses.next().unwrap_or_else(|| {
-            serde_json::json!({
-                "data": {"node": {"comments": {
-                    "nodes": [],
-                    "pageInfo": {"hasNextPage": false, "endCursor": null}
-                }}}
-            })
-            .to_string()
-        });
+        let body = responses.next().unwrap_or_else(empty_comments_fallback);
         Response::builder()
             .status(StatusCode::OK)
             .header("Content-Type", "application/json")
@@ -110,20 +113,11 @@ async fn e2e_missing_nodes_reports_path() {
 }
 
 #[tokio::test]
-#[ignore = "requires updated transcript"]
 async fn pr_exits_cleanly_on_broken_pipe() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let mut responses = load_transcript("tests/fixtures/pr42.json").into_iter();
     *handler.lock().expect("lock handler") = Box::new(move |_req| {
-        let body = responses.next().unwrap_or_else(|| {
-            serde_json::json!({
-                "data": {"node": {"comments": {
-                    "nodes": [],
-                    "pageInfo": {"hasNextPage": false, "endCursor": null}
-                }}}
-            })
-            .to_string()
-        });
+        let body = responses.next().unwrap_or_else(empty_comments_fallback);
         Response::builder()
             .status(StatusCode::OK)
             .header("Content-Type", "application/json")

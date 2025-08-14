@@ -3,14 +3,73 @@
 use super::*;
 use crate::GraphQLClient;
 use crate::ref_parser::RepoInfo;
+use rstest::{fixture, rstest};
+use tokio::task::JoinHandle;
 
-#[tokio::test]
-async fn run_query_missing_nodes_reports_path() {
-    use third_wheel::hyper::{
-        Body, Request, Response, Server, StatusCode,
-        service::{make_service_fn, service_fn},
+use third_wheel::hyper::{
+    Body, Request, Response, Server, StatusCode,
+    service::{make_service_fn, service_fn},
+};
+
+/// Start a stub HTTP server returning each body in `responses` sequentially.
+///
+/// Returns a [`GraphQLClient`] targeting the server and a [`JoinHandle`] for
+/// the server task.
+struct TestClient {
+    client: GraphQLClient,
+    join: JoinHandle<()>,
+}
+
+fn start_server(responses: Vec<String>) -> TestClient {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
     };
 
+    let responses = Arc::new(responses);
+    let counter = Arc::new(AtomicUsize::new(0));
+    let svc = make_service_fn(move |_conn| {
+        let responses = Arc::clone(&responses);
+        let counter = Arc::clone(&counter);
+        async move {
+            Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
+                let idx = counter.fetch_add(1, Ordering::SeqCst);
+                let body = responses
+                    .get(idx)
+                    .cloned()
+                    .unwrap_or_else(|| "{}".to_string());
+                async move {
+                    Ok::<_, std::convert::Infallible>(
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/json")
+                            .body(Body::from(body))
+                            .expect("response"),
+                    )
+                }
+            }))
+        }
+    });
+    let server = Server::bind(&"127.0.0.1:0".parse().expect("parse addr")).serve(svc);
+    let addr = server.local_addr();
+    let join = tokio::spawn(async move {
+        let _ = server.await;
+    });
+    let client = GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None)
+        .expect("create client");
+    TestClient { client, join }
+}
+
+#[fixture]
+fn repo() -> RepoInfo {
+    RepoInfo {
+        owner: "o".into(),
+        name: "r".into(),
+    }
+}
+
+#[fixture]
+async fn missing_nodes_client() -> TestClient {
     let body = serde_json::json!({
         "data": {
             "repository": {
@@ -23,41 +82,52 @@ async fn run_query_missing_nodes_reports_path() {
         }
     })
     .to_string();
+    start_server(vec![body])
+}
 
-    let make_svc = make_service_fn(move |_conn| {
-        let body = body.clone();
-        async move {
-            Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
-                let body = body.clone();
-                async move {
-                    Ok::<_, std::convert::Infallible>(
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header("Content-Type", "application/json")
-                            .body(Body::from(body.clone()))
-                            .expect("failed to build HTTP response"),
-                    )
-                }
-            }))
-        }
-    });
+fn comment(body: &str) -> serde_json::Value {
+    serde_json::json!({
+        "body": body,
+        "diffHunk": "",
+        "originalPosition": null,
+        "position": null,
+        "path": "f",
+        "url": "",
+        "author": null
+    })
+}
 
-    let server = Server::bind(
-        &"127.0.0.1:0"
-            .parse()
-            .expect("failed to parse server address"),
-    )
-    .serve(make_svc);
-    let addr = server.local_addr();
-    let join = tokio::spawn(server);
+#[fixture]
+async fn pagination_client() -> TestClient {
+    let first: Vec<_> = (0..100).map(|i| comment(&format!("c{i}"))).collect();
+    let thread_body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [{
+                "id": "t",
+                "isResolved": false,
+                "comments": {"nodes": first, "pageInfo": {"hasNextPage": true, "endCursor": "c99"}}
+            }],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    let comment_body = serde_json::json!({
+        "data": {"node": {"comments": {
+            "nodes": [comment("c100")],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}
+    })
+    .to_string();
+    start_server(vec![thread_body, comment_body])
+}
 
-    let client = GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None)
-        .expect("failed to create GraphQL client");
-
-    let repo = RepoInfo {
-        owner: "o".into(),
-        name: "r".into(),
-    };
+#[rstest]
+#[tokio::test]
+async fn run_query_missing_nodes_reports_path(
+    repo: RepoInfo,
+    #[future] missing_nodes_client: TestClient,
+) {
+    let TestClient { client, join } = missing_nodes_client.await;
     let result = fetch_review_threads(&client, &repo, 1).await;
     let err = result.expect_err("expected error");
     let err_msg = format!("{err}");
@@ -69,7 +139,6 @@ async fn run_query_missing_nodes_reports_path() {
         err_msg.contains("snippet:"),
         "Error should contain JSON snippet",
     );
-
     join.abort();
     let _ = join.await;
 }
@@ -108,88 +177,13 @@ fn filter_threads_by_files_retains_matches() {
     assert_eq!(path, Some("README.md"));
 }
 
+#[rstest]
 #[tokio::test]
-async fn threads_with_many_comments_do_not_duplicate_first_page() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-    use third_wheel::hyper::{
-        Body, Request, Response, Server, StatusCode,
-        service::{make_service_fn, service_fn},
-    };
-
-    fn comment(body: &str) -> serde_json::Value {
-        json!({
-            "body": body,
-            "diffHunk": "",
-            "originalPosition": null,
-            "position": null,
-            "path": "f",
-            "url": "",
-            "author": null
-        })
-    }
-
-    let first: Vec<_> = (0..100).map(|i| comment(&format!("c{i}"))).collect();
-    let thread_body = json!({
-        "data": {"repository": {"pullRequest": {"reviewThreads": {
-            "nodes": [{
-                "id": "t",
-                "isResolved": false,
-                "comments": {"nodes": first, "pageInfo": {"hasNextPage": true, "endCursor": "c99"}}
-            }],
-            "pageInfo": {"hasNextPage": false, "endCursor": null}
-        }}}}
-    })
-    .to_string();
-    let comment_body = json!({
-        "data": {"node": {"comments": {
-            "nodes": [comment("c100")],
-            "pageInfo": {"hasNextPage": false, "endCursor": null}
-        }}}
-    })
-    .to_string();
-
-    let counter = Arc::new(AtomicUsize::new(0));
-    let svc = make_service_fn(move |_conn| {
-        let thread_body = thread_body.clone();
-        let comment_body = comment_body.clone();
-        let counter = Arc::clone(&counter);
-        async move {
-            Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
-                let body = if counter.fetch_add(1, Ordering::SeqCst) == 0 {
-                    thread_body.clone()
-                } else {
-                    comment_body.clone()
-                };
-                async move {
-                    Ok::<_, std::convert::Infallible>(
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header("Content-Type", "application/json")
-                            .body(Body::from(body))
-                            .expect("response"),
-                    )
-                }
-            }))
-        }
-    });
-
-    let server = Server::bind(
-        &"127.0.0.1:0"
-            .parse()
-            .expect("failed to parse server address"),
-    )
-    .serve(svc);
-    let addr = server.local_addr();
-    let join = tokio::spawn(server);
-    let client = GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None)
-        .expect("failed to create client");
-    let repo = RepoInfo {
-        owner: "o".into(),
-        name: "r".into(),
-    };
+async fn threads_with_many_comments_do_not_duplicate_first_page(
+    repo: RepoInfo,
+    #[future] pagination_client: TestClient,
+) {
+    let TestClient { client, join } = pagination_client.await;
     let threads = fetch_review_threads(&client, &repo, 1)
         .await
         .expect("fetch threads");

@@ -164,10 +164,19 @@ pub async fn fetch_review_threads(
         while let Some(c) = cursor.take() {
             let (more, info) = fetch_comment_page(client, &thread.id, Some(c)).await?;
             comments.extend(more);
-            if !info.has_next_page {
-                break;
-            }
-            cursor = info.end_cursor;
+            cursor = match (info.has_next_page, info.end_cursor) {
+                (true, Some(next)) => Some(next),
+                (true, None) => {
+                    return Err(VkError::BadResponse(
+                        format!(
+                            "hasNextPage=true but endCursor missing for thread {}",
+                            thread.id
+                        )
+                        .boxed(),
+                    ));
+                }
+                (false, _) => None,
+            };
         }
         thread.comments = CommentConnection {
             nodes: comments,
