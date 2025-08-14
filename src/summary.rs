@@ -85,6 +85,27 @@ pub fn print_summary(summary: &[(String, usize)]) {
     }
 }
 
+fn write_banner<W: Write>(mut out: W, text: &str) -> std::io::Result<()> {
+    writeln!(out, "{text}")
+}
+
+/// Write a banner marking the start of code review output to any writer.
+///
+/// # Errors
+///
+/// Returns an error if writing to the provided writer fails.
+///
+/// # Examples
+///
+/// ```
+/// use vk::summary::write_start_banner;
+/// let mut out = Vec::new();
+/// write_start_banner(&mut out).unwrap();
+/// ```
+pub fn write_start_banner<W: Write>(out: W) -> std::io::Result<()> {
+    write_banner(out, "========== code review ==========")
+}
+
 /// Print a banner marking the start of code review output.
 ///
 /// # Errors
@@ -98,11 +119,25 @@ pub fn print_summary(summary: &[(String, usize)]) {
 /// print_start_banner().unwrap();
 /// ```
 pub fn print_start_banner() -> std::io::Result<()> {
-    writeln!(
-        std::io::stdout().lock(),
-        "========== code review =========="
-    )?;
-    Ok(())
+    write_start_banner(std::io::stdout().lock())
+}
+
+/// Write a closing banner once all review threads have been displayed to any
+/// writer.
+///
+/// # Errors
+///
+/// Returns an error if writing to the provided writer fails.
+///
+/// # Examples
+///
+/// ```
+/// use vk::summary::write_end_banner;
+/// let mut out = Vec::new();
+/// write_end_banner(&mut out).unwrap();
+/// ```
+pub fn write_end_banner<W: Write>(out: W) -> std::io::Result<()> {
+    write_banner(out, "========== end of code review ==========")
 }
 
 /// Print a closing banner once all review threads have been displayed.
@@ -118,11 +153,7 @@ pub fn print_start_banner() -> std::io::Result<()> {
 /// print_end_banner().unwrap();
 /// ```
 pub fn print_end_banner() -> std::io::Result<()> {
-    writeln!(
-        std::io::stdout().lock(),
-        "========== end of code review =========="
-    )?;
-    Ok(())
+    write_end_banner(std::io::stdout().lock())
 }
 
 #[cfg(test)]
@@ -190,5 +221,25 @@ mod tests {
         let mut buf = Vec::new();
         write_summary(&mut buf, &summary).expect("write summary");
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn write_start_banner_propagates_io_errors() {
+        use std::io::{self, Write};
+
+        struct ErrorWriter;
+        impl Write for ErrorWriter {
+            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+                Err(io::Error::other("Simulated stdout write error"))
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut writer = ErrorWriter;
+        let err = write_start_banner(&mut writer).expect_err("expect error");
+        assert_eq!(err.to_string(), "Simulated stdout write error");
     }
 }

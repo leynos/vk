@@ -165,6 +165,19 @@ fn is_broken_pipe_io(err: &std::io::Error) -> bool {
     err.kind() == ErrorKind::BrokenPipe
 }
 
+fn handle_banner<F>(print: F, label: &str) -> bool
+where
+    F: FnOnce() -> std::io::Result<()>,
+{
+    if let Err(e) = print() {
+        if is_broken_pipe_io(&e) {
+            return true;
+        }
+        error!("error printing {label} banner: {e}");
+    }
+    false
+}
+
 async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
@@ -181,11 +194,8 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         fetch_review_threads(&client, &repo, number).await?,
         &args.files,
     );
-    if let Err(e) = print_start_banner() {
-        if is_broken_pipe_io(&e) {
-            return Ok(());
-        }
-        error!("error printing start banner: {e}");
+    if handle_banner(print_start_banner, "start") {
+        return Ok(());
     }
     // Avoid fetching reviews when there are no unresolved threads.
     if threads.is_empty() {
@@ -195,11 +205,8 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
             println!("No unresolved comments for the specified files.");
         }
         // Preserve the end-of-review banner for consumers that parse it.
-        if let Err(e) = print_end_banner() {
-            if is_broken_pipe_io(&e) {
-                return Ok(());
-            }
-            error!("error printing end banner: {e}");
+        if handle_banner(print_end_banner, "end") {
+            return Ok(());
         }
         return Ok(());
     }
@@ -228,11 +235,8 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         }
     }
 
-    if let Err(e) = print_end_banner() {
-        if is_broken_pipe_io(&e) {
-            return Ok(());
-        }
-        error!("error printing end banner: {e}");
+    if handle_banner(print_end_banner, "end") {
+        return Ok(());
     }
     Ok(())
 }
