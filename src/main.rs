@@ -182,10 +182,12 @@ where
 }
 
 /// Prepare PR context, validate environment and print the start banner.
+///
+/// Returns `Ok(None)` when standard output is closed before printing.
 fn setup_pr_output(
     args: &PrArgs,
     global: &GlobalArgs,
-) -> Result<(RepoInfo, u64, GraphQLClient), VkError> {
+) -> Result<Option<(RepoInfo, u64, GraphQLClient)>, VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
@@ -196,17 +198,14 @@ fn setup_pr_output(
         warn!("terminal locale is not UTF-8; emojis may not render correctly");
     }
     if handle_banner(print_start_banner, "start") {
-        return Err(VkError::Io(Box::new(std::io::Error::new(
-            ErrorKind::BrokenPipe,
-            "broken pipe",
-        ))));
+        return Ok(None);
     }
     let client = build_graphql_client(&token, global.transcript.as_ref())?;
-    Ok((repo, number, client))
+    Ok(Some((repo, number, client)))
 }
 
 /// Print an appropriate message when no threads match and append the end banner.
-#[allow(
+#[expect(
     clippy::unnecessary_wraps,
     reason = "returns Result for interface symmetry"
 )]
@@ -229,7 +228,7 @@ fn handle_empty_threads(files: &[String]) -> Result<(), VkError> {
 }
 
 /// Render the summary, reviews and threads, then print the closing banner.
-#[allow(clippy::unnecessary_wraps, reason = "future error cases may emerge")]
+#[expect(clippy::unnecessary_wraps, reason = "future error cases may emerge")]
 fn generate_pr_output(
     threads: Vec<ReviewThread>,
     reviews: Vec<PullRequestReview>,
@@ -264,10 +263,8 @@ fn generate_pr_output(
 }
 
 async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let (repo, number, client) = match setup_pr_output(&args, global) {
-        Ok(v) => v,
-        Err(VkError::Io(e)) if e.kind() == ErrorKind::BrokenPipe => return Ok(()),
-        Err(e) => return Err(e),
+    let Some((repo, number, client)) = setup_pr_output(&args, global)? else {
+        return Ok(());
     };
 
     let threads = filter_threads_by_files(
