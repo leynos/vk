@@ -10,7 +10,7 @@ use rand::Rng;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use std::env;
 use tokio::time::{Duration, sleep};
 
@@ -317,47 +317,83 @@ impl GraphQLClient {
         }
         Err(last_err.unwrap_or_else(|| VkError::BadResponse("retry loop exhausted".boxed())))
     }
-}
 
-/// Execute a GraphQL query and merge an optional cursor into the variables.
-///
-/// This helper wraps [`GraphQLClient::run_query`] to avoid repeated boilerplate
-/// when issuing paginated queries. Callers supply the base variables for the
-/// query and this function injects the `cursor` field when provided.
-///
-/// # Errors
-///
-/// Returns a [`VkError::BadResponse`] if the variables value is not a JSON
-/// object, or propagates any error from the underlying request.
-///
-/// # Examples
-/// ```no_run
-/// use serde_json::json;
-/// use vk::api::{fetch_page, GraphQLClient};
-/// # async fn run(client: GraphQLClient) -> Result<(), vk::VkError> {
-/// let data: serde_json::Value = fetch_page(&client, "query", None, json!({"id": 1})).await?;
-/// # Ok(())
-/// # }
-/// ```
-pub async fn fetch_page<T>(
-    client: &GraphQLClient,
-    query: &str,
-    cursor: Option<String>,
-    mut variables: serde_json::Value,
-) -> Result<T, VkError>
-where
-    T: DeserializeOwned,
-{
-    if let Some(c) = cursor {
-        if let Some(obj) = variables.as_object_mut() {
-            obj.insert("cursor".to_string(), serde_json::Value::String(c));
-        } else {
-            return Err(VkError::BadResponse(
-                "variables for fetch_page must be a JSON object".boxed(),
-            ));
+    /// Execute a GraphQL query and merge an optional cursor into the variables.
+    ///
+    /// This wraps [`run_query`], injecting the `cursor` field when provided so
+    /// callers need only supply the base variables for paginated queries.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any error from the underlying request.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use serde_json::{Map, Value, json};
+    /// use vk::api::GraphQLClient;
+    /// # async fn run(client: GraphQLClient) -> Result<(), vk::VkError> {
+    /// let mut vars = Map::new();
+    /// vars.insert("id".to_string(), json!(1));
+    /// let data: Value = client.fetch_page("query", None, vars).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    /// ```compile_fail
+    /// use serde_json::json;
+    /// use vk::api::GraphQLClient;
+    /// # async fn run(client: GraphQLClient) {
+    ///     // variables must be a JSON object
+    ///     let _ = client
+    ///         .fetch_page::<serde_json::Value>("query", None, json!(null))
+    ///         .await;
+    /// # }
+    /// ```
+    pub async fn fetch_page<T>(
+        &self,
+        query: &str,
+        cursor: Option<String>,
+        mut variables: Map<String, Value>,
+    ) -> Result<T, VkError>
+    where
+        T: DeserializeOwned,
+    {
+        if let Some(c) = cursor {
+            variables.insert("cursor".to_string(), Value::String(c));
         }
+        self.run_query(query, variables).await
     }
-    client.run_query(query, variables).await
+
+    /// Fetch and concatenate all pages from a cursor-based connection.
+    ///
+    /// `query` and `variables` define the base request. The `map` closure
+    /// extracts the items and pagination info from each page's response.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any [`VkError`] returned by the underlying request or mapper
+    /// closure.
+    pub async fn paginate_all<T, U, M>(
+        &self,
+        query: &str,
+        variables: Map<String, Value>,
+        mut start: Option<String>,
+        map: M,
+    ) -> Result<Vec<U>, VkError>
+    where
+        T: DeserializeOwned,
+        M: FnMut(T) -> Result<(Vec<U>, crate::PageInfo), VkError> + Clone,
+    {
+        paginate(|cursor| {
+            let vars = variables.clone();
+            let mut mapper = map.clone();
+            let current = cursor.or_else(|| start.take());
+            async move {
+                let data = self.fetch_page::<T>(query, current, vars).await?;
+                mapper(data)
+            }
+        })
+        .await
+    }
 }
 
 /// Retrieve all pages from a cursor-based connection.
@@ -409,7 +445,9 @@ where
         if !info.has_next_page {
             break;
         }
-        cursor = info.end_cursor;
+        cursor = Some(info.end_cursor.ok_or_else(|| {
+            VkError::BadResponse("hasNextPage=true but endCursor missing".boxed())
+        })?);
     }
     Ok(items)
 }

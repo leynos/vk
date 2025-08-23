@@ -110,14 +110,10 @@ async fn fetch_page_injects_cursor() {
     let client =
         GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None).expect("client");
 
-    let _: serde_json::Value = fetch_page(
-        &client,
-        "query",
-        Some("abc".to_string()),
-        serde_json::json!({}),
-    )
-    .await
-    .expect("fetch");
+    let _: serde_json::Value = client
+        .fetch_page("query", Some("abc".to_string()), serde_json::Map::new())
+        .await
+        .expect("fetch");
 
     join.abort();
     let _ = join.await;
@@ -154,4 +150,19 @@ async fn paginate_discards_items_on_error() {
 
     assert!(result.is_err());
     assert_eq!(seen.borrow().as_slice(), &[1]);
+}
+
+#[tokio::test]
+async fn paginate_missing_cursor_errors() {
+    let result: Result<Vec<i32>, VkError> = paginate(|_cursor| async {
+        Ok((
+            vec![1],
+            PageInfo {
+                has_next_page: true,
+                end_cursor: None,
+            },
+        ))
+    })
+    .await;
+    assert!(matches!(result, Err(VkError::BadResponse(_))));
 }
