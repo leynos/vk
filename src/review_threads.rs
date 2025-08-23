@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashSet;
 
+use crate::api::fetch_page;
 use crate::boxed::BoxedStr;
 use crate::graphql_queries::{COMMENT_QUERY, THREADS_QUERY};
 use crate::ref_parser::RepoInfo;
@@ -94,9 +95,13 @@ async fn fetch_comment_page(
     id: &str,
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewComment>, PageInfo), VkError> {
-    let wrapper: NodeWrapper<CommentNode> = client
-        .run_query(COMMENT_QUERY, json!({ "id": id, "cursor": cursor.clone() }))
-        .await?;
+    let wrapper: NodeWrapper<CommentNode> = fetch_page(
+        client,
+        COMMENT_QUERY,
+        cursor.clone(),
+        json!({ "id": id }),
+    )
+    .await?;
     let conn = wrapper
         .node
         .ok_or_else(|| {
@@ -119,17 +124,17 @@ async fn fetch_thread_page(
     number: u64,
     cursor: Option<String>,
 ) -> Result<(Vec<ReviewThread>, PageInfo), VkError> {
-    let data: ThreadData = client
-        .run_query(
-            THREADS_QUERY,
-            json!({
-                "owner": repo.owner.as_str(),
-                "name": repo.name.as_str(),
-                "number": number,
-                "cursor": cursor,
-            }),
-        )
-        .await?;
+    let data: ThreadData = fetch_page(
+        client,
+        THREADS_QUERY,
+        cursor,
+        json!({
+            "owner": repo.owner.as_str(),
+            "name": repo.name.as_str(),
+            "number": number,
+        }),
+    )
+    .await?;
     let conn = data.repository.pull_request.review_threads;
     Ok((conn.nodes, conn.page_info))
 }

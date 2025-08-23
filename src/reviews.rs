@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::api::fetch_page;
 use crate::{GraphQLClient, PageInfo, User, VkError, paginate, ref_parser::RepoInfo};
 use std::collections::HashMap;
 
@@ -69,17 +70,17 @@ pub async fn fetch_review_page(
     number: u64,
     cursor: Option<String>,
 ) -> Result<(Vec<PullRequestReview>, PageInfo), VkError> {
-    let data: ReviewData = client
-        .run_query(
-            REVIEWS_QUERY,
-            json!({
-                "owner": repo.owner.as_str(),
-                "name": repo.name.as_str(),
-                "number": number,
-                "cursor": cursor,
-            }),
-        )
-        .await?;
+    let data: ReviewData = fetch_page(
+        client,
+        REVIEWS_QUERY,
+        cursor,
+        json!({
+            "owner": repo.owner.as_str(),
+            "name": repo.name.as_str(),
+            "number": number,
+        }),
+    )
+    .await?;
     let conn = data.repository.pull_request.reviews;
     Ok((conn.nodes, conn.page_info))
 }

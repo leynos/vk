@@ -5,7 +5,7 @@ use crate::PageInfo;
 use std::{
     cell::RefCell,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -75,6 +75,58 @@ async fn run_query_retries_missing_data() {
     assert_eq!(result, serde_json::json!({"x": 1}));
     join.abort();
     let _ = join.await;
+}
+
+#[tokio::test]
+async fn fetch_page_injects_cursor() {
+    use third_wheel::hyper::body::to_bytes;
+
+    let captured = Arc::new(Mutex::new(String::new()));
+    let cap_clone = Arc::clone(&captured);
+    let svc = make_service_fn(move |_conn| {
+        let cap_inner = Arc::clone(&cap_clone);
+        async move {
+            Ok::<_, std::convert::Infallible>(service_fn(move |req: Request<Body>| {
+                let cap = Arc::clone(&cap_inner);
+                async move {
+                    let bytes = to_bytes(req.into_body()).await.expect("body");
+                    *cap.lock().expect("lock") = String::from_utf8(bytes.to_vec()).expect("utf8");
+                    Ok::<_, std::convert::Infallible>(
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/json")
+                            .body(Body::from("{\"data\":{}}"))
+                            .expect("response"),
+                    )
+                }
+            }))
+        }
+    });
+    let server = Server::bind(&"127.0.0.1:0".parse().expect("addr")).serve(svc);
+    let addr = server.local_addr();
+    let join = tokio::spawn(async move {
+        let _ = server.await;
+    });
+    let client =
+        GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None).expect("client");
+
+    let _: serde_json::Value = fetch_page(
+        &client,
+        "query",
+        Some("abc".to_string()),
+        serde_json::json!({}),
+    )
+    .await
+    .expect("fetch");
+
+    join.abort();
+    let _ = join.await;
+    assert!(
+        captured
+            .lock()
+            .expect("lock")
+            .contains("\"cursor\":\"abc\"")
+    );
 }
 
 #[tokio::test]

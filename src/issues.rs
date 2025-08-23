@@ -5,6 +5,7 @@
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::api::fetch_page;
 use crate::graphql_queries::ISSUE_QUERY;
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, VkError};
@@ -36,15 +37,16 @@ pub async fn fetch_issue(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Issue, VkError> {
-    let data: IssueData = client
-        .run_query(
-            ISSUE_QUERY,
-            json!({
-                "owner": repo.owner.as_str(),
-                "name": repo.name.as_str(),
-                "number": number
-            }),
-        )
-        .await?;
+    let data: IssueData = fetch_page(
+        client,
+        ISSUE_QUERY,
+        None,
+        json!({
+            "owner": repo.owner.as_str(),
+            "name": repo.name.as_str(),
+            "number": number,
+        }),
+    )
+    .await?;
     Ok(data.repository.issue)
 }

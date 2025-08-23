@@ -319,6 +319,47 @@ impl GraphQLClient {
     }
 }
 
+/// Execute a GraphQL query and merge an optional cursor into the variables.
+///
+/// This helper wraps [`GraphQLClient::run_query`] to avoid repeated boilerplate
+/// when issuing paginated queries. Callers supply the base variables for the
+/// query and this function injects the `cursor` field when provided.
+///
+/// # Errors
+///
+/// Returns a [`VkError::BadResponse`] if the variables value is not a JSON
+/// object, or propagates any error from the underlying request.
+///
+/// # Examples
+/// ```no_run
+/// use serde_json::json;
+/// use vk::api::{fetch_page, GraphQLClient};
+/// # async fn run(client: GraphQLClient) -> Result<(), vk::VkError> {
+/// let data: serde_json::Value = fetch_page(&client, "query", None, json!({"id": 1})).await?;
+/// # Ok(())
+/// # }
+/// ```
+pub async fn fetch_page<T>(
+    client: &GraphQLClient,
+    query: &str,
+    cursor: Option<String>,
+    mut variables: serde_json::Value,
+) -> Result<T, VkError>
+where
+    T: DeserializeOwned,
+{
+    if let Some(c) = cursor {
+        if let Some(obj) = variables.as_object_mut() {
+            obj.insert("cursor".to_string(), serde_json::Value::String(c));
+        } else {
+            return Err(VkError::BadResponse(
+                "variables for fetch_page must be a JSON object".boxed(),
+            ));
+        }
+    }
+    client.run_query(query, variables).await
+}
+
 /// Retrieve all pages from a cursor-based connection.
 ///
 /// The `fetch` closure is called repeatedly with the current cursor until the
