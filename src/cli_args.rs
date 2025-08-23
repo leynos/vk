@@ -2,8 +2,8 @@
 //!
 //! Isolates clap derivations so lint expectations remain scoped, keeping
 //! `main.rs` focused on runtime logic.
-#![expect(non_snake_case, reason = "clap generates non-snake-case modules")]
-#![expect(unused_imports, reason = "clap derives import the struct internally")]
+#![allow(non_snake_case, reason = "clap generates non-snake-case modules")]
+#![allow(unused_imports, reason = "clap derives import the struct internally")]
 
 use clap::Parser;
 use ortho_config::OrthoConfig;
@@ -51,6 +51,25 @@ pub struct PrArgs {
     pub files: Vec<String>,
 }
 
+impl PrArgs {
+    /// Merge configuration sources with already parsed CLI arguments.
+    ///
+    /// `load_and_merge_subcommand_for` reads files and environment variables
+    /// using the struct's prefix, layering CLI-supplied values on top.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`ortho_config::OrthoError`] when configuration gathering or
+    /// merging fails.
+    #[expect(
+        clippy::result_large_err,
+        reason = "OrthoError comes from external crate and matches API",
+    )]
+    pub fn load_and_merge(self) -> Result<Self, ortho_config::OrthoError> {
+        ortho_config::subcommand::load_and_merge_subcommand_for(&self)
+    }
+}
+
 /// Parameters accepted by the `issue` sub-command.
 ///
 /// Stores the URL or number of the issue to inspect.
@@ -71,5 +90,24 @@ pub struct IssueArgs {
 impl Default for IssueArgs {
     fn default() -> Self {
         Self { reference: None }
+    }
+}
+
+impl IssueArgs {
+    /// Merge configuration sources with already parsed CLI arguments.
+    ///
+    /// This leverages `load_and_merge_subcommand_for` to combine
+    /// configuration files and environment variables with CLI values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`ortho_config::OrthoError`] when configuration gathering or
+    /// merging fails.
+    #[expect(
+        clippy::result_large_err,
+        reason = "OrthoError comes from external crate and matches API",
+    )]
+    pub fn load_and_merge(self) -> Result<Self, ortho_config::OrthoError> {
+        ortho_config::subcommand::load_and_merge_subcommand_for(&self)
     }
 }
