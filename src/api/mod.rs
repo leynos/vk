@@ -419,11 +419,13 @@ impl GraphQLClient {
     /// Execute a GraphQL query and merge an optional cursor into the variables.
     ///
     /// This wraps [`run_query`], injecting the `cursor` field when provided so
-    /// callers need only supply the base variables for paginated queries.
+    /// callers need only supply the base variables for paginated queries. If the
+    /// `variables` already contain a `cursor` key it will be overwritten.
     ///
     /// # Errors
     ///
-    /// Propagates any error from the underlying request.
+    /// Returns [`VkError::BadResponse`] if `variables` serialise to a non-object
+    /// value, or propagates any error from the underlying request.
     ///
     /// # Examples
     /// ```no_run
@@ -436,28 +438,35 @@ impl GraphQLClient {
     /// # Ok(())
     /// # }
     /// ```
-    /// ```compile_fail
+    /// ```no_run
     /// use serde_json::json;
     /// use vk::api::GraphQLClient;
     /// # async fn run(client: GraphQLClient) {
-    ///     // variables must be a JSON object
-    ///     let _ = client
-    ///         .fetch_page::<serde_json::Value>("query", None, json!(null))
+    ///     let err = client
+    ///         .fetch_page::<serde_json::Value, _>("query", None, json!(null))
     ///         .await;
+    ///     assert!(err.is_err());
     /// # }
     /// ```
-    pub async fn fetch_page<T>(
+    pub async fn fetch_page<T, V>(
         &self,
         query: impl Into<Query>,
         cursor: Option<Cursor>,
-        mut variables: Map<String, Value>,
+        variables: V,
     ) -> Result<T, VkError>
     where
+        V: serde::Serialize,
         T: DeserializeOwned,
     {
         let query = query.into();
+        let mut variables = serde_json::to_value(variables).map_err(|e| {
+            VkError::BadResponseSerde(format!("serialising fetch_page variables: {e}").boxed())
+        })?;
+        let obj = variables.as_object_mut().ok_or_else(|| {
+            VkError::BadResponse("variables for fetch_page must be a JSON object".boxed())
+        })?;
         if let Some(c) = cursor {
-            variables.insert("cursor".to_string(), Value::String(c.as_str().to_string()));
+            obj.insert("cursor".into(), Value::String(c.as_str().to_string()));
         }
         self.run_query(query, variables).await
     }
@@ -475,25 +484,35 @@ impl GraphQLClient {
         &self,
         query: impl Into<Query>,
         variables: Map<String, Value>,
-        mut start: Option<Cursor>,
+        start: Option<Cursor>,
         map: M,
     ) -> Result<Vec<U>, VkError>
     where
         T: DeserializeOwned,
-        M: FnMut(T) -> Result<(Vec<U>, crate::PageInfo), VkError> + Clone,
+        M: Fn(T) -> Result<(Vec<U>, crate::PageInfo), VkError>,
     {
         let query = query.into();
-        paginate(|cursor| {
+        let mut items = Vec::new();
+        let mut cursor = start;
+        loop {
             let vars = variables.clone();
-            let mut mapper = map.clone();
-            let current = cursor.map(Cursor::from).or_else(|| start.take());
-            let q = query.clone();
-            async move {
-                let data = self.fetch_page::<T>(q, current, vars).await?;
-                mapper(data)
+            let data = self
+                .fetch_page::<T, _>(query.clone(), cursor.clone(), vars)
+                .await?;
+            let (mut page, info) = map(data)?;
+            items.append(&mut page);
+            if !info.has_next_page {
+                break;
             }
-        })
-        .await
+            cursor = Some(
+                info.end_cursor
+                    .ok_or_else(|| {
+                        VkError::BadResponse("hasNextPage=true but endCursor missing".boxed())
+                    })?
+                    .into(),
+            );
+        }
+        Ok(items)
     }
 }
 

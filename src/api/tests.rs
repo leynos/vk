@@ -54,13 +54,8 @@ fn start_server(responses: Vec<String>) -> TestClient {
         base_delay: Duration::from_millis(1),
         ..RetryConfig::default()
     };
-    let client = GraphQLClient::with_endpoint_retry(
-        "token",
-        format!("http://{addr}"),
-        None,
-        retry,
-    )
-    .expect("create client");
+    let client = GraphQLClient::with_endpoint_retry("token", format!("http://{addr}"), None, retry)
+        .expect("create client");
     TestClient { client, join }
 }
 
@@ -129,6 +124,21 @@ async fn fetch_page_injects_cursor() {
 }
 
 #[tokio::test]
+async fn fetch_page_rejects_non_object_variables() {
+    let client = GraphQLClient::with_endpoint("token", "http://localhost", None).expect("client");
+    let err = client
+        .fetch_page::<serde_json::Value, _>("query", None, serde_json::json!(null))
+        .await
+        .expect_err("error");
+    match err {
+        VkError::BadResponse(msg) => {
+            assert!(msg.contains("variables for fetch_page must be a JSON object"));
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn paginate_discards_items_on_error() {
     let seen = RefCell::new(Vec::new());
 
@@ -167,5 +177,14 @@ async fn paginate_missing_cursor_errors() {
         ))
     })
     .await;
-    assert!(matches!(result, Err(VkError::BadResponse(_))));
+    match result {
+        Err(VkError::BadResponse(msg)) => {
+            let s = msg.to_string();
+            assert!(
+                s.contains("hasNextPage=true") && s.contains("endCursor"),
+                "{s}"
+            );
+        }
+        other => panic!("unexpected result: {other:?}"),
+    }
 }

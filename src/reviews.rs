@@ -69,8 +69,8 @@ pub async fn fetch_reviews(
     number: u64,
 ) -> Result<Vec<PullRequestReview>, VkError> {
     let mut vars = Map::new();
-    vars.insert("owner".into(), json!(repo.owner.as_str()));
-    vars.insert("name".into(), json!(repo.name.as_str()));
+    vars.insert("owner".into(), json!(repo.owner.clone()));
+    vars.insert("name".into(), json!(repo.name.clone()));
     vars.insert("number".into(), json!(number));
     client
         .paginate_all(REVIEWS_QUERY, vars, None, |data: ReviewData| {

@@ -101,8 +101,8 @@ pub async fn fetch_review_threads(
 ) -> Result<Vec<ReviewThread>, VkError> {
     // GitHub's API lacks filtering for unresolved threads, so filter client-side.
     let mut vars = Map::new();
-    vars.insert("owner".into(), json!(repo.owner.as_str()));
-    vars.insert("name".into(), json!(repo.name.as_str()));
+    vars.insert("owner".into(), json!(repo.owner.clone()));
+    vars.insert("name".into(), json!(repo.name.clone()));
     vars.insert("number".into(), json!(number));
     let mut threads = client
         .paginate_all(THREADS_QUERY, vars, None, |data: ThreadData| {
@@ -115,10 +115,12 @@ pub async fn fetch_review_threads(
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
         let mut comments = initial.nodes;
-        if let Some(cursor) = initial.page_info.end_cursor {
-            let mut vars = Map::new();
-            vars.insert("id".into(), json!(thread.id.clone()));
+        if initial.page_info.has_next_page
+            && let Some(cursor) = initial.page_info.end_cursor
+        {
             let thread_id = thread.id.clone();
+            let mut vars = Map::new();
+            vars.insert("id".into(), json!(thread_id.clone()));
             let mut more = client
                 .paginate_all(
                     COMMENT_QUERY,
