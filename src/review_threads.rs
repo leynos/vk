@@ -123,7 +123,7 @@ pub async fn fetch_review_threads(
                 .paginate_all(
                     COMMENT_QUERY,
                     vars,
-                    Some(cursor),
+                    Some(cursor.into()),
                     move |wrapper: NodeWrapper<CommentNode>| {
                         let conn = wrapper
                             .node

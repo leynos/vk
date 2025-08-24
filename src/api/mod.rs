@@ -17,6 +17,125 @@ use tokio::time::{Duration, sleep};
 use crate::VkError;
 use crate::boxed::BoxedStr;
 
+/// A GraphQL query string with type safety.
+#[derive(Debug, Clone)]
+pub struct Query(String);
+
+impl Query {
+    pub fn new(query: impl Into<String>) -> Self {
+        Self(query.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for Query {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl AsRef<str> for Query {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A GitHub API authentication token.
+#[derive(Debug, Clone)]
+pub struct Token(String);
+
+impl Token {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(token.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<&str> for Token {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl AsRef<str> for Token {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A GitHub GraphQL API endpoint URL.
+#[derive(Debug, Clone)]
+pub struct Endpoint(String);
+
+impl Endpoint {
+    pub fn new(url: impl Into<String>) -> Self {
+        Self(url.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for Endpoint {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<String> for Endpoint {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl Default for Endpoint {
+    fn default() -> Self {
+        Self(GITHUB_GRAPHQL_URL.to_string())
+    }
+}
+
+/// A pagination cursor for GraphQL connections.
+#[derive(Debug, Clone)]
+pub struct Cursor(String);
+
+impl Cursor {
+    pub fn new(cursor: impl Into<String>) -> Self {
+        Self(cursor.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for Cursor {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for Cursor {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
 const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
 const BODY_SNIPPET_LEN: usize = 500;
@@ -70,7 +189,7 @@ fn handle_graphql_errors(errors: Vec<GraphQlError>) -> VkError {
     VkError::ApiErrors(msg.boxed())
 }
 
-fn build_headers(token: &str) -> HeaderMap {
+fn build_headers(token: &Token) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().expect("static string"));
     headers.insert(
@@ -82,7 +201,9 @@ fn build_headers(token: &str) -> HeaderMap {
     if !token.is_empty() {
         headers.insert(
             AUTHORIZATION,
-            format!("Bearer {token}").parse().expect("valid header"),
+            format!("Bearer {}", token.as_str())
+                .parse()
+                .expect("valid header"),
         );
     }
     headers
@@ -95,7 +216,7 @@ fn build_headers(token: &str) -> HeaderMap {
 pub struct GraphQLClient {
     client: reqwest::Client,
     headers: HeaderMap,
-    endpoint: String,
+    endpoint: Endpoint,
     transcript: Option<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>,
     retry: RetryConfig,
 }
@@ -110,12 +231,14 @@ impl GraphQLClient {
     ///
     /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
     pub fn new(
-        token: &str,
+        token: impl Into<Token>,
         transcript: Option<std::path::PathBuf>,
     ) -> Result<Self, std::io::Error> {
-        let endpoint =
-            env::var("GITHUB_GRAPHQL_URL").unwrap_or_else(|_| GITHUB_GRAPHQL_URL.to_string());
-        Self::with_endpoint_retry(token, &endpoint, transcript, RetryConfig::default())
+        let token = token.into();
+        let endpoint = env::var("GITHUB_GRAPHQL_URL")
+            .map(Endpoint::new)
+            .unwrap_or_default();
+        Self::with_endpoint_retry(token, endpoint, transcript, RetryConfig::default())
     }
 
     /// Create a client targeting a custom API endpoint.
@@ -127,8 +250,8 @@ impl GraphQLClient {
     ///
     /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
     pub fn with_endpoint(
-        token: &str,
-        endpoint: &str,
+        token: impl Into<Token>,
+        endpoint: impl Into<Endpoint>,
         transcript: Option<std::path::PathBuf>,
     ) -> Result<Self, std::io::Error> {
         Self::with_endpoint_retry(token, endpoint, transcript, RetryConfig::default())
@@ -140,11 +263,13 @@ impl GraphQLClient {
     ///
     /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
     pub fn with_endpoint_retry(
-        token: &str,
-        endpoint: &str,
+        token: impl Into<Token>,
+        endpoint: impl Into<Endpoint>,
         transcript: Option<std::path::PathBuf>,
         retry: RetryConfig,
     ) -> Result<Self, std::io::Error> {
+        let token = token.into();
+        let endpoint = endpoint.into();
         let transcript = match transcript {
             Some(p) => match std::fs::File::create(p) {
                 Ok(file) => Some(std::sync::Mutex::new(std::io::BufWriter::new(file))),
@@ -154,8 +279,8 @@ impl GraphQLClient {
         };
         Ok(Self {
             client: reqwest::Client::new(),
-            headers: build_headers(token),
-            endpoint: endpoint.to_string(),
+            headers: build_headers(&token),
+            endpoint,
             transcript,
             retry,
         })
@@ -182,7 +307,7 @@ impl GraphQLClient {
     ) -> Result<String, VkError> {
         let response = self
             .client
-            .post(&self.endpoint)
+            .post(self.endpoint.as_str())
             .headers(self.headers.clone())
             .json(payload)
             .send()
@@ -265,12 +390,13 @@ impl GraphQLClient {
     /// # Panics
     ///
     /// Panics if the configured backoff exceeds `u64::MAX` milliseconds.
-    pub async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
+    pub async fn run_query<V, T>(&self, query: impl Into<Query>, variables: V) -> Result<T, VkError>
     where
         V: serde::Serialize,
         T: DeserializeOwned,
     {
-        let payload = json!({ "query": query, "variables": &variables });
+        let query = query.into();
+        let payload = json!({ "query": query.as_ref(), "variables": &variables });
         let ctx = serde_json::to_string(&payload)
             .expect("serialising GraphQL request payload")
             .boxed();
@@ -322,15 +448,16 @@ impl GraphQLClient {
     /// ```
     pub async fn fetch_page<T>(
         &self,
-        query: &str,
-        cursor: Option<String>,
+        query: impl Into<Query>,
+        cursor: Option<Cursor>,
         mut variables: Map<String, Value>,
     ) -> Result<T, VkError>
     where
         T: DeserializeOwned,
     {
+        let query = query.into();
         if let Some(c) = cursor {
-            variables.insert("cursor".to_string(), Value::String(c));
+            variables.insert("cursor".to_string(), Value::String(c.as_str().to_string()));
         }
         self.run_query(query, variables).await
     }
@@ -346,21 +473,23 @@ impl GraphQLClient {
     /// closure.
     pub async fn paginate_all<T, U, M>(
         &self,
-        query: &str,
+        query: impl Into<Query>,
         variables: Map<String, Value>,
-        mut start: Option<String>,
+        mut start: Option<Cursor>,
         map: M,
     ) -> Result<Vec<U>, VkError>
     where
         T: DeserializeOwned,
         M: FnMut(T) -> Result<(Vec<U>, crate::PageInfo), VkError> + Clone,
     {
+        let query = query.into();
         paginate(|cursor| {
             let vars = variables.clone();
             let mut mapper = map.clone();
-            let current = cursor.or_else(|| start.take());
+            let current = cursor.map(Cursor::from).or_else(|| start.take());
+            let q = query.clone();
             async move {
-                let data = self.fetch_page::<T>(query, current, vars).await?;
+                let data = self.fetch_page::<T>(q, current, vars).await?;
                 mapper(data)
             }
         })

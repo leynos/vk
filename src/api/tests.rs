@@ -54,9 +54,13 @@ fn start_server(responses: Vec<String>) -> TestClient {
         base_delay: Duration::from_millis(1),
         ..RetryConfig::default()
     };
-    let client =
-        GraphQLClient::with_endpoint_retry("token", &format!("http://{addr}"), None, retry)
-            .expect("create client");
+    let client = GraphQLClient::with_endpoint_retry(
+        "token",
+        format!("http://{addr}"),
+        None,
+        retry,
+    )
+    .expect("create client");
     TestClient { client, join }
 }
 
@@ -107,10 +111,10 @@ async fn fetch_page_injects_cursor() {
         let _ = server.await;
     });
     let client =
-        GraphQLClient::with_endpoint("token", &format!("http://{addr}"), None).expect("client");
+        GraphQLClient::with_endpoint("token", format!("http://{addr}"), None).expect("client");
 
     let _: serde_json::Value = client
-        .fetch_page("query", Some("abc".to_string()), serde_json::Map::new())
+        .fetch_page("query", Some("abc".into()), serde_json::Map::new())
         .await
         .expect("fetch");
 

@@ -60,9 +60,13 @@ fn start_server(responses: Vec<String>) -> TestClient {
         base_delay: Duration::from_millis(1),
         ..RetryConfig::default()
     };
-    let client =
-        GraphQLClient::with_endpoint_retry("token", &format!("http://{addr}"), None, retry)
-            .expect("create client");
+    let client = GraphQLClient::with_endpoint_retry(
+        "token",
+        format!("http://{addr}"),
+        None,
+        retry,
+    )
+    .expect("create client");
     TestClient {
         client,
         join,

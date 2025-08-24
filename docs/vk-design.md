@@ -52,10 +52,12 @@ accepts an optional list of file paths that limits output to matching comments.
 
 Networking logic resides in [src/api/mod.rs](../src/api/mod.rs). It exposes the
 `GraphQLClient` alongside the `run_query` helper and pagination utilities used
-throughout the application. `run_query` retries transient request failures with
-`backon`'s jittered exponential backoff, attempting each query up to five
-times. The `paginate` helper loops until `PageInfo` indicates completion,
-discarding any items fetched before an error occurs.
+throughout the application. The client employs lightweight `Token`, `Endpoint`,
+`Query`, and `Cursor` types to avoid parameter mix-ups. `run_query` retries
+transient request failures with `backon`'s jittered exponential backoff,
+attempting each query up to five times. The `paginate` helper loops until
+`PageInfo` indicates completion, discarding any items fetched before an error
+occurs.
 
 ## Utility
 
