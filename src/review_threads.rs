@@ -115,9 +115,7 @@ pub async fn fetch_review_threads(
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
         let mut comments = initial.nodes;
-        if initial.page_info.has_next_page
-            && let Some(cursor) = initial.page_info.end_cursor
-        {
+        if initial.page_info.has_next_page && let Some(cursor) = initial.page_info.end_cursor {
             let thread_id = thread.id.clone();
             let mut vars = Map::new();
             vars.insert("id".into(), json!(thread_id.clone()));

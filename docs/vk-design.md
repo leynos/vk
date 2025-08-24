@@ -51,13 +51,14 @@ their purpose and merge semantics are clear to downstream users. `PrArgs`
 accepts an optional list of file paths that limits output to matching comments.
 
 Networking logic resides in [src/api/mod.rs](../src/api/mod.rs). It exposes the
-`GraphQLClient` alongside the `run_query` helper and pagination utilities used
-throughout the application. The client employs lightweight `Token`, `Endpoint`,
-`Query`, and `Cursor` types to avoid parameter mix-ups. `run_query` retries
-transient request failures with `backon`'s jittered exponential backoff,
-attempting each query up to five times. The `paginate` helper loops until
-`PageInfo` indicates completion, discarding any items fetched before an error
-occurs.
+`GraphQLClient` alongside `run_query`, `fetch_page`, and `paginate_all` helpers
+used throughout the application. The client employs lightweight `Token`,
+`Endpoint`, `Query`, and `Cursor` types to avoid parameter mix-ups. `run_query`
+retries transient request failures with `backon`'s jittered exponential
+backoff, attempting each query up to five times. `fetch_page` merges an
+optional cursor into a variables map and rejects non-object input upfront. The
+`paginate` helper loops until `PageInfo` indicates completion, discarding any
+items fetched before an error occurs.
 
 ## Utility
 
