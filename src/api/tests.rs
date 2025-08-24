@@ -2,6 +2,8 @@
 
 use super::*;
 use crate::PageInfo;
+use rstest::{fixture, rstest};
+use serde_json::{Map, Value, json};
 use std::{
     cell::RefCell,
     sync::{
@@ -59,6 +61,52 @@ fn start_server(responses: Vec<String>) -> TestClient {
     TestClient { client, join }
 }
 
+#[fixture]
+fn mock_server_with_capture() -> (GraphQLClient, Arc<Mutex<String>>, JoinHandle<()>) {
+    use third_wheel::hyper::body::to_bytes;
+
+    let captured = Arc::new(Mutex::new(String::new()));
+    let cap_clone = Arc::clone(&captured);
+    let svc = make_service_fn(move |_conn| {
+        let cap_inner = Arc::clone(&cap_clone);
+        async move {
+            Ok::<_, std::convert::Infallible>(service_fn(move |req: Request<Body>| {
+                let cap = Arc::clone(&cap_inner);
+                async move {
+                    let bytes = to_bytes(req.into_body()).await.expect("body");
+                    *cap.lock().expect("lock") = String::from_utf8(bytes.to_vec()).expect("utf8");
+                    Ok::<_, std::convert::Infallible>(
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "application/json")
+                            .body(Body::from("{\"data\":{}}"))
+                            .expect("response"),
+                    )
+                }
+            }))
+        }
+    });
+    let server = Server::bind(&"127.0.0.1:0".parse().expect("addr")).serve(svc);
+    let addr = server.local_addr();
+    let join = tokio::spawn(async move {
+        let _ = server.await;
+    });
+    let client =
+        GraphQLClient::with_endpoint("token", format!("http://{addr}"), None).expect("client");
+
+    (client, captured, join)
+}
+
+fn assert_cursor_in_request(captured: &Arc<Mutex<String>>, expected: &str) {
+    let body = captured.lock().expect("lock").to_string();
+    let v: Value = serde_json::from_str(&body).expect("json body");
+    let cur = v
+        .get("variables")
+        .and_then(|vars| vars.get("cursor"))
+        .and_then(Value::as_str);
+    assert_eq!(cur, Some(expected));
+}
+
 #[tokio::test]
 async fn run_query_retries_missing_data() {
     let responses = vec![
@@ -76,59 +124,10 @@ async fn run_query_retries_missing_data() {
 }
 
 #[tokio::test]
-async fn fetch_page_injects_cursor() {
-    use third_wheel::hyper::body::to_bytes;
-
-    let captured = Arc::new(Mutex::new(String::new()));
-    let cap_clone = Arc::clone(&captured);
-    let svc = make_service_fn(move |_conn| {
-        let cap_inner = Arc::clone(&cap_clone);
-        async move {
-            Ok::<_, std::convert::Infallible>(service_fn(move |req: Request<Body>| {
-                let cap = Arc::clone(&cap_inner);
-                async move {
-                    let bytes = to_bytes(req.into_body()).await.expect("body");
-                    *cap.lock().expect("lock") = String::from_utf8(bytes.to_vec()).expect("utf8");
-                    Ok::<_, std::convert::Infallible>(
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header("Content-Type", "application/json")
-                            .body(Body::from("{\"data\":{}}"))
-                            .expect("response"),
-                    )
-                }
-            }))
-        }
-    });
-    let server = Server::bind(&"127.0.0.1:0".parse().expect("addr")).serve(svc);
-    let addr = server.local_addr();
-    let join = tokio::spawn(async move {
-        let _ = server.await;
-    });
-    let client =
-        GraphQLClient::with_endpoint("token", format!("http://{addr}"), None).expect("client");
-
-    let _: serde_json::Value = client
-        .fetch_page("query", Some("abc".into()), serde_json::Map::new())
-        .await
-        .expect("fetch");
-
-    join.abort();
-    let _ = join.await;
-    let body = captured.lock().expect("lock").to_string();
-    let v: serde_json::Value = serde_json::from_str(&body).expect("json body");
-    let cur = v
-        .get("variables")
-        .and_then(|vars| vars.get("cursor"))
-        .and_then(|c| c.as_str());
-    assert_eq!(cur, Some("abc"));
-}
-
-#[tokio::test]
 async fn fetch_page_rejects_non_object_variables() {
     let client = GraphQLClient::with_endpoint("token", "http://127.0.0.1:9", None).expect("client");
     let err = client
-        .fetch_page::<serde_json::Value, _>("query", None, serde_json::json!(null))
+        .fetch_page::<Value, _>("query", None, serde_json::json!(null))
         .await
         .expect_err("error");
     match err {
@@ -139,57 +138,28 @@ async fn fetch_page_rejects_non_object_variables() {
     }
 }
 
-#[tokio::test]
-async fn fetch_page_overwrites_existing_cursor() {
-    use serde_json::json;
-    use third_wheel::hyper::body::to_bytes;
-
-    let captured = Arc::new(Mutex::new(String::new()));
-    let cap_clone = Arc::clone(&captured);
-    let svc = make_service_fn(move |_conn| {
-        let cap_inner = Arc::clone(&cap_clone);
-        async move {
-            Ok::<_, std::convert::Infallible>(service_fn(move |req: Request<Body>| {
-                let cap = Arc::clone(&cap_inner);
-                async move {
-                    let bytes = to_bytes(req.into_body()).await.expect("body");
-                    *cap.lock().expect("lock") = String::from_utf8(bytes.to_vec()).expect("utf8");
-                    Ok::<_, std::convert::Infallible>(
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header("Content-Type", "application/json")
-                            .body(Body::from("{\"data\":{}}"))
-                            .expect("response"),
-                    )
-                }
-            }))
-        }
-    });
-    let server = Server::bind(&"127.0.0.1:0".parse().expect("addr")).serve(svc);
-    let addr = server.local_addr();
-    let join = tokio::spawn(async move {
-        let _ = server.await;
-    });
-    let client =
-        GraphQLClient::with_endpoint("token", format!("http://{addr}"), None).expect("client");
-
-    let mut vars = serde_json::Map::new();
+#[rstest]
+#[case(Map::new(), "abc", "abc")]
+#[case({
+    let mut vars = Map::new();
     vars.insert("cursor".into(), json!("stale"));
-    let _: serde_json::Value = client
-        .fetch_page("query", Some("fresh".into()), vars)
+    vars
+}, "fresh", "fresh")]
+#[tokio::test]
+async fn fetch_page_cursor_handling(
+    mock_server_with_capture: (GraphQLClient, Arc<Mutex<String>>, JoinHandle<()>),
+    #[case] variables: Map<String, Value>,
+    #[case] cursor: &str,
+    #[case] expected: &str,
+) {
+    let (client, captured, join) = mock_server_with_capture;
+    let _: Value = client
+        .fetch_page("query", Some(cursor.into()), variables)
         .await
         .expect("fetch");
-
     join.abort();
     let _ = join.await;
-    let body = captured.lock().expect("lock").to_string();
-    let v: serde_json::Value = serde_json::from_str(&body).expect("json body");
-    let cur = v
-        .get("variables")
-        .and_then(|vars| vars.get("cursor"))
-        .and_then(|c| c.as_str());
-    assert_eq!(cur, Some("fresh"));
-    assert!(!body.contains("\"cursor\":\"stale\""));
+    assert_cursor_in_request(&captured, expected);
 }
 
 #[tokio::test]

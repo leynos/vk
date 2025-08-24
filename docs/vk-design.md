@@ -57,8 +57,8 @@ used throughout the application. The client employs lightweight `Token`,
 retries transient request failures with `backon`'s jittered exponential
 backoff, attempting each query up to five times. `fetch_page` merges an
 optional cursor into a variables map and rejects non-object input upfront. The
-`paginate` helper loops until `PageInfo` indicates completion, discarding any
-items fetched before an error occurs.
+`paginate_all` helper loops until `PageInfo` indicates completion, discarding
+any items fetched before an error occurs.
 
 ## Utility
 
@@ -140,7 +140,7 @@ number of attempts and the base delay for the exponential backoff. By default,
 the client tries a query up to five times, waiting `200ms * 2^attempt` with
 full jitter supplied by `backon` so concurrent callers spread out as delays
 grow. Because `run_query` only returns after a full page has been fetched,
-`paginate` never appends partial results, preserving order and avoiding
+`paginate_all` never appends partial results, preserving order and avoiding
 duplicates.
 
 The diagram below illustrates how deserialisation errors surface the JSON path

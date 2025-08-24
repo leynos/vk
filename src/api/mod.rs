@@ -122,6 +122,12 @@ impl Cursor {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Consume the cursor and return the inner `String`.
+    #[must_use]
+    pub fn into_inner(self) -> String {
+        self.0
+    }
 }
 
 impl From<String> for Cursor {
@@ -397,9 +403,9 @@ impl GraphQLClient {
     {
         let query = query.into();
         let payload = json!({ "query": query.as_ref(), "variables": &variables });
-        let ctx = serde_json::to_string(&payload)
-            .expect("serialising GraphQL request payload")
-            .boxed();
+        let payload_str =
+            serde_json::to_string(&payload).expect("serialising GraphQL request payload");
+        let ctx = snippet(&payload_str, 1024).boxed();
         let builder = ExponentialBuilder::default()
             .with_min_delay(self.retry.base_delay)
             .with_max_times(self.retry.attempts)
@@ -466,7 +472,7 @@ impl GraphQLClient {
             VkError::BadResponse("variables for fetch_page must be a JSON object".boxed())
         })?;
         if let Some(c) = cursor {
-            obj.insert("cursor".into(), Value::String(c.as_str().to_string()));
+            obj.insert("cursor".into(), Value::String(c.into_inner()));
         }
         self.run_query(query, variables).await
     }
