@@ -52,10 +52,10 @@ accepts an optional list of file paths that limits output to matching comments.
 
 Networking logic resides in [src/api/mod.rs](../src/api/mod.rs). It exposes the
 `GraphQLClient` alongside the `run_query` helper and pagination utilities used
-throughout the application. `run_query` retries transient request failures up
-to five times with exponential backoff and random jitter. The `paginate` helper
-loops until `PageInfo` indicates completion, discarding any items fetched
-before an error occurs.
+throughout the application. `run_query` retries transient request failures with
+`backon`'s jittered exponential backoff, attempting each query up to five
+times. The `paginate` helper loops until `PageInfo` indicates completion,
+discarding any items fetched before an error occurs.
 
 ## Utility
 
@@ -133,12 +133,12 @@ classDiagram
 
 GraphQL requests are retried when a network error occurs or the response lacks
 data. Retry behaviour is configurable through `RetryConfig`, covering the
-number of attempts, base delay, and jitter fraction. By default, the client
-attempts a query up to five times, waiting `200ms * 2^attempt` plus up to the
-same backoff again of random jitter, scaling jitter with the backoff, so
-concurrent callers spread out as delays grow. Because `run_query` only returns
-after a full page has been fetched, `paginate` never appends partial results,
-preserving order and avoiding duplicates.
+number of attempts and the base delay for the exponential backoff. By default,
+the client tries a query up to five times, waiting `200ms * 2^attempt` with
+full jitter supplied by `backon` so concurrent callers spread out as delays
+grow. Because `run_query` only returns after a full page has been fetched,
+`paginate` never appends partial results, preserving order and avoiding
+duplicates.
 
 The diagram below illustrates how deserialisation errors surface the JSON path
 and a response snippet, helping developers quickly locate schema mismatches.

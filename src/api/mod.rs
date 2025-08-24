@@ -5,8 +5,8 @@
 //! `paginate` helper used throughout the binary for fetching all pages of
 //! a cursor-based connection.
 
+use backon::{ExponentialBuilder, Retryable};
 use log::warn;
-use rand::Rng;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -26,14 +26,9 @@ const VALUE_SNIPPET_LEN: usize = 200;
 #[derive(Clone, Copy)]
 pub struct RetryConfig {
     /// Total number of attempts including the initial request.
-    pub attempts: u32,
+    pub attempts: usize,
     /// Base delay for the exponential backoff.
     pub base_delay: Duration,
-    /// Jitter fraction of the backoff interval as a fixed-point value.
-    ///
-    /// The actual fraction is `jitter_factor / 128`; 128 means 100% jitter
-    /// (up to the full backoff duration).
-    pub jitter_factor: u32,
 }
 
 impl Default for RetryConfig {
@@ -41,7 +36,6 @@ impl Default for RetryConfig {
         Self {
             attempts: 5,
             base_delay: Duration::from_millis(200),
-            jitter_factor: 128,
         }
     }
 }
@@ -175,14 +169,6 @@ impl GraphQLClient {
         }
     }
 
-    fn jittered_backoff(&self, attempt: u32, rng: &mut impl Rng) -> Duration {
-        let backoff = self.retry.base_delay * 2u32.pow(attempt);
-        let backoff_ms = u64::try_from(backoff.as_millis()).expect("delay fits in u64");
-        let jitter_max = (backoff_ms * u64::from(self.retry.jitter_factor)) >> 7;
-        let jitter = rng.gen_range(0..=jitter_max);
-        Duration::from_millis(backoff_ms + jitter)
-    }
-
     /// Execute an HTTP request and return the raw response body.
     ///
     /// # Errors
@@ -269,11 +255,6 @@ impl GraphQLClient {
         }
     }
 
-    /// Sleep for an exponential backoff with jitter.
-    async fn perform_retry_delay(&self, attempt: u32, rng: &mut impl Rng) {
-        sleep(self.jittered_backoff(attempt, rng)).await;
-    }
-
     /// Execute a GraphQL query using this client.
     ///
     /// # Errors
@@ -293,29 +274,20 @@ impl GraphQLClient {
         let ctx = serde_json::to_string(&payload)
             .expect("serialising GraphQL request payload")
             .boxed();
-        let mut rng = rand::thread_rng();
-        let mut last_err = None;
-        for attempt in 0..self.retry.attempts {
-            let res = async {
-                let body = self.execute_single_request(&payload, &ctx).await?;
-                self.log_transcript(&payload, &body);
-                Self::process_graphql_response::<T>(&body)
-            }
-            .await;
-            match res {
-                Ok(v) => return Ok(v),
-                Err(e) => {
-                    if attempt + 1 < self.retry.attempts && Self::should_retry(&e) {
-                        warn!("retrying GraphQL query after error: {e}");
-                        self.perform_retry_delay(attempt, &mut rng).await;
-                        last_err = Some(e);
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
-        }
-        Err(last_err.unwrap_or_else(|| VkError::BadResponse("retry loop exhausted".boxed())))
+        let builder = ExponentialBuilder::default()
+            .with_min_delay(self.retry.base_delay)
+            .with_max_times(self.retry.attempts)
+            .with_jitter();
+        (|| async {
+            let body = self.execute_single_request(&payload, &ctx).await?;
+            self.log_transcript(&payload, &body);
+            Self::process_graphql_response::<T>(&body)
+        })
+        .retry(builder)
+        .sleep(sleep)
+        .when(|e: &VkError| Self::should_retry(e))
+        .notify(|err: &VkError, dur| warn!("retrying GraphQL query after {dur:?}: {err}"))
+        .await
     }
 
     /// Execute a GraphQL query and merge an optional cursor into the variables.
