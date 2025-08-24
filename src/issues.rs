@@ -2,12 +2,11 @@
 //!
 //! Currently only retrieval of a single issue by number is supported.
 
-use serde::Deserialize;
-use serde_json::json;
-
 use crate::graphql_queries::ISSUE_QUERY;
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, VkError};
+use serde::Deserialize;
+use serde_json::{Map, json};
 
 #[derive(Deserialize)]
 struct IssueData {
@@ -36,15 +35,10 @@ pub async fn fetch_issue(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Issue, VkError> {
-    let data: IssueData = client
-        .run_query(
-            ISSUE_QUERY,
-            json!({
-                "owner": repo.owner.as_str(),
-                "name": repo.name.as_str(),
-                "number": number
-            }),
-        )
-        .await?;
+    let mut vars = Map::new();
+    vars.insert("owner".into(), json!(repo.owner.clone()));
+    vars.insert("name".into(), json!(repo.name.clone()));
+    vars.insert("number".into(), json!(number));
+    let data: IssueData = client.fetch_page(ISSUE_QUERY, None, vars).await?;
     Ok(data.repository.issue)
 }

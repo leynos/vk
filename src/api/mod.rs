@@ -5,17 +5,142 @@
 //! `paginate` helper used throughout the binary for fetching all pages of
 //! a cursor-based connection.
 
+use backon::{ExponentialBuilder, Retryable};
 use log::warn;
-use rand::Rng;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use serde_json::json;
+use serde_json::{Map, Value, json};
 use std::env;
 use tokio::time::{Duration, sleep};
 
 use crate::VkError;
 use crate::boxed::BoxedStr;
+
+/// A GraphQL query string with type safety.
+#[derive(Debug, Clone)]
+pub struct Query(String);
+
+impl Query {
+    pub fn new(query: impl Into<String>) -> Self {
+        Self(query.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for Query {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl AsRef<str> for Query {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A GitHub API authentication token.
+#[derive(Debug, Clone)]
+pub struct Token(String);
+
+impl Token {
+    pub fn new(token: impl Into<String>) -> Self {
+        Self(token.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl From<&str> for Token {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl AsRef<str> for Token {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A GitHub GraphQL API endpoint URL.
+#[derive(Debug, Clone)]
+pub struct Endpoint(String);
+
+impl Endpoint {
+    pub fn new(url: impl Into<String>) -> Self {
+        Self(url.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for Endpoint {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<String> for Endpoint {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl Default for Endpoint {
+    fn default() -> Self {
+        Self(GITHUB_GRAPHQL_URL.to_string())
+    }
+}
+
+/// A pagination cursor for GraphQL connections.
+#[derive(Debug, Clone)]
+pub struct Cursor(String);
+
+impl Cursor {
+    pub fn new(cursor: impl Into<String>) -> Self {
+        Self(cursor.into())
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Consume the cursor and return the inner `String`.
+    #[must_use]
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl From<String> for Cursor {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl From<&str> for Cursor {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
 
 const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
@@ -26,14 +151,9 @@ const VALUE_SNIPPET_LEN: usize = 200;
 #[derive(Clone, Copy)]
 pub struct RetryConfig {
     /// Total number of attempts including the initial request.
-    pub attempts: u32,
+    pub attempts: usize,
     /// Base delay for the exponential backoff.
     pub base_delay: Duration,
-    /// Jitter fraction of the backoff interval as a fixed-point value.
-    ///
-    /// The actual fraction is `jitter_factor / 128`; 128 means 100% jitter
-    /// (up to the full backoff duration).
-    pub jitter_factor: u32,
 }
 
 impl Default for RetryConfig {
@@ -41,7 +161,6 @@ impl Default for RetryConfig {
         Self {
             attempts: 5,
             base_delay: Duration::from_millis(200),
-            jitter_factor: 128,
         }
     }
 }
@@ -76,7 +195,7 @@ fn handle_graphql_errors(errors: Vec<GraphQlError>) -> VkError {
     VkError::ApiErrors(msg.boxed())
 }
 
-fn build_headers(token: &str) -> HeaderMap {
+fn build_headers(token: &Token) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().expect("static string"));
     headers.insert(
@@ -88,7 +207,9 @@ fn build_headers(token: &str) -> HeaderMap {
     if !token.is_empty() {
         headers.insert(
             AUTHORIZATION,
-            format!("Bearer {token}").parse().expect("valid header"),
+            format!("Bearer {}", token.as_str())
+                .parse()
+                .expect("valid header"),
         );
     }
     headers
@@ -101,7 +222,7 @@ fn build_headers(token: &str) -> HeaderMap {
 pub struct GraphQLClient {
     client: reqwest::Client,
     headers: HeaderMap,
-    endpoint: String,
+    endpoint: Endpoint,
     transcript: Option<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>,
     retry: RetryConfig,
 }
@@ -116,12 +237,14 @@ impl GraphQLClient {
     ///
     /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
     pub fn new(
-        token: &str,
+        token: impl Into<Token>,
         transcript: Option<std::path::PathBuf>,
     ) -> Result<Self, std::io::Error> {
-        let endpoint =
-            env::var("GITHUB_GRAPHQL_URL").unwrap_or_else(|_| GITHUB_GRAPHQL_URL.to_string());
-        Self::with_endpoint_retry(token, &endpoint, transcript, RetryConfig::default())
+        let token = token.into();
+        let endpoint = env::var("GITHUB_GRAPHQL_URL")
+            .map(Endpoint::new)
+            .unwrap_or_default();
+        Self::with_endpoint_retry(token, endpoint, transcript, RetryConfig::default())
     }
 
     /// Create a client targeting a custom API endpoint.
@@ -133,8 +256,8 @@ impl GraphQLClient {
     ///
     /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
     pub fn with_endpoint(
-        token: &str,
-        endpoint: &str,
+        token: impl Into<Token>,
+        endpoint: impl Into<Endpoint>,
         transcript: Option<std::path::PathBuf>,
     ) -> Result<Self, std::io::Error> {
         Self::with_endpoint_retry(token, endpoint, transcript, RetryConfig::default())
@@ -146,11 +269,13 @@ impl GraphQLClient {
     ///
     /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
     pub fn with_endpoint_retry(
-        token: &str,
-        endpoint: &str,
+        token: impl Into<Token>,
+        endpoint: impl Into<Endpoint>,
         transcript: Option<std::path::PathBuf>,
         retry: RetryConfig,
     ) -> Result<Self, std::io::Error> {
+        let token = token.into();
+        let endpoint = endpoint.into();
         let transcript = match transcript {
             Some(p) => match std::fs::File::create(p) {
                 Ok(file) => Some(std::sync::Mutex::new(std::io::BufWriter::new(file))),
@@ -160,8 +285,8 @@ impl GraphQLClient {
         };
         Ok(Self {
             client: reqwest::Client::new(),
-            headers: build_headers(token),
-            endpoint: endpoint.to_string(),
+            headers: build_headers(&token),
+            endpoint,
             transcript,
             retry,
         })
@@ -173,14 +298,6 @@ impl GraphQLClient {
             VkError::BadResponse(msg) => msg.starts_with("Missing data in response"),
             _ => false,
         }
-    }
-
-    fn jittered_backoff(&self, attempt: u32, rng: &mut impl Rng) -> Duration {
-        let backoff = self.retry.base_delay * 2u32.pow(attempt);
-        let backoff_ms = u64::try_from(backoff.as_millis()).expect("delay fits in u64");
-        let jitter_max = (backoff_ms * u64::from(self.retry.jitter_factor)) >> 7;
-        let jitter = rng.gen_range(0..=jitter_max);
-        Duration::from_millis(backoff_ms + jitter)
     }
 
     /// Execute an HTTP request and return the raw response body.
@@ -196,7 +313,7 @@ impl GraphQLClient {
     ) -> Result<String, VkError> {
         let response = self
             .client
-            .post(&self.endpoint)
+            .post(self.endpoint.as_str())
             .headers(self.headers.clone())
             .json(payload)
             .send()
@@ -269,11 +386,6 @@ impl GraphQLClient {
         }
     }
 
-    /// Sleep for an exponential backoff with jitter.
-    async fn perform_retry_delay(&self, attempt: u32, rng: &mut impl Rng) {
-        sleep(self.jittered_backoff(attempt, rng)).await;
-    }
-
     /// Execute a GraphQL query using this client.
     ///
     /// # Errors
@@ -284,38 +396,129 @@ impl GraphQLClient {
     /// # Panics
     ///
     /// Panics if the configured backoff exceeds `u64::MAX` milliseconds.
-    pub async fn run_query<V, T>(&self, query: &str, variables: V) -> Result<T, VkError>
+    pub async fn run_query<V, T>(&self, query: impl Into<Query>, variables: V) -> Result<T, VkError>
     where
         V: serde::Serialize,
         T: DeserializeOwned,
     {
-        let payload = json!({ "query": query, "variables": &variables });
-        let ctx = serde_json::to_string(&payload)
-            .expect("serialising GraphQL request payload")
-            .boxed();
-        let mut rng = rand::thread_rng();
-        let mut last_err = None;
-        for attempt in 0..self.retry.attempts {
-            let res = async {
-                let body = self.execute_single_request(&payload, &ctx).await?;
-                self.log_transcript(&payload, &body);
-                Self::process_graphql_response::<T>(&body)
-            }
-            .await;
-            match res {
-                Ok(v) => return Ok(v),
-                Err(e) => {
-                    if attempt + 1 < self.retry.attempts && Self::should_retry(&e) {
-                        warn!("retrying GraphQL query after error: {e}");
-                        self.perform_retry_delay(attempt, &mut rng).await;
-                        last_err = Some(e);
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
+        let query = query.into();
+        let payload = json!({ "query": query.as_ref(), "variables": &variables });
+        let payload_str =
+            serde_json::to_string(&payload).expect("serialising GraphQL request payload");
+        let ctx = snippet(&payload_str, 1024).boxed();
+        let builder = ExponentialBuilder::default()
+            .with_min_delay(self.retry.base_delay)
+            .with_max_times(self.retry.attempts)
+            .with_jitter();
+        (|| async {
+            let body = self.execute_single_request(&payload, &ctx).await?;
+            self.log_transcript(&payload, &body);
+            Self::process_graphql_response::<T>(&body)
+        })
+        .retry(builder)
+        .sleep(sleep)
+        .when(|e: &VkError| Self::should_retry(e))
+        .notify(|err: &VkError, dur| warn!("retrying GraphQL query after {dur:?}: {err}"))
+        .await
+    }
+
+    /// Execute a GraphQL query and merge an optional cursor into the variables.
+    ///
+    /// This wraps [`run_query`], injecting the `cursor` field when provided so
+    /// callers need only supply the base variables for paginated queries. If the
+    /// `variables` already contain a `cursor` key it will be overwritten.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VkError::BadResponse`] if `variables` serialise to a non-object
+    /// value, or propagates any error from the underlying request.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// use serde_json::{Map, Value, json};
+    /// use vk::api::GraphQLClient;
+    /// # async fn run(client: GraphQLClient) -> Result<(), vk::VkError> {
+    /// let mut vars = Map::new();
+    /// vars.insert("id".to_string(), json!(1));
+    /// let data: Value = client.fetch_page("query", None, vars).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    /// ```no_run
+    /// use serde_json::json;
+    /// use vk::api::GraphQLClient;
+    /// # async fn run(client: GraphQLClient) {
+    ///     let err = client
+    ///         .fetch_page::<serde_json::Value, _>("query", None, json!(null))
+    ///         .await;
+    ///     assert!(err.is_err());
+    /// # }
+    /// ```
+    pub async fn fetch_page<T, V>(
+        &self,
+        query: impl Into<Query>,
+        cursor: Option<Cursor>,
+        variables: V,
+    ) -> Result<T, VkError>
+    where
+        V: serde::Serialize,
+        T: DeserializeOwned,
+    {
+        let query = query.into();
+        let mut variables = serde_json::to_value(variables).map_err(|e| {
+            VkError::BadResponseSerde(format!("serialising fetch_page variables: {e}").boxed())
+        })?;
+        let obj = variables.as_object_mut().ok_or_else(|| {
+            VkError::BadResponse("variables for fetch_page must be a JSON object".boxed())
+        })?;
+        if let Some(c) = cursor {
+            obj.insert("cursor".into(), Value::String(c.into_inner()));
         }
-        Err(last_err.unwrap_or_else(|| VkError::BadResponse("retry loop exhausted".boxed())))
+        self.run_query(query, variables).await
+    }
+
+    /// Fetch and concatenate all pages from a cursor-based connection.
+    ///
+    /// `query` and `variables` define the base request. The `map` closure
+    /// extracts the items and pagination info from each page's response.
+    ///
+    /// # Errors
+    ///
+    /// Propagates any [`VkError`] returned by the underlying request or mapper
+    /// closure.
+    pub async fn paginate_all<T, U, M>(
+        &self,
+        query: impl Into<Query>,
+        variables: Map<String, Value>,
+        start: Option<Cursor>,
+        map: M,
+    ) -> Result<Vec<U>, VkError>
+    where
+        T: DeserializeOwned,
+        M: Fn(T) -> Result<(Vec<U>, crate::PageInfo), VkError>,
+    {
+        let query = query.into();
+        let mut items = Vec::new();
+        let mut cursor = start;
+        loop {
+            let vars = variables.clone();
+            let data = self
+                .fetch_page::<T, _>(query.clone(), cursor.clone(), vars)
+                .await?;
+            let (mut page, info) = map(data)?;
+            items.append(&mut page);
+            if !info.has_next_page {
+                break;
+            }
+            cursor = Some(
+                info.end_cursor
+                    .ok_or_else(|| {
+                        VkError::BadResponse("hasNextPage=true but endCursor missing".boxed())
+                    })?
+                    .into(),
+            );
+        }
+        Ok(items)
     }
 }
 
@@ -368,7 +571,9 @@ where
         if !info.has_next_page {
             break;
         }
-        cursor = info.end_cursor;
+        cursor = Some(info.end_cursor.ok_or_else(|| {
+            VkError::BadResponse("hasNextPage=true but endCursor missing".boxed())
+        })?);
     }
     Ok(items)
 }

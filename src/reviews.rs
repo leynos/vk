@@ -5,9 +5,9 @@
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Map, json};
 
-use crate::{GraphQLClient, PageInfo, User, VkError, paginate, ref_parser::RepoInfo};
+use crate::{GraphQLClient, PageInfo, User, VkError, ref_parser::RepoInfo};
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -63,33 +63,21 @@ const REVIEWS_QUERY: &str = r"
     }
 ";
 
-pub async fn fetch_review_page(
-    client: &GraphQLClient,
-    repo: &RepoInfo,
-    number: u64,
-    cursor: Option<String>,
-) -> Result<(Vec<PullRequestReview>, PageInfo), VkError> {
-    let data: ReviewData = client
-        .run_query(
-            REVIEWS_QUERY,
-            json!({
-                "owner": repo.owner.as_str(),
-                "name": repo.name.as_str(),
-                "number": number,
-                "cursor": cursor,
-            }),
-        )
-        .await?;
-    let conn = data.repository.pull_request.reviews;
-    Ok((conn.nodes, conn.page_info))
-}
-
 pub async fn fetch_reviews(
     client: &GraphQLClient,
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<PullRequestReview>, VkError> {
-    paginate(|c| fetch_review_page(client, repo, number, c)).await
+    let mut vars = Map::new();
+    vars.insert("owner".into(), json!(repo.owner.clone()));
+    vars.insert("name".into(), json!(repo.name.clone()));
+    vars.insert("number".into(), json!(number));
+    client
+        .paginate_all(REVIEWS_QUERY, vars, None, |data: ReviewData| {
+            let conn = data.repository.pull_request.reviews;
+            Ok((conn.nodes, conn.page_info))
+        })
+        .await
 }
 
 pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview> {
