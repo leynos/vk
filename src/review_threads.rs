@@ -120,7 +120,7 @@ pub async fn fetch_review_threads(
         {
             let thread_id = thread.id.clone();
             let mut vars = Map::new();
-            vars.insert("id".into(), json!(thread_id.clone()));
+            vars.insert("id".into(), json!(&thread_id));
             let mut more = client
                 .paginate_all(
                     COMMENT_QUERY,
