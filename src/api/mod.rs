@@ -507,7 +507,7 @@ impl GraphQLClient {
                 .await?;
             let (mut page, info) = map(data)?;
             items.append(&mut page);
-            if let Some(next) = next_cursor(&info)? {
+            if let Some(next) = info.next_cursor()? {
                 cursor = Some(next.into());
             } else {
                 break;
@@ -563,37 +563,13 @@ where
     loop {
         let (mut page, info) = fetch(cursor.clone()).await?;
         items.append(&mut page);
-        if let Some(next) = next_cursor(&info)? {
-            cursor = Some(next);
+        if let Some(next) = info.next_cursor()? {
+            cursor = Some(next.to_string());
         } else {
             break;
         }
     }
     Ok(items)
-}
-
-/// Return the cursor for the next page when available.
-///
-/// # Errors
-///
-/// Returns [`VkError::BadResponse`] when `has_next_page` is `true` but
-/// `end_cursor` is absent.
-///
-/// # Examples
-/// ```ignore
-/// use vk::{api::next_cursor, PageInfo};
-/// let info = PageInfo { has_next_page: true, end_cursor: Some("c1".into()) };
-/// assert_eq!(next_cursor(&info).unwrap(), Some("c1".into()));
-/// ```
-pub(crate) fn next_cursor(info: &crate::PageInfo) -> Result<Option<String>, VkError> {
-    if info.has_next_page {
-        let cursor = info.end_cursor.clone().ok_or_else(|| {
-            VkError::BadResponse("hasNextPage=true but endCursor missing".boxed())
-        })?;
-        Ok(Some(cursor))
-    } else {
-        Ok(None)
-    }
 }
 
 #[cfg(test)]
