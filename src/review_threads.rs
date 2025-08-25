@@ -83,6 +83,32 @@ pub struct PageInfo {
     pub end_cursor: Option<String>,
 }
 
+impl PageInfo {
+    /// Return the cursor for the next page when available.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VkError::BadResponse`] when `has_next_page` is `true` but
+    /// `end_cursor` is absent.
+    ///
+    /// # Examples
+    /// ```
+    /// use vk::PageInfo;
+    /// let info = PageInfo { has_next_page: true, end_cursor: Some("c1".into()) };
+    /// assert_eq!(info.next_cursor().unwrap(), Some("c1"));
+    /// ```
+    pub fn next_cursor(&self) -> Result<Option<&str>, VkError> {
+        if self.has_next_page {
+            let cursor = self.end_cursor.as_deref().ok_or_else(|| {
+                VkError::BadResponse("hasNextPage=true but endCursor missing".boxed())
+            })?;
+            Ok(Some(cursor))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 /// Minimal user representation for authorship information.
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct User {
@@ -115,9 +141,8 @@ pub async fn fetch_review_threads(
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
         let mut comments = initial.nodes;
-        if initial.page_info.has_next_page
-            && let Some(cursor) = initial.page_info.end_cursor
-        {
+        // Propagate invalid pagination info as an error.
+        if let Some(cursor) = initial.page_info.next_cursor()? {
             let thread_id = thread.id.clone();
             let mut vars = Map::new();
             vars.insert("id".into(), json!(&thread_id));
