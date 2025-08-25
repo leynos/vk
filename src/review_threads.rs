@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json::{Map, json};
 use std::collections::HashSet;
 
+use crate::api::next_cursor;
 use crate::boxed::BoxedStr;
 use crate::graphql_queries::{COMMENT_QUERY, THREADS_QUERY};
 use crate::ref_parser::RepoInfo;
@@ -115,9 +116,7 @@ pub async fn fetch_review_threads(
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
         let mut comments = initial.nodes;
-        if initial.page_info.has_next_page
-            && let Some(cursor) = initial.page_info.end_cursor
-        {
+        if let Some(cursor) = next_cursor(&initial.page_info)? {
             let thread_id = thread.id.clone();
             let mut vars = Map::new();
             vars.insert("id".into(), json!(&thread_id));

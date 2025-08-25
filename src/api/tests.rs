@@ -212,3 +212,33 @@ async fn paginate_missing_cursor_errors() {
         other => panic!("unexpected result: {other:?}"),
     }
 }
+
+#[test]
+fn next_cursor_none_when_complete() {
+    let info = PageInfo {
+        has_next_page: false,
+        end_cursor: None,
+    };
+    let next = super::next_cursor(&info).expect("cursor");
+    assert!(next.is_none());
+}
+
+#[test]
+fn next_cursor_propagates_cursor() {
+    let info = PageInfo {
+        has_next_page: true,
+        end_cursor: Some("abc".into()),
+    };
+    let next = super::next_cursor(&info).expect("cursor");
+    assert_eq!(next.as_deref(), Some("abc"));
+}
+
+#[test]
+fn next_cursor_errors_without_cursor() {
+    let info = PageInfo {
+        has_next_page: true,
+        end_cursor: None,
+    };
+    let err = super::next_cursor(&info).expect_err("missing cursor");
+    assert!(matches!(err, VkError::BadResponse(_)));
+}
