@@ -63,6 +63,24 @@ const REVIEWS_QUERY: &str = r"
     }
 ";
 
+/// Retrieve all reviews for a pull request by paging through the GitHub
+/// GraphQL API.
+///
+/// ```no_run
+/// use vk::{GraphQLClient, ref_parser::RepoInfo};
+///
+/// # async fn run() -> Result<(), vk::VkError> {
+/// let client = GraphQLClient::new("token", None).expect("client");
+/// let repo = RepoInfo { owner: "octocat".into(), name: "hello-world".into() };
+/// let reviews = vk::reviews::fetch_reviews(&client, &repo, 1).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// Returns a [`VkError`] if the request fails or the response cannot be
+/// deserialised.
 pub async fn fetch_reviews(
     client: &GraphQLClient,
     repo: &RepoInfo,
@@ -80,6 +98,21 @@ pub async fn fetch_reviews(
         .await
 }
 
+/// Select the most recent review from each author.
+///
+/// ```
+/// use chrono::Utc;
+/// use vk::reviews::{latest_reviews, PullRequestReview};
+///
+/// let reviews = vec![PullRequestReview {
+///     body: String::new(),
+///     submitted_at: Utc::now(),
+///     state: "COMMENTED".into(),
+///     author: None,
+/// }];
+/// let latest = latest_reviews(reviews);
+/// assert_eq!(latest.len(), 1);
+/// ```
 pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview> {
     let mut latest: HashMap<String, PullRequestReview> = HashMap::new();
     for r in reviews {
