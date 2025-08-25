@@ -89,6 +89,79 @@ pub struct User {
     pub login: String,
 }
 
+/// Fetch all comments for a review thread by following pagination cursors.
+///
+/// # Examples
+///
+/// ```no_run
+/// # use vk::review_threads::{CommentConnection, PageInfo};
+/// # use vk::{GraphQLClient, VkError};
+/// # async fn demo(client: GraphQLClient) -> Result<(), VkError> {
+/// let initial = CommentConnection {
+///     nodes: vec![],
+///     page_info: PageInfo { has_next_page: false, end_cursor: None },
+/// };
+/// let comments = fetch_all_comments(&client, "thread-id", initial).await?;
+/// # Ok(()) }
+/// ```
+async fn fetch_all_comments(
+    client: &GraphQLClient,
+    thread_id: &str,
+    initial: CommentConnection,
+) -> Result<CommentConnection, VkError> {
+    let mut comments = initial.nodes;
+    if initial.page_info.has_next_page
+        && let Some(cursor) = initial.page_info.end_cursor.clone()
+    {
+        let mut vars = Map::new();
+        vars.insert("id".into(), json!(thread_id));
+        let mut more = client
+            .paginate_all(
+                COMMENT_QUERY,
+                vars,
+                Some(cursor.into()),
+                move |wrapper: NodeWrapper<CommentNode>| {
+                    let conn = wrapper
+                        .node
+                        .ok_or_else(|| {
+                            VkError::BadResponse(
+                                format!("Missing comment node in response for thread {thread_id}")
+                                    .boxed(),
+                            )
+                        })?
+                        .comments;
+                    Ok((conn.nodes, conn.page_info))
+                },
+            )
+            .await?;
+        comments.append(&mut more);
+    }
+    Ok(CommentConnection {
+        nodes: comments,
+        page_info: PageInfo {
+            has_next_page: false,
+            end_cursor: None,
+        },
+    })
+}
+
+/// Retain only unresolved review threads.
+///
+/// # Examples
+///
+/// ```
+/// use vk::review_threads::{filter_unresolved_threads, ReviewThread};
+/// let threads = vec![
+///     ReviewThread { is_resolved: false, ..Default::default() },
+///     ReviewThread { is_resolved: true, ..Default::default() },
+/// ];
+/// let filtered = filter_unresolved_threads(threads);
+/// assert!(filtered.iter().all(|t| !t.is_resolved));
+/// ```
+fn filter_unresolved_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
+    threads.into_iter().filter(|t| !t.is_resolved).collect()
+}
+
 /// Fetch all unresolved review threads for a pull request.
 ///
 /// # Errors
@@ -104,53 +177,16 @@ pub async fn fetch_review_threads(
     vars.insert("owner".into(), json!(repo.owner.clone()));
     vars.insert("name".into(), json!(repo.name.clone()));
     vars.insert("number".into(), json!(number));
-    let mut threads = client
+    let threads = client
         .paginate_all(THREADS_QUERY, vars, None, |data: ThreadData| {
             let conn = data.repository.pull_request.review_threads;
             Ok((conn.nodes, conn.page_info))
         })
         .await?;
-    threads.retain(|t| !t.is_resolved);
-
+    let mut threads = filter_unresolved_threads(threads);
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
-        let mut comments = initial.nodes;
-        if initial.page_info.has_next_page
-            && let Some(cursor) = initial.page_info.end_cursor
-        {
-            let thread_id = thread.id.clone();
-            let mut vars = Map::new();
-            vars.insert("id".into(), json!(&thread_id));
-            let mut more = client
-                .paginate_all(
-                    COMMENT_QUERY,
-                    vars,
-                    Some(cursor.into()),
-                    move |wrapper: NodeWrapper<CommentNode>| {
-                        let conn = wrapper
-                            .node
-                            .ok_or_else(|| {
-                                VkError::BadResponse(
-                                    format!(
-                                        "Missing comment node in response for thread {thread_id}"
-                                    )
-                                    .boxed(),
-                                )
-                            })?
-                            .comments;
-                        Ok((conn.nodes, conn.page_info))
-                    },
-                )
-                .await?;
-            comments.append(&mut more);
-        }
-        thread.comments = CommentConnection {
-            nodes: comments,
-            page_info: PageInfo {
-                has_next_page: false,
-                end_cursor: None,
-            },
-        };
+        thread.comments = fetch_all_comments(client, &thread.id, initial).await?;
     }
     Ok(threads)
 }
