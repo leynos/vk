@@ -186,6 +186,64 @@ fn filter_threads_by_files_retains_matches() {
     assert_eq!(path, Some("README.md"));
 }
 
+#[test]
+fn filter_unresolved_threads_discards_resolved() {
+    let threads = vec![
+        ReviewThread {
+            is_resolved: false,
+            ..Default::default()
+        },
+        ReviewThread {
+            is_resolved: true,
+            ..Default::default()
+        },
+    ];
+    let filtered = filter_unresolved_threads(threads);
+    assert_eq!(filtered.len(), 1);
+    assert!(filtered.first().is_some_and(|t| !t.is_resolved));
+}
+
+#[test]
+fn filter_unresolved_threads_empty_input() {
+    let threads: Vec<ReviewThread> = vec![];
+    let filtered = filter_unresolved_threads(threads);
+    assert_eq!(filtered.len(), 0);
+}
+
+#[test]
+fn filter_unresolved_threads_all_resolved() {
+    let threads = vec![
+        ReviewThread {
+            is_resolved: true,
+            ..Default::default()
+        },
+        ReviewThread {
+            is_resolved: true,
+            ..Default::default()
+        },
+    ];
+    let filtered = filter_unresolved_threads(threads);
+    assert_eq!(filtered.len(), 0);
+}
+
+#[test]
+fn filter_unresolved_threads_all_unresolved() {
+    let threads = vec![
+        ReviewThread {
+            is_resolved: false,
+            ..Default::default()
+        },
+        ReviewThread {
+            is_resolved: false,
+            ..Default::default()
+        },
+    ];
+    let count = threads.len();
+    let filtered = filter_unresolved_threads(threads);
+    assert_eq!(filtered.len(), count);
+    assert!(filtered.iter().all(|t| !t.is_resolved));
+}
+
 #[rstest]
 #[tokio::test]
 async fn threads_with_many_comments_do_not_duplicate_first_page(

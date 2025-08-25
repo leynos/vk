@@ -2873,6 +2873,7 @@ dependencies = [
  "env_logger",
  "figment",
  "figment-json5",
+ "futures",
  "html5ever",
  "http-body-util",
  "hyper 1.6.0",
