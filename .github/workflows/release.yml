@@ -1,6 +1,8 @@
+---
+# yamllint disable rule:line-length
 name: Release Binary
 
-on:
+'on':
   push:
     tags:
       - 'v*.*.*'
@@ -26,10 +28,8 @@ jobs:
           cargo_version="$(
             CARGO_TOML_PATH="$toml_path" \
             "${{ steps.setup-python.outputs.python-path }}" - <<'PY' || echo ""
-import os, tomllib
-with open(os.environ['CARGO_TOML_PATH'], 'rb') as f:
-    print(tomllib.load(f)['package']['version'])
-PY
+            import os, pathlib, tomllib; print(tomllib.loads(pathlib.Path(os.environ['CARGO_TOML_PATH']).read_text(encoding='utf-8'))['package']['version'])
+            PY
           )"
           if [ -z "${cargo_version:-}" ]; then
             echo "::error title=Cargo.toml parse failure::Could not read package.version from ${toml_path}. Ensure Python ≥3.11 (tomllib available) and that the manifest contains [package], or set CARGO_TOML_PATH to the crate's Cargo.toml."
