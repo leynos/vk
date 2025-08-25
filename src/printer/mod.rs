@@ -23,6 +23,21 @@ fn write_author_line<W: std::io::Write>(
     )
 }
 
+fn write_entry_body<W: std::io::Write>(
+    out: &mut W,
+    skin: &MadSkin,
+    icon: &str,
+    login: Option<&str>,
+    suffix: &str,
+    body: &str,
+) -> anyhow::Result<()> {
+    write_author_line(out, icon, login, suffix)?;
+    let body = collapse_details(body);
+    skin.write_text_on(out, &body)?;
+    writeln!(out)?;
+    Ok(())
+}
+
 /// Format the body of a single review comment.
 ///
 /// The author's login appears in bold followed by the rendered markdown
@@ -44,15 +59,14 @@ pub fn write_comment_body<W: std::io::Write>(
     skin: &MadSkin,
     comment: &ReviewComment,
 ) -> anyhow::Result<()> {
-    write_author_line(
+    write_entry_body(
         &mut out,
+        skin,
         "\u{1f4ac}",
         comment.author.as_ref().map(|u| u.login.as_str()),
         " wrote:",
+        &comment.body,
     )?;
-    let body = collapse_details(&comment.body);
-    skin.write_text_on(&mut out, &body)?;
-    writeln!(out)?;
     Ok(())
 }
 
@@ -163,15 +177,14 @@ pub fn write_review<W: std::io::Write>(
     review: &PullRequestReview,
 ) -> anyhow::Result<()> {
     let suffix = format!(" {}:", review.state);
-    write_author_line(
+    write_entry_body(
         &mut out,
+        skin,
         "\u{1f4dd}",
         review.author.as_ref().map(|u| u.login.as_str()),
         &suffix,
+        &review.body,
     )?;
-    let body = collapse_details(&review.body);
-    skin.write_text_on(&mut out, &body)?;
-    writeln!(out)?;
     Ok(())
 }
 
@@ -181,7 +194,7 @@ mod tests {
     use chrono::Utc;
     use rstest::rstest;
 
-    use crate::User;
+    use crate::{ReviewComment, User};
 
     #[test]
     fn print_reviews_formats_authors_and_states() {
@@ -242,6 +255,38 @@ mod tests {
         };
         let mut buf = Vec::new();
         write_review(&mut buf, &MadSkin::default(), &review).expect("write review");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains("▶ sum"));
+        assert!(!out.contains("hidden"));
+    }
+
+    #[rstest]
+    #[case(Some("carol"), "carol")]
+    #[case(None, "(unknown)")]
+    fn write_comment_body_formats_banner(
+        #[case] login: Option<&str>,
+        #[case] expected_login: &str,
+    ) {
+        let comment = ReviewComment {
+            body: "Hi".into(),
+            author: login.map(|l| User { login: l.into() }),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        write_comment_body(&mut buf, &MadSkin::default(), &comment).expect("write comment");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains(expected_login));
+        assert!(out.contains("wrote"));
+    }
+
+    #[test]
+    fn write_comment_body_collapses_details() {
+        let comment = ReviewComment {
+            body: "<details><summary>sum</summary>hidden</details>".into(),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        write_comment_body(&mut buf, &MadSkin::default(), &comment).expect("write comment");
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("▶ sum"));
         assert!(!out.contains("hidden"));
