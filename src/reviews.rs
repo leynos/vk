@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{Map, json};
 
 use crate::{GraphQLClient, PageInfo, User, VkError, ref_parser::RepoInfo};
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -100,37 +100,74 @@ pub async fn fetch_reviews(
 
 /// Select the most recent review from each author.
 ///
+/// Reviews without an author are returned individually rather than being
+/// grouped together.
+///
 /// ```
 /// use chrono::Utc;
 /// use vk::reviews::{latest_reviews, PullRequestReview};
 ///
-/// let reviews = vec![PullRequestReview {
-///     body: String::new(),
-///     submitted_at: Utc::now(),
-///     state: "COMMENTED".into(),
-///     author: None,
-/// }];
+/// let reviews = vec![
+///     PullRequestReview {
+///         body: String::new(),
+///         submitted_at: Utc::now(),
+///         state: "COMMENTED".into(),
+///         author: None,
+///     },
+///     PullRequestReview {
+///         body: String::new(),
+///         submitted_at: Utc::now(),
+///         state: "COMMENTED".into(),
+///         author: None,
+///     },
+/// ];
 /// let latest = latest_reviews(reviews);
-/// assert_eq!(latest.len(), 1);
+/// assert_eq!(latest.len(), 2);
 /// ```
 pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview> {
     let mut latest: HashMap<String, PullRequestReview> = HashMap::new();
+    let mut anonymous = Vec::new();
     for r in reviews {
-        let key = r
-            .author
-            .as_ref()
-            .map(|u| u.login.clone())
-            .unwrap_or_default();
-        match latest.entry(key) {
-            std::collections::hash_map::Entry::Vacant(e) => {
-                e.insert(r);
-            }
-            std::collections::hash_map::Entry::Occupied(mut e) => {
-                if r.submitted_at > e.get().submitted_at {
+        match r.author.as_ref().map(|u| u.login.clone()) {
+            Some(login) => match latest.entry(login) {
+                Entry::Vacant(e) => {
                     e.insert(r);
                 }
-            }
+                Entry::Occupied(mut e) => {
+                    if r.submitted_at > e.get().submitted_at {
+                        e.insert(r);
+                    }
+                }
+            },
+            None => anonymous.push(r),
         }
     }
-    latest.into_values().collect()
+    latest.into_values().chain(anonymous).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+
+    #[test]
+    fn preserves_anonymous_reviews() {
+        let reviews = vec![
+            PullRequestReview {
+                body: String::new(),
+                submitted_at: Utc.timestamp_opt(1, 0).single().expect("timestamp"),
+                state: "COMMENTED".into(),
+                author: None,
+            },
+            PullRequestReview {
+                body: String::new(),
+                submitted_at: Utc.timestamp_opt(2, 0).single().expect("timestamp"),
+                state: "COMMENTED".into(),
+                author: None,
+            },
+        ];
+
+        let latest = latest_reviews(reviews);
+        assert_eq!(latest.len(), 2);
+    }
 }
