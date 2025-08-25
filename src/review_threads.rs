@@ -5,6 +5,7 @@
 //! unresolved review threads along with their comments. It also provides
 //! utilities for filtering threads by file path.
 
+use futures::stream::{FuturesUnordered, StreamExt};
 use serde::Deserialize;
 use serde_json::{Map, json};
 use std::collections::HashSet;
@@ -167,6 +168,11 @@ fn filter_unresolved_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
 /// # Errors
 ///
 /// Returns an error if any API request fails or the response is malformed.
+///
+/// # Panics
+///
+/// Panics if comment results reference an out-of-range thread index. This
+/// indicates a logic error in enumeration.
 pub async fn fetch_review_threads(
     client: &GraphQLClient,
     repo: &RepoInfo,
@@ -184,10 +190,26 @@ pub async fn fetch_review_threads(
         })
         .await?;
     let mut threads = filter_unresolved_threads(threads);
-    for thread in &mut threads {
-        let initial = std::mem::take(&mut thread.comments);
-        thread.comments = fetch_all_comments(client, &thread.id, initial).await?;
+    // Fetch comment pages concurrently to avoid N+1 latency.
+    let fetch_futures = threads
+        .iter_mut()
+        .enumerate()
+        .map(|(idx, thread)| {
+            let initial = std::mem::take(&mut thread.comments);
+            let id = thread.id.clone();
+            async move { (idx, fetch_all_comments(client, &id, initial).await) }
+        })
+        .collect::<FuturesUnordered<_>>();
+
+    let results = fetch_futures.collect::<Vec<_>>().await;
+
+    for (idx, comments_result) in results {
+        let thread = threads
+            .get_mut(idx)
+            .expect("thread index yielded by enumeration");
+        thread.comments = comments_result?;
     }
+
     Ok(threads)
 }
 
