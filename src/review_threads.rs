@@ -85,6 +85,7 @@ pub struct PageInfo {
 
 impl PageInfo {
     /// Return the cursor for the next page when available.
+    /// Returns `Ok(None)` when there are no more pages.
     ///
     /// # Errors
     ///
@@ -102,11 +103,19 @@ impl PageInfo {
     /// let info = PageInfo { has_next_page: true, end_cursor: None };
     /// assert!(info.next_cursor().is_err());
     /// ```
+    /// ```
+    /// use vk::PageInfo;
+    /// let info = PageInfo { has_next_page: false, end_cursor: None };
+    /// assert_eq!(info.next_cursor().expect("cursor"), None);
+    /// ```
     pub fn next_cursor(&self) -> Result<Option<&str>, VkError> {
         if self.has_next_page {
             let cursor = self.end_cursor.as_deref().ok_or_else(|| {
                 VkError::BadResponse(
-                    "PageInfo invariant violated: hasNextPage=true but endCursor missing".boxed(),
+                    format!(
+                        "PageInfo invariant violated: hasNextPage=true but endCursor missing | pageInfo: {self:?}"
+                    )
+                    .boxed(),
                 )
             })?;
             Ok(Some(cursor))
