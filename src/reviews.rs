@@ -9,7 +9,6 @@ use serde_json::{Map, json};
 
 use crate::{GraphQLClient, PageInfo, User, VkError, ref_parser::RepoInfo};
 use std::collections::{HashMap, hash_map::Entry};
-use std::convert::TryFrom;
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -117,6 +116,10 @@ pub async fn fetch_reviews(
 /// - The order of reviews with authors is not guaranteed.
 /// - Anonymous reviews are appended after the keyed results.
 ///
+/// Tie-break:
+/// - When two reviews from the same author share the same `submitted_at`,
+///   the later item in the input sequence wins.
+///
 /// If you require a deterministic order, sort the returned vector by
 /// `submitted_at` at the call site.
 ///
@@ -173,7 +176,6 @@ mod tests {
     use crate::{GraphQLClient, User, VkError};
     use chrono::{TimeZone, Utc};
     use rstest::rstest;
-    use std::convert::TryFrom;
 
     #[rstest]
     #[case(1)]
@@ -181,7 +183,8 @@ mod tests {
     fn preserves_anonymous_reviews(#[case] count: usize) {
         let reviews = (0..count)
             .map(|i| {
-                let ts = i64::try_from(i).expect("index") + 1;
+                #[allow(clippy::cast_possible_wrap, reason = "indices are small")]
+                let ts = i as i64 + 1;
                 PullRequestReview {
                     body: String::new(),
                     submitted_at: Utc.timestamp_opt(ts, 0).single().expect("timestamp"),

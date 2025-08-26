@@ -1,6 +1,7 @@
 //! Tests for review thread fetching helpers.
 
 use super::*;
+use crate::VkError;
 use crate::api::{GraphQLClient, RetryConfig};
 use crate::ref_parser::RepoInfo;
 use rstest::{fixture, rstest};
@@ -252,4 +253,15 @@ async fn retries_bad_page_and_preserves_order(repo: RepoInfo, #[future] retry_cl
     assert_eq!(hits.load(Ordering::SeqCst), 3);
     join.abort();
     let _ = join.await;
+}
+
+#[rstest]
+#[tokio::test]
+async fn rejects_out_of_range_number(repo: RepoInfo) {
+    let client = GraphQLClient::new("token", None).expect("client");
+    let number = i32::MAX as u64 + 1;
+    let err = fetch_review_threads(&client, &repo, number)
+        .await
+        .expect_err("error");
+    assert!(matches!(err, VkError::InvalidNumber));
 }
