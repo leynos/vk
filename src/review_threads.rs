@@ -83,6 +83,47 @@ pub struct PageInfo {
     pub end_cursor: Option<String>,
 }
 
+impl PageInfo {
+    /// Return the cursor for the next page when available.
+    /// Returns `Ok(None)` when there are no more pages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VkError::BadResponse`] when `has_next_page` is `true` but
+    /// `end_cursor` is absent.
+    ///
+    /// # Examples
+    /// ```
+    /// use vk::PageInfo;
+    /// let info = PageInfo { has_next_page: true, end_cursor: Some("c1".into()) };
+    /// assert_eq!(info.next_cursor().expect("cursor"), Some("c1"));
+    /// ```
+    /// ```
+    /// use vk::PageInfo;
+    /// let info = PageInfo { has_next_page: true, end_cursor: None };
+    /// assert!(info.next_cursor().is_err());
+    /// ```
+    /// ```
+    /// use vk::PageInfo;
+    /// let info = PageInfo { has_next_page: false, end_cursor: None };
+    /// assert_eq!(info.next_cursor().expect("cursor"), None);
+    /// ```
+    #[inline]
+    #[must_use = "inspect the returned cursor to advance pagination"]
+    pub fn next_cursor(&self) -> Result<Option<&str>, VkError> {
+        match (self.has_next_page, self.end_cursor.as_deref()) {
+            (true, Some(cursor)) => Ok(Some(cursor)),
+            (true, None) => Err(VkError::BadResponse(
+                format!(
+                    "PageInfo invariant violated: hasNextPage=true but endCursor missing | pageInfo: {self:?}"
+                )
+                .boxed(),
+            )),
+            (false, _) => Ok(None),
+        }
+    }
+}
+
 /// Minimal user representation for authorship information.
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct User {
@@ -115,13 +156,12 @@ pub async fn fetch_review_threads(
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
         let mut comments = initial.nodes;
-        if initial.page_info.has_next_page
-            && let Some(cursor) = initial.page_info.end_cursor
-        {
+        // Propagate invalid pagination info as an error.
+        if let Some(cursor) = initial.page_info.next_cursor()? {
             let thread_id = thread.id.clone();
             let mut vars = Map::new();
             vars.insert("id".into(), json!(&thread_id));
-            let mut more = client
+            let more = client
                 .paginate_all(
                     COMMENT_QUERY,
                     vars,
@@ -142,7 +182,7 @@ pub async fn fetch_review_threads(
                     },
                 )
                 .await?;
-            comments.append(&mut more);
+            comments.extend(more);
         }
         thread.comments = CommentConnection {
             nodes: comments,

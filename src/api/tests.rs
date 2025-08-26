@@ -212,3 +212,33 @@ async fn paginate_missing_cursor_errors() {
         other => panic!("unexpected result: {other:?}"),
     }
 }
+
+#[rstest]
+#[case(false, None, None)]
+#[case(true, Some(String::from("abc")), Some("abc"))]
+fn next_cursor_ok_cases(
+    #[case] has_next_page: bool,
+    #[case] end_cursor: Option<String>,
+    #[case] expected: Option<&str>,
+) {
+    let info = PageInfo {
+        has_next_page,
+        end_cursor,
+    };
+    let next = info.next_cursor().expect("cursor");
+    match (next, expected) {
+        (None, None) => {}
+        (Some(got), Some(want)) => assert_eq!(got, want),
+        other => panic!("unexpected case: {other:?}"),
+    }
+}
+
+#[test]
+fn next_cursor_errors_without_cursor() {
+    let info = PageInfo {
+        has_next_page: true,
+        end_cursor: None,
+    };
+    let err = info.next_cursor().expect_err("missing cursor");
+    assert!(matches!(err, VkError::BadResponse(_)));
+}
