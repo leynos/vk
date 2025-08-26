@@ -10,6 +10,26 @@ use crate::html::collapse_details;
 use crate::reviews::PullRequestReview;
 use crate::{ReviewComment, ReviewThread};
 
+/// Display information for a comment or review entry.
+///
+/// This data drives the banner line above rendered markdown, keeping
+/// formatting details bundled together.
+///
+/// # Examples
+///
+/// ```ignore
+/// use vk::printer::{write_entry_body, EntryDisplayInfo};
+/// use termimad::MadSkin;
+/// let info = EntryDisplayInfo { icon: "\u{1f4ac}", login: Some("alice"), suffix: " wrote:" };
+/// let mut buf = Vec::new();
+/// write_entry_body(&mut buf, &MadSkin::default(), &info, "Hi").unwrap();
+/// ```
+struct EntryDisplayInfo<'a> {
+    icon: &'a str,
+    login: Option<&'a str>,
+    suffix: &'a str,
+}
+
 fn write_author_line<W: std::io::Write>(
     out: &mut W,
     icon: &str,
@@ -26,12 +46,15 @@ fn write_author_line<W: std::io::Write>(
 fn write_entry_body<W: std::io::Write>(
     out: &mut W,
     skin: &MadSkin,
-    icon: &str,
-    login: Option<&str>,
-    suffix: &str,
+    display_info: &EntryDisplayInfo,
     body: &str,
 ) -> anyhow::Result<()> {
-    write_author_line(out, icon, login, suffix)?;
+    write_author_line(
+        out,
+        display_info.icon,
+        display_info.login,
+        display_info.suffix,
+    )?;
     let body = collapse_details(body);
     skin.write_text_on(out, &body)?;
     writeln!(out)?;
@@ -59,14 +82,12 @@ pub fn write_comment_body<W: std::io::Write>(
     skin: &MadSkin,
     comment: &ReviewComment,
 ) -> anyhow::Result<()> {
-    write_entry_body(
-        &mut out,
-        skin,
-        "\u{1f4ac}",
-        comment.author.as_ref().map(|u| u.login.as_str()),
-        " wrote:",
-        &comment.body,
-    )?;
+    let display_info = EntryDisplayInfo {
+        icon: "\u{1f4ac}",
+        login: comment.author.as_ref().map(|u| u.login.as_str()),
+        suffix: " wrote:",
+    };
+    write_entry_body(&mut out, skin, &display_info, &comment.body)?;
     Ok(())
 }
 
@@ -177,14 +198,12 @@ pub fn write_review<W: std::io::Write>(
     review: &PullRequestReview,
 ) -> anyhow::Result<()> {
     let suffix = format!(" {}:", review.state);
-    write_entry_body(
-        &mut out,
-        skin,
-        "\u{1f4dd}",
-        review.author.as_ref().map(|u| u.login.as_str()),
-        &suffix,
-        &review.body,
-    )?;
+    let display_info = EntryDisplayInfo {
+        icon: "\u{1f4dd}",
+        login: review.author.as_ref().map(|u| u.login.as_str()),
+        suffix: &suffix,
+    };
+    write_entry_body(&mut out, skin, &display_info, &review.body)?;
     Ok(())
 }
 
