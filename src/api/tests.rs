@@ -5,6 +5,7 @@ use crate::PageInfo;
 use rstest::{fixture, rstest};
 use serde_json::{Map, Value, json};
 use std::{
+    borrow::Cow,
     cell::RefCell,
     sync::{
         Arc, Mutex,
@@ -154,7 +155,7 @@ async fn fetch_page_cursor_handling(
 ) {
     let (client, captured, join) = mock_server_with_capture;
     let _: Value = client
-        .fetch_page("query", Some(cursor.into()), variables)
+        .fetch_page("query", Some(Cow::Borrowed(cursor)), variables)
         .await
         .expect("fetch");
     join.abort();
