@@ -108,6 +108,7 @@ impl PageInfo {
     /// let info = PageInfo { has_next_page: false, end_cursor: None };
     /// assert_eq!(info.next_cursor().expect("cursor"), None);
     /// ```
+    #[inline]
     pub fn next_cursor(&self) -> Result<Option<&str>, VkError> {
         match (self.has_next_page, self.end_cursor.as_deref()) {
             (true, Some(cursor)) => Ok(Some(cursor)),
@@ -159,7 +160,7 @@ pub async fn fetch_review_threads(
             let thread_id = thread.id.clone();
             let mut vars = Map::new();
             vars.insert("id".into(), json!(&thread_id));
-            let mut more = client
+            let more = client
                 .paginate_all(
                     COMMENT_QUERY,
                     vars,
@@ -180,7 +181,7 @@ pub async fn fetch_review_threads(
                     },
                 )
                 .await?;
-            comments.append(&mut more);
+            comments.extend(more);
         }
         thread.comments = CommentConnection {
             nodes: comments,
