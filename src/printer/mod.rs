@@ -23,16 +23,74 @@ fn write_author_line<W: std::io::Write>(
     )
 }
 
-fn write_body_with_banner<W: std::io::Write>(
+/// Item that can be formatted with an author banner and body.
+trait Formattable {
+    /// Login for the author, if available.
+    fn author_login(&self) -> Option<&str>;
+    /// Text content to render below the banner.
+    fn body(&self) -> &str;
+    /// Icon prefixing the banner.
+    fn icon(&self) -> &'static str;
+    /// Suffix appended after the author.
+    fn suffix(&self) -> String;
+}
+
+impl Formattable for ReviewComment {
+    fn author_login(&self) -> Option<&str> {
+        self.author.as_ref().map(|u| u.login.as_str())
+    }
+
+    fn body(&self) -> &str {
+        &self.body
+    }
+
+    fn icon(&self) -> &'static str {
+        "💬"
+    }
+
+    fn suffix(&self) -> String {
+        " wrote:".to_string()
+    }
+}
+
+impl Formattable for PullRequestReview {
+    fn author_login(&self) -> Option<&str> {
+        self.author.as_ref().map(|u| u.login.as_str())
+    }
+
+    fn body(&self) -> &str {
+        &self.body
+    }
+
+    fn icon(&self) -> &'static str {
+        "📝"
+    }
+
+    fn suffix(&self) -> String {
+        format!(" {}:", self.state)
+    }
+}
+
+/// Write a [`Formattable`] item with a banner and rendered markdown body.
+///
+/// # Examples
+///
+/// ```ignore
+/// use vk::printer::write_formattable;
+/// use vk::ReviewComment;
+/// use termimad::MadSkin;
+/// let comment = ReviewComment { body: "hi".into(), ..Default::default() };
+/// let mut buf = Vec::new();
+/// write_formattable(&mut buf, &MadSkin::default(), &comment).unwrap();
+/// ```
+fn write_formattable<W: std::io::Write, T: Formattable>(
     mut out: W,
     skin: &MadSkin,
-    icon: &str,
-    login: Option<&str>,
-    suffix: &str,
-    body: &str,
+    item: &T,
 ) -> anyhow::Result<()> {
-    write_author_line(&mut out, icon, login, suffix)?;
-    let collapsed = collapse_details(body);
+    let suffix = item.suffix();
+    write_author_line(&mut out, item.icon(), item.author_login(), &suffix)?;
+    let collapsed = collapse_details(item.body());
     skin.write_text_on(&mut out, &collapsed)
         .map_err(anyhow::Error::from)?;
     writeln!(out)?;
@@ -60,14 +118,7 @@ pub fn write_comment_body<W: std::io::Write>(
     skin: &MadSkin,
     comment: &ReviewComment,
 ) -> anyhow::Result<()> {
-    write_body_with_banner(
-        out,
-        skin,
-        "💬",
-        comment.author.as_ref().map(|u| u.login.as_str()),
-        " wrote:",
-        &comment.body,
-    )
+    write_formattable(out, skin, comment)
 }
 
 /// Write a single comment including its diff hunk.
@@ -176,14 +227,7 @@ pub fn write_review<W: std::io::Write>(
     skin: &MadSkin,
     review: &PullRequestReview,
 ) -> anyhow::Result<()> {
-    write_body_with_banner(
-        out,
-        skin,
-        "📝",
-        review.author.as_ref().map(|u| u.login.as_str()),
-        &format!(" {}:", review.state),
-        &review.body,
-    )
+    write_formattable(out, skin, review)
 }
 
 #[cfg(test)]
