@@ -29,6 +29,9 @@ figment = { version = "0.10", default-features = false, features = ["env", "toml
 xdg = "3"
 uncased = "0.9"
 figment-json5 = "0.1.1"
+# Use the maintained `serde_yaml_ok` fork (MIT/Apache-2.0).
+# Alias it as `serde_yaml` because the `OrthoConfig` derive macro
+# looks for that crate name.
 serde_yaml = { package = "serde_yaml_ok", version = "0.9.36" }
 toml = "0.8"
 

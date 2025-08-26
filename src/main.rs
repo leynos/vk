@@ -5,7 +5,7 @@
 //! API. The core functionality is delegated to specialised modules:
 //! `review_threads` for fetching review data, `issues` for issue retrieval,
 //! `summary` for summarising comments. Configuration defaults are merged using
-//! `ortho-config`. When a thread has multiple comments on the same diff, the diff
+//! `ortho_config`. When a thread has multiple comments on the same diff, the diff
 //! is shown only once. Output is framed by a `code review` banner at the start
 //! and an `end of code review` banner at the end so calling processes can
 //! reliably detect boundaries. The module re-exports banner helpers
@@ -16,7 +16,7 @@
 pub mod api;
 mod boxed;
 mod cli_args;
-// configuration helpers have been folded into `ortho-config`
+// configuration helpers have been folded into `ortho_config`
 mod diff;
 mod graphql_queries;
 mod html;

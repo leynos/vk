@@ -166,7 +166,7 @@ sequenceDiagram
 
 ## Configuration and features
 
-`vk` reads configuration files using `ortho-config`, which layers values from
+`vk` reads configuration files using `ortho_config`, which layers values from
 files, environment variables and CLI arguments. JSON5 and YAML formats are
-enabled through the `json5` and `yaml` features on `ortho-config`, which pull
+enabled through the `json5` and `yaml` features on `ortho_config`, which pull
 in the required parsers as transitive dependencies.
