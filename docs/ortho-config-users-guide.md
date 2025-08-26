@@ -45,9 +45,9 @@ Add `ortho_config` as a dependency in `Cargo.toml` along with `serde`:
 
 ```toml
 [dependencies]
-ortho_config = "0.5.0-alpha2"     # replace with the latest version
+ortho_config = "0.5.0-alpha2"     # replace with the latest compatible version
 serde = { version = "1.0", features = ["derive"] }
-clap = { version = "4.5.40", features = ["derive"] }    # required for CLI support
+clap = { version = "4.5", features = ["derive"] }       # required for CLI support
 ```
 
 By default, only TOML configuration files are supported. To enable JSON5
@@ -57,6 +57,7 @@ corresponding cargo features:
 ```toml
 [dependencies]
 ortho_config = { version = "0.5.0-alpha2", features = ["json5", "yaml"] }
+# Enabling these features expands file formats; precedence stays: defaults < file < env < CLI.
 ```
 
 Enabling the `json5` feature causes both `.json` and `.json5` files to be
@@ -138,12 +139,10 @@ Unknown keys will therefore silently do nothing. Developers who require
 stricter validation may add manual `compile_error!` guards.
 
 By default, each field receives a long flag derived from its name in kebab-case
-and a short flag from its first letter. If that letter is already used, the
-macro assigns the upper-case variant to the next field. Further collisions
-require specifying `cli_short` explicitly. Short flags must be ASCII
-alphanumeric and may not use clap's global `-h` or `-V` options. Long flags
-must contain only ASCII alphanumeric characters, hyphens or underscores and
-cannot be named `help` or `version`.
+and a short flag. Collisions must be resolved explicitly via `cli_short`. Short
+flags must be single ASCII alphanumeric characters and may not use clap's
+global `-h` or `-V` options. Long flags must contain only ASCII alphanumeric
+characters, hyphens or underscores and cannot be named `help` or `version`.
 
 ### Example configuration struct
 
@@ -216,8 +215,9 @@ following steps:
    1. A `--config-path` CLI argument. A hidden option is generated
       automatically by the derive macro; if the user defines a `config_path`
       field in their struct then that will override the hidden option.
-      Alternatively the environment variable `PREFIXCONFIG_PATH` (or
-      `CONFIG_PATH` if no prefix is set) can specify an explicit file.
+      Alternatively the environment variable `<PREFIX>CONFIG_PATH` (for
+      example, `APP_CONFIG_PATH`; or `CONFIG_PATH` if no prefix is set) can
+      specify an explicit file.
 
    1. A dotfile named `.config.toml` or `.<prefix>.toml` in the current working
       directory.
@@ -271,7 +271,7 @@ names with double underscores. For example, if `AppConfig` has a nested
 prefix is used for its fields (e.g. `APP_DB_URL`).
 
 When `clap`'s `flatten` attribute is employed to compose argument groups, the
-flattened struct is initialized even if no CLI flags within the group are
+flattened struct is initialised even if no CLI flags within the group are
 specified. During merging, `ortho_config` discards these empty groups so that
 values from configuration files or the environment remain in place unless a
 field is explicitly supplied on the command line.
@@ -357,8 +357,8 @@ of configuration.
 
 When a struct derives `OrthoConfig`, it also implements the associated
 `prefix()` method. This method returns the configured prefix string.
-`load_and_merge_subcommand_for(prefix, cli_struct)` uses this prefix to build a
-`cmds.<subcommand>` section name for the configuration file and an
+`load_and_merge_subcommand_for::<T>(&cli_struct)` uses the derived prefix to
+build a `cmds.<subcommand>` section name for the configuration file and a
 `PREFIX_CMDS_SUBCOMMAND_` prefix for environment variables. Configuration is
 loaded in the same order as global configuration (defaults → file → environment
 → CLI), but only values in the `[cmds.<subcommand>]` section or environment
@@ -372,7 +372,7 @@ might be defined as follows:
 
 ```rust
 use clap::Parser;
-use ortho_config::{OrthoConfig, load_and_merge_subcommand_for};
+use ortho_config::{OrthoConfig, subcommand::load_and_merge_subcommand_for};
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
