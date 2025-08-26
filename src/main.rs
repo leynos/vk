@@ -8,10 +8,10 @@
 //! `ortho_config`. When a thread has multiple comments on the same diff, the diff
 //! is shown only once. Output is framed by a `code review` banner at the start
 //! and an `end of code review` banner at the end so calling processes can
-//! reliably detect boundaries. The module re-exports banner helpers
-//! [`print_start_banner`] and [`print_end_banner`] alongside summary utilities
-//! [`print_summary`], [`summarize_files`], and [`write_summary`] so consumers can
-//! reuse the framing and summarization logic.
+//! reliably detect boundaries. Banner helpers [`print_start_banner`] and
+//! [`print_end_banner`] frame output while summary utilities
+//! [`print_summary`], [`summarize_files`], and [`write_summary`] collate
+//! comments so consumers can reuse the framing logic.
 
 pub mod api;
 mod boxed;
@@ -35,9 +35,7 @@ pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
     filter_threads_by_files,
 };
-pub use summary::{
-    print_end_banner, print_start_banner, print_summary, summarize_files, write_summary,
-};
+use summary::{print_end_banner, print_start_banner, print_summary, summarize_files};
 
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use crate::printer::{print_reviews, write_thread};
