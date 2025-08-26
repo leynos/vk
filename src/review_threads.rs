@@ -97,10 +97,17 @@ impl PageInfo {
     /// let info = PageInfo { has_next_page: true, end_cursor: Some("c1".into()) };
     /// assert_eq!(info.next_cursor().expect("cursor"), Some("c1"));
     /// ```
+    /// ```
+    /// use vk::PageInfo;
+    /// let info = PageInfo { has_next_page: true, end_cursor: None };
+    /// assert!(info.next_cursor().is_err());
+    /// ```
     pub fn next_cursor(&self) -> Result<Option<&str>, VkError> {
         if self.has_next_page {
             let cursor = self.end_cursor.as_deref().ok_or_else(|| {
-                VkError::BadResponse("hasNextPage=true but endCursor missing".boxed())
+                VkError::BadResponse(
+                    "PageInfo invariant violated: hasNextPage=true but endCursor missing".boxed(),
+                )
             })?;
             Ok(Some(cursor))
         } else {

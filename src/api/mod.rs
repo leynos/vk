@@ -564,7 +564,7 @@ where
         let (mut page, info) = fetch(cursor.clone()).await?;
         items.append(&mut page);
         if let Some(next) = info.next_cursor()? {
-            cursor = Some(next.to_string());
+            cursor = Some(next.into());
         } else {
             break;
         }

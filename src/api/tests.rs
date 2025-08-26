@@ -213,24 +213,24 @@ async fn paginate_missing_cursor_errors() {
     }
 }
 
-#[test]
-fn next_cursor_none_when_complete() {
+#[rstest]
+#[case(false, None, None)]
+#[case(true, Some(String::from("abc")), Some("abc"))]
+fn next_cursor_ok_cases(
+    #[case] has_next_page: bool,
+    #[case] end_cursor: Option<String>,
+    #[case] expected: Option<&str>,
+) {
     let info = PageInfo {
-        has_next_page: false,
-        end_cursor: None,
+        has_next_page,
+        end_cursor,
     };
     let next = info.next_cursor().expect("cursor");
-    assert!(next.is_none());
-}
-
-#[test]
-fn next_cursor_propagates_cursor() {
-    let info = PageInfo {
-        has_next_page: true,
-        end_cursor: Some("abc".into()),
-    };
-    let next = info.next_cursor().expect("cursor");
-    assert_eq!(next, Some("abc"));
+    match (next, expected) {
+        (None, None) => {}
+        (Some(got), Some(want)) => assert_eq!(got, want),
+        other => panic!("unexpected case: {other:?}"),
+    }
 }
 
 #[test]
