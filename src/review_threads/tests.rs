@@ -2,73 +2,15 @@
 
 use super::*;
 use crate::VkError;
-use crate::api::{GraphQLClient, RetryConfig};
+use crate::api::GraphQLClient;
 use crate::ref_parser::RepoInfo;
+use crate::test_utils::{TestClient, start_server};
+#[cfg(debug_assertions)]
+use futures::FutureExt;
 use rstest::{fixture, rstest};
-use tokio::{task::JoinHandle, time::Duration};
-
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
-use third_wheel::hyper::{
-    Body, Request, Response, Server, StatusCode,
-    service::{make_service_fn, service_fn},
-};
-
-/// Start a stub HTTP server returning each body in `responses` sequentially.
-///
-/// Returns a [`GraphQLClient`] targeting the server and a [`JoinHandle`] for
-/// the server task.
-struct TestClient {
-    client: GraphQLClient,
-    join: JoinHandle<()>,
-    hits: Arc<AtomicUsize>,
-}
-
-fn start_server(responses: Vec<String>) -> TestClient {
-    let responses = Arc::new(responses);
-    let counter = Arc::new(AtomicUsize::new(0));
-    let svc_counter = Arc::clone(&counter);
-    let svc = make_service_fn(move |_conn| {
-        let responses = Arc::clone(&responses);
-        let counter = Arc::clone(&svc_counter);
-        async move {
-            Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
-                let idx = counter.fetch_add(1, Ordering::SeqCst);
-                let body = responses
-                    .get(idx)
-                    .cloned()
-                    .unwrap_or_else(|| "{}".to_string());
-                async move {
-                    Ok::<_, std::convert::Infallible>(
-                        Response::builder()
-                            .status(StatusCode::OK)
-                            .header("Content-Type", "application/json")
-                            .body(Body::from(body))
-                            .expect("response"),
-                    )
-                }
-            }))
-        }
-    });
-    let server = Server::bind(&"127.0.0.1:0".parse().expect("parse addr")).serve(svc);
-    let addr = server.local_addr();
-    let join = tokio::spawn(async move {
-        let _ = server.await;
-    });
-    let retry = RetryConfig {
-        base_delay: Duration::from_millis(1),
-        ..RetryConfig::default()
-    };
-    let client = GraphQLClient::with_endpoint_retry("token", format!("http://{addr}"), None, retry)
-        .expect("create client");
-    TestClient {
-        client,
-        join,
-        hits: counter,
-    }
-}
+#[cfg(debug_assertions)]
+use std::panic::AssertUnwindSafe;
+use std::sync::atomic::Ordering;
 
 #[fixture]
 fn repo() -> RepoInfo {
@@ -260,6 +202,13 @@ async fn retries_bad_page_and_preserves_order(repo: RepoInfo, #[future] retry_cl
 async fn rejects_out_of_range_number(repo: RepoInfo) {
     let client = GraphQLClient::new("token", None).expect("client");
     let number = i32::MAX as u64 + 1;
+    if cfg!(debug_assertions) {
+        let result = AssertUnwindSafe(fetch_review_threads(&client, &repo, number))
+            .catch_unwind()
+            .await;
+        assert!(result.is_err());
+        return;
+    }
     let err = fetch_review_threads(&client, &repo, number)
         .await
         .expect_err("error");
@@ -277,11 +226,16 @@ async fn accepts_max_i32_number(repo: RepoInfo) {
         }}}}
     })
     .to_string();
-    let TestClient { client, join, .. } = start_server(vec![body]);
+    let TestClient { client, join, hits } = start_server(vec![body]);
     let threads = fetch_review_threads(&client, &repo, i32::MAX as u64)
         .await
         .expect("should accept i32::MAX");
     assert!(threads.is_empty());
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "unexpected number of HTTP calls"
+    );
     join.abort();
     let _ = join.await;
 }

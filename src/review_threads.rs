@@ -108,6 +108,10 @@ pub async fn fetch_review_threads(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
+    debug_assert!(
+        i32::try_from(number).is_ok(),
+        "pull-request number {number} exceeds GraphQL Int (i32) range",
+    );
     let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
 
     // GitHub's API lacks filtering for unresolved threads, so filter client-side.

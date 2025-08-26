@@ -94,6 +94,10 @@ pub async fn fetch_reviews(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<PullRequestReview>, VkError> {
+    debug_assert!(
+        i32::try_from(number).is_ok(),
+        "pull-request number {number} exceeds GraphQL Int (i32) range",
+    );
     let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
 
     let mut vars = Map::new();
@@ -167,18 +171,28 @@ pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview>
             None => anonymous.push(r),
         }
     }
-    latest.into_values().chain(anonymous).collect()
+    let keyed = latest.into_values();
+    let mut out = Vec::with_capacity(keyed.len() + anonymous.len());
+    out.extend(keyed);
+    out.extend(anonymous);
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ref_parser::RepoInfo;
+    use crate::test_utils::{TestClient, start_server};
     use crate::{GraphQLClient, User, VkError};
     use chrono::{TimeZone, Utc};
+    #[cfg(debug_assertions)]
+    use futures::FutureExt;
     use rstest::rstest;
+    #[cfg(debug_assertions)]
+    use std::panic::AssertUnwindSafe;
 
     #[rstest]
+    #[case(0)]
     #[case(1)]
     #[case(2)]
     fn preserves_anonymous_reviews(#[case] count: usize) {
@@ -250,9 +264,42 @@ mod tests {
             name: "n".into(),
         };
         let number = i32::MAX as u64 + 1;
+        if cfg!(debug_assertions) {
+            let result = AssertUnwindSafe(fetch_reviews(&client, &repo, number))
+                .catch_unwind()
+                .await;
+            assert!(result.is_err());
+            return;
+        }
         let err = fetch_reviews(&client, &repo, number)
             .await
             .expect_err("error");
         assert!(matches!(err, VkError::InvalidNumber));
+    }
+
+    #[tokio::test]
+    async fn accepts_max_i32_number() {
+        // Minimal valid response with no reviews.
+        let body = serde_json::json!({
+            "data": {"repository": {"pullRequest": {"reviews": {
+                "nodes": [],
+                "pageInfo": { "hasNextPage": false, "endCursor": null }
+            }}}}
+        })
+        .to_string();
+        let TestClient { client, join, .. } = start_server(vec![body]);
+        let reviews = fetch_reviews(
+            &client,
+            &RepoInfo {
+                owner: "o".into(),
+                name: "n".into(),
+            },
+            i32::MAX as u64,
+        )
+        .await
+        .expect("should accept i32::MAX");
+        assert!(reviews.is_empty());
+        join.abort();
+        let _ = join.await;
     }
 }
