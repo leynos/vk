@@ -145,6 +145,8 @@ pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview>
     let mut latest: HashMap<String, PullRequestReview> = HashMap::new();
     let mut anonymous = Vec::new();
     for r in reviews {
+        // GitHub canonicalises login casing, so case collisions are not
+        // expected when keying by `login`.
         match r.author.as_ref().map(|u| u.login.clone()) {
             Some(login) => match latest.entry(login) {
                 Entry::Vacant(e) => {
