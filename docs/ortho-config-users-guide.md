@@ -45,9 +45,9 @@ Add `ortho_config` as a dependency in `Cargo.toml` along with `serde`:
 
 ```toml
 [dependencies]
-ortho_config = "0.3.0"            # replace with the latest version
+ortho_config = "0.5.0-alpha2"     # replace with the latest version
 serde = { version = "1.0", features = ["derive"] }
-clap = { version = "4", features = ["derive"] }    # required for CLI support
+clap = { version = "4.5.40", features = ["derive"] }    # required for CLI support
 ```
 
 By default, only TOML configuration files are supported. To enable JSON5
@@ -56,7 +56,7 @@ corresponding cargo features:
 
 ```toml
 [dependencies]
-ortho_config = { version = "0.3.0", features = ["json5", "yaml"] }
+ortho_config = { version = "0.5.0-alpha2", features = ["json5", "yaml"] }
 ```
 
 Enabling the `json5` feature causes both `.json` and `.json5` files to be

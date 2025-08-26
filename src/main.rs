@@ -4,8 +4,8 @@
 //! line tool, which fetches unresolved review comments from GitHub's GraphQL
 //! API. The core functionality is delegated to specialised modules:
 //! `review_threads` for fetching review data, `issues` for issue retrieval,
-//! `summary` for summarising comments, and `config` for configuration
-//! management. When a thread has multiple comments on the same diff, the diff
+//! `summary` for summarising comments. Configuration defaults are merged using
+//! `ortho-config`. When a thread has multiple comments on the same diff, the diff
 //! is shown only once. Output is framed by a `code review` banner at the start
 //! and an `end of code review` banner at the end so calling processes can
 //! reliably detect boundaries. The module re-exports banner helpers
@@ -16,7 +16,7 @@
 pub mod api;
 mod boxed;
 mod cli_args;
-mod config;
+// configuration helpers have been folded into `ortho-config`
 mod diff;
 mod graphql_queries;
 mod html;
@@ -30,7 +30,6 @@ mod summary;
 mod test_utils;
 
 pub use crate::api::{GraphQLClient, paginate};
-pub use config::load_with_reference_fallback;
 pub use issues::{Issue, fetch_issue};
 pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
@@ -46,6 +45,7 @@ use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_reference};
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
 use log::{error, warn};
+use ortho_config::{OrthoConfig, subcommand::load_and_merge_subcommand_for};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -310,11 +310,11 @@ async fn main() -> Result<(), VkError> {
     global.merge(cli.global);
     match cli.command {
         Commands::Pr(pr_cli) => {
-            let args = load_with_reference_fallback::<PrArgs>(pr_cli.clone())?;
+            let args = load_and_merge_subcommand_for(&pr_cli)?;
             run_pr(args, &global).await
         }
         Commands::Issue(issue_cli) => {
-            let args = load_with_reference_fallback::<IssueArgs>(issue_cli.clone())?;
+            let args = load_and_merge_subcommand_for(&issue_cli)?;
             run_issue(args, &global).await
         }
     }

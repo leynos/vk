@@ -5,7 +5,7 @@ edition = "2024"
 license = "ISC"
 
 [dependencies]
-clap = { version = "4.5.3", features = ["derive"] }
+clap = { version = "4.5.40", features = ["derive"] }
 reqwest = { version = "0.11.23", features = ["json", "rustls-tls"] }
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
@@ -23,19 +23,19 @@ anyhow = "1.0"
 backon = "1.5.2"
 html5ever = "0.35.0"
 markup5ever_rcdom = "0.35.0+unofficial"
-ortho_config = { git = "https://github.com/leynos/ortho-config", tag = "v0.2.0", default-features = false }
-figment = { version = "0.10", default-features = false, features = ["env", "toml"], optional = true }
-xdg = { version = "3", optional = true }
-uncased = { version = "0.9", optional = true }
-toml = { version = "0.8", optional = true }
-figment-json5 = { version = "0.1.1", optional = true }
-serde_yaml = { package = "serde_yaml_ok", version = "0.9.36", optional = true }
+ortho_config = { version = "0.5.0-alpha2", features = ["json5", "yaml"] }
+figment = { version = "0.10", default-features = false, features = ["env", "toml"] }
+xdg = "3"
+uncased = "0.9"
+toml = "0.8"
+figment-json5 = "0.1.1"
+serde_yaml = { package = "serde_yaml_ok", version = "0.9.36" }
 
 [features]
-default = ["toml"]
-toml = ["dep:figment", "dep:xdg", "dep:uncased", "dep:toml", "ortho_config/toml"]
-json5 = ["toml", "dep:figment-json5", "ortho_config/json5"]
-yaml = ["toml", "dep:serde_yaml", "ortho_config/yaml"]
+default = ["ortho_config/toml"]
+toml = ["ortho_config/toml"]
+json5 = ["ortho_config/json5"]
+yaml = ["ortho_config/yaml"]
 
 [dev-dependencies]
 tempfile = "3.20.0"
