@@ -94,6 +94,18 @@ async fn missing_nodes_client() -> TestClient {
     start_server(vec![body])
 }
 
+#[fixture]
+async fn empty_threads_client() -> TestClient {
+    let body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    start_server(vec![body])
+}
+
 fn comment(body: &str) -> serde_json::Value {
     serde_json::json!({
         "body": body,
@@ -148,6 +160,19 @@ async fn run_query_missing_nodes_reports_path(
         err_msg.contains("snippet:"),
         "Error should contain JSON snippet",
     );
+    join.abort();
+    let _ = join.await;
+}
+
+#[rstest]
+#[tokio::test]
+async fn returns_empty_when_no_threads(repo: RepoInfo, #[future] empty_threads_client: TestClient) {
+    let TestClient { client, join, hits } = empty_threads_client.await;
+    let threads = fetch_review_threads(&client, &repo, 1)
+        .await
+        .expect("fetch threads");
+    assert!(threads.is_empty());
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
     join.abort();
     let _ = join.await;
 }

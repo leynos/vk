@@ -204,7 +204,10 @@ pub async fn fetch_review_threads(
         })
         .collect::<Vec<_>>();
 
-    let limit = usize::min(futures.len(), 16);
+    if futures.is_empty() {
+        return Ok(threads);
+    }
+    let limit = usize::min(futures.len(), 16).max(1);
     let mut stream = stream::iter(futures).buffer_unordered(limit);
 
     while let Some((idx, comments_result)) = stream.next().await {
