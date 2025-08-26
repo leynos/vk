@@ -154,7 +154,7 @@ pub async fn fetch_review_threads(
         "pull-request number {number} exceeds GraphQL Int (i32) range",
     );
     let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
-  
+
     let mut vars = Map::new();
     vars.insert("owner".into(), json!(repo.owner.clone()));
     vars.insert("name".into(), json!(repo.name.clone()));
