@@ -185,8 +185,11 @@ async fn fetch_all_comments(
     thread_id: &str,
     initial: CommentConnection,
 ) -> Result<CommentConnection, VkError> {
-    let mut comments = initial.nodes;
-    if let Some(cursor) = initial.page_info.next_cursor()? {
+    let CommentConnection {
+        nodes: mut comments,
+        page_info,
+    } = initial;
+    if let Some(cursor) = page_info.next_cursor()? {
         let mut vars = Map::new();
         vars.insert("id".into(), json!(thread_id));
         let more = client
