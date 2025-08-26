@@ -3,6 +3,7 @@
 //! These functions format comments with syntax highlighting using
 //! `termimad`. They are separated from the rest of the application so
 //! behaviour can be unit tested without capturing stdout.
+use std::borrow::Cow;
 use termimad::MadSkin;
 
 use crate::diff::format_comment_diff;
@@ -20,14 +21,49 @@ use crate::{ReviewComment, ReviewThread};
 /// ```ignore
 /// use vk::printer::{write_entry_body, EntryDisplayInfo};
 /// use termimad::MadSkin;
-/// let info = EntryDisplayInfo { icon: "\u{1f4ac}", login: Some("alice"), suffix: " wrote:" };
+/// use std::borrow::Cow;
+/// let info = EntryDisplayInfo {
+///     icon: "\u{1f4ac}",
+///     login: Some("alice"),
+///     suffix: Cow::Borrowed(" wrote:"),
+/// };
 /// let mut buf = Vec::new();
 /// write_entry_body(&mut buf, &MadSkin::default(), &info, "Hi").unwrap();
 /// ```
 struct EntryDisplayInfo<'a> {
     icon: &'a str,
     login: Option<&'a str>,
-    suffix: &'a str,
+    suffix: Cow<'a, str>,
+}
+
+/// A comment or review rendered by [`write_entry`].
+enum Entry<'a> {
+    Comment(&'a ReviewComment),
+    Review(&'a PullRequestReview),
+}
+
+impl<'a> Entry<'a> {
+    fn display_info(&self) -> EntryDisplayInfo<'a> {
+        match self {
+            Entry::Comment(comment) => EntryDisplayInfo {
+                icon: "\u{1f4ac}",
+                login: comment.author.as_ref().map(|u| u.login.as_str()),
+                suffix: Cow::Borrowed(" wrote:"),
+            },
+            Entry::Review(review) => EntryDisplayInfo {
+                icon: "\u{1f4dd}",
+                login: review.author.as_ref().map(|u| u.login.as_str()),
+                suffix: Cow::Owned(format!(" {}:", review.state)),
+            },
+        }
+    }
+
+    fn body(&self) -> &str {
+        match self {
+            Entry::Comment(c) => &c.body,
+            Entry::Review(r) => &r.body,
+        }
+    }
 }
 
 fn write_author_line<W: std::io::Write>(
@@ -53,12 +89,21 @@ fn write_entry_body<W: std::io::Write>(
         out,
         display_info.icon,
         display_info.login,
-        display_info.suffix,
+        display_info.suffix.as_ref(),
     )?;
     let body = collapse_details(body);
     skin.write_text_on(out, &body)?;
     writeln!(out)?;
     Ok(())
+}
+
+fn write_entry<W: std::io::Write>(
+    out: &mut W,
+    skin: &MadSkin,
+    entry: &Entry<'_>,
+) -> anyhow::Result<()> {
+    let info = entry.display_info();
+    write_entry_body(out, skin, &info, entry.body())
 }
 
 /// Format the body of a single review comment.
@@ -82,13 +127,7 @@ pub fn write_comment_body<W: std::io::Write>(
     skin: &MadSkin,
     comment: &ReviewComment,
 ) -> anyhow::Result<()> {
-    let display_info = EntryDisplayInfo {
-        icon: "\u{1f4ac}",
-        login: comment.author.as_ref().map(|u| u.login.as_str()),
-        suffix: " wrote:",
-    };
-    write_entry_body(&mut out, skin, &display_info, &comment.body)?;
-    Ok(())
+    write_entry(&mut out, skin, &Entry::Comment(comment))
 }
 
 /// Write a single comment including its diff hunk.
@@ -197,14 +236,7 @@ pub fn write_review<W: std::io::Write>(
     skin: &MadSkin,
     review: &PullRequestReview,
 ) -> anyhow::Result<()> {
-    let suffix = format!(" {}:", review.state);
-    let display_info = EntryDisplayInfo {
-        icon: "\u{1f4dd}",
-        login: review.author.as_ref().map(|u| u.login.as_str()),
-        suffix: &suffix,
-    };
-    write_entry_body(&mut out, skin, &display_info, &review.body)?;
-    Ok(())
+    write_entry(&mut out, skin, &Entry::Review(review))
 }
 
 #[cfg(test)]
