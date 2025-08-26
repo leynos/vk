@@ -66,6 +66,13 @@ const REVIEWS_QUERY: &str = r"
 /// Retrieve all reviews for a pull request by paging through the GitHub
 /// GraphQL API.
 ///
+/// Note:
+/// - GitHub GraphQL `Int` is a 32-bit signed integer; pass a pull-request
+///   number within `i32::MAX`.
+/// - The token must have sufficient scopes (for example, `repo` for private
+///   repositories) or the API may return partial data that fails to
+///   deserialise.
+///
 /// ```no_run
 /// use vk::{GraphQLClient, ref_parser::RepoInfo};
 ///
@@ -103,6 +110,13 @@ pub async fn fetch_reviews(
 /// Reviews without an author are returned individually rather than being
 /// grouped together.
 ///
+/// Ordering:
+/// - The order of reviews with authors is not guaranteed.
+/// - Anonymous reviews are appended after the keyed results.
+///
+/// If you require a deterministic order, sort the returned vector by
+/// `submitted_at` at the call site.
+///
 /// ```
 /// use chrono::Utc;
 /// use vk::reviews::{latest_reviews, PullRequestReview};
@@ -134,7 +148,9 @@ pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview>
                     e.insert(r);
                 }
                 Entry::Occupied(mut e) => {
-                    if r.submitted_at > e.get().submitted_at {
+                    // Tie-break on equal timestamps by favouring the later
+                    // item in input order.
+                    if r.submitted_at >= e.get().submitted_at {
                         e.insert(r);
                     }
                 }
@@ -148,6 +164,7 @@ pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::User;
     use chrono::{TimeZone, Utc};
 
     #[test]
@@ -169,5 +186,63 @@ mod tests {
 
         let latest = latest_reviews(reviews);
         assert_eq!(latest.len(), 2);
+    }
+
+    #[test]
+    fn keeps_latest_per_author() {
+        let a1 = PullRequestReview {
+            body: String::new(),
+            submitted_at: Utc.timestamp_opt(10, 0).single().expect("ts"),
+            state: "COMMENTED".into(),
+            author: Some(User {
+                login: "alice".into(),
+            }),
+        };
+        let a2 = PullRequestReview {
+            body: String::new(),
+            submitted_at: Utc.timestamp_opt(20, 0).single().expect("ts"),
+            state: "APPROVED".into(),
+            author: Some(User {
+                login: "alice".into(),
+            }),
+        };
+        let b1 = PullRequestReview {
+            body: String::new(),
+            submitted_at: Utc.timestamp_opt(30, 0).single().expect("ts"),
+            state: "CHANGES_REQUESTED".into(),
+            author: Some(User {
+                login: "bob".into(),
+            }),
+        };
+        let latest = latest_reviews(vec![a1.clone(), a2.clone(), b1.clone()]);
+        assert!(latest.iter().any(|r| {
+            r.author.as_ref().expect("author").login == "alice" && r.submitted_at == a2.submitted_at
+        }));
+        assert!(latest.iter().any(|r| {
+            r.author.as_ref().expect("author").login == "bob" && r.submitted_at == b1.submitted_at
+        }));
+    }
+
+    #[test]
+    fn ties_favour_last_in_input_when_timestamps_equal() {
+        let a1 = PullRequestReview {
+            body: "first".into(),
+            submitted_at: Utc.timestamp_opt(10, 0).single().expect("ts"),
+            state: "COMMENTED".into(),
+            author: Some(User {
+                login: "alice".into(),
+            }),
+        };
+        let a2 = PullRequestReview {
+            body: "second".into(),
+            submitted_at: Utc.timestamp_opt(10, 0).single().expect("ts"),
+            state: "COMMENTED".into(),
+            author: Some(User {
+                login: "alice".into(),
+            }),
+        };
+        let latest = latest_reviews(vec![a1, a2.clone()]);
+        assert_eq!(latest.len(), 1);
+        assert_eq!(latest.first().expect("review").body, "second");
     }
 }
