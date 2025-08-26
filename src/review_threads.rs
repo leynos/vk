@@ -194,7 +194,7 @@ async fn fetch_all_comments(
                 COMMENT_QUERY,
                 vars,
                 Some(Cow::Borrowed(cursor)),
-                move |wrapper: NodeWrapper<CommentNode>| {
+                |wrapper: NodeWrapper<CommentNode>| {
                     let conn = wrapper
                         .node
                         .ok_or_else(|| {

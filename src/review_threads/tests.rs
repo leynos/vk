@@ -130,7 +130,7 @@ fn filter_threads_by_files_retains_matches() {
 }
 
 #[test]
-fn filter_unresolved_threads_discards_resolved() {
+fn retains_only_unresolved_threads() {
     let threads = vec![
         ReviewThread {
             is_resolved: true,
