@@ -92,13 +92,17 @@ pub struct User {
 /// Fetch all unresolved review threads for a pull request.
 ///
 /// Note:
-/// - GitHub GraphQL `Int` is a 32-bit signed integer; pass a pull-request
-///   number within `i32::MAX`.
+/// - GitHub GraphQL `Int` is a 32-bit signed integer (range −2^31..=2^31−1).
+///   This function accepts a non-negative `number`; values above `i32::MAX`
+///   are rejected with [`VkError::InvalidNumber`].
+/// - The token must have sufficient scopes (for example, `repo` for private
+///   repositories) or the API may return partial data that fails to
+///   deserialise.
 ///
 /// # Errors
 ///
 /// Returns [`VkError::InvalidNumber`] if `number` exceeds `i32::MAX`, or a
-/// [`VkError`] if any API request fails or the response is malformed.
+/// general [`VkError`] if any API request fails or the response is malformed.
 pub async fn fetch_review_threads(
     client: &GraphQLClient,
     repo: &RepoInfo,

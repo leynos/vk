@@ -67,8 +67,9 @@ const REVIEWS_QUERY: &str = r"
 /// GraphQL API.
 ///
 /// Note:
-/// - GitHub GraphQL `Int` is a 32-bit signed integer; pass a pull-request
-///   number within `i32::MAX`.
+/// - GitHub GraphQL `Int` is a 32-bit signed integer (range −2^31..=2^31−1).
+///   This function accepts a non-negative `number`; values above `i32::MAX`
+///   are rejected with [`VkError::InvalidNumber`].
 /// - The token must have sufficient scopes (for example, `repo` for private
 ///   repositories) or the API may return partial data that fails to
 ///   deserialise.
@@ -183,7 +184,7 @@ mod tests {
     fn preserves_anonymous_reviews(#[case] count: usize) {
         let reviews = (0..count)
             .map(|i| {
-                #[allow(clippy::cast_possible_wrap, reason = "indices are small")]
+                #[expect(clippy::cast_possible_wrap, reason = "indices are small")]
                 let ts = i as i64 + 1;
                 PullRequestReview {
                     body: String::new(),

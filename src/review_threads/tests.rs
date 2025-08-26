@@ -265,3 +265,23 @@ async fn rejects_out_of_range_number(repo: RepoInfo) {
         .expect_err("error");
     assert!(matches!(err, VkError::InvalidNumber));
 }
+
+#[rstest]
+#[tokio::test]
+async fn accepts_max_i32_number(repo: RepoInfo) {
+    // Minimal valid response with no threads.
+    let body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [],
+            "pageInfo": { "hasNextPage": false, "endCursor": null }
+        }}}}
+    })
+    .to_string();
+    let TestClient { client, join, .. } = start_server(vec![body]);
+    let threads = fetch_review_threads(&client, &repo, i32::MAX as u64)
+        .await
+        .expect("should accept i32::MAX");
+    assert!(threads.is_empty());
+    join.abort();
+    let _ = join.await;
+}
