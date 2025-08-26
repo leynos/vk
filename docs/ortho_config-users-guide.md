@@ -1,12 +1,12 @@
 # OrthoConfig User's Guide
 
-`OrthoConfig` is a Rust library that unifies command‑line arguments,
-environment variables and configuration files into a single, strongly typed
-configuration struct. It is inspired by tools such as `esbuild` and is designed
-to minimize boiler‑plate. The library uses `serde` for deserialization and
-`clap` for argument parsing, while `figment` provides layered configuration
-management. This guide covers the functionality currently implemented in the
-repository.
+The `ortho_config` crate provides the `OrthoConfig` derive macro to unify
+command‑line arguments, environment variables and configuration files into a
+single, strongly typed configuration struct. It is inspired by tools such as
+`esbuild` and is designed to minimize boiler‑plate. The library uses `serde`
+for deserialization and `clap` for argument parsing, while `figment` provides
+layered configuration management. This guide covers the functionality currently
+implemented in the repository.
 
 ## Core concepts and motivation
 
