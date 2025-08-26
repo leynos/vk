@@ -1,7 +1,7 @@
 //! Functions for retrieving pull-request reviews through the GitHub API.
 //!
 //! The module defines GraphQL query structures and pagination helpers so callers
-//! can fetch review threads and collate the latest review from each author.
+//! can fetch pull-request reviews and collate the latest review from each author.
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
