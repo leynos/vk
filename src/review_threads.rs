@@ -126,8 +126,10 @@ async fn fetch_all_comments(
                         .node
                         .ok_or_else(|| {
                             VkError::BadResponse(
-                                format!("Missing comment node in response for thread {thread_id}")
-                                    .boxed(),
+                                format!(
+                                    "Missing comment node in response for thread {thread_id} at path 'node.comments'"
+                                )
+                                .boxed(),
                             )
                         })?
                         .comments;
