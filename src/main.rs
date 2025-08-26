@@ -2,16 +2,16 @@
 //!
 //! This module provides the main entry point and orchestrates the `vk` command
 //! line tool, which fetches unresolved review comments from GitHub's GraphQL
-//! API. The core functionality is delegated to specialised modules:
+//! API. The core functionality is delegated to specialized modules:
 //! `review_threads` for fetching review data, `issues` for issue retrieval,
-//! `summary` for summarising comments. Configuration defaults are merged using
+//! `summary` for summarizing comments. Configuration defaults are merged using
 //! `ortho_config`. When a thread has multiple comments on the same diff, the diff
 //! is shown only once. Output is framed by a `code review` banner at the start
 //! and an `end of code review` banner at the end so calling processes can
 //! reliably detect boundaries. The module re-exports banner helpers
 //! [`print_start_banner`] and [`print_end_banner`] alongside summary utilities
 //! [`print_summary`], [`summarize_files`], and [`write_summary`] so consumers can
-//! reuse the framing and summarisation logic.
+//! reuse the framing and summarization logic.
 
 pub mod api;
 mod boxed;

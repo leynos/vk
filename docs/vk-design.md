@@ -143,7 +143,7 @@ grow. Because `run_query` only returns after a full page has been fetched,
 `paginate_all` never appends partial results, preserving order and avoiding
 duplicates.
 
-The diagram below illustrates how deserialisation errors surface the JSON path
+The diagram below illustrates how deserialization errors surface the JSON path
 and a response snippet, helping developers quickly locate schema mismatches.
 
 ```mermaid
