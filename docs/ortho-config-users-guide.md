@@ -3,8 +3,8 @@
 The `ortho_config` crate provides the `OrthoConfig` derive macro to unify
 command-line arguments, environment variables and configuration files into a
 single, strongly typed configuration struct. It is inspired by tools such as
-`esbuild` and is designed to minimise boilerplate. The library uses `serde` for
-deserialisation and `clap` for argument parsing, while `figment` provides
+`esbuild` and is designed to minimize boilerplate. The library uses `serde` for
+deserialization and `clap` for argument parsing, while `figment` provides
 layered configuration management. This guide covers the functionality currently
 implemented in the repository.
 
@@ -271,7 +271,7 @@ names with double underscores. For example, if `AppConfig` has a nested
 prefix is used for its fields (e.g. `APP_DB_URL`).
 
 When `clap`'s `flatten` attribute is employed to compose argument groups, the
-flattened struct is initialised even if no CLI flags within the group are
+flattened struct is initialized even if no CLI flags within the group are
 specified. During merging, `ortho_config` discards these empty groups so that
 values from configuration files or the environment remain in place unless a
 field is explicitly supplied on the command line.

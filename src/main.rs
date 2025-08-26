@@ -139,7 +139,7 @@ fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
 
 /// Create a [`GraphQLClient`], falling back to no transcript on failure.
 ///
-/// This attempts to initialise the client with the provided `transcript`.
+/// This attempts to initialize the client with the provided `transcript`.
 /// If the transcript cannot be created, it logs a warning and retries
 /// without one.
 fn build_graphql_client(
