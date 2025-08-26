@@ -109,6 +109,7 @@ impl PageInfo {
     /// assert_eq!(info.next_cursor().expect("cursor"), None);
     /// ```
     #[inline]
+    #[must_use = "inspect the returned cursor to advance pagination"]
     pub fn next_cursor(&self) -> Result<Option<&str>, VkError> {
         match (self.has_next_page, self.end_cursor.as_deref()) {
             (true, Some(cursor)) => Ok(Some(cursor)),
