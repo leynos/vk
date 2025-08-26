@@ -166,6 +166,7 @@ sequenceDiagram
 
 ## Configuration and features
 
-`vk` reads configuration files using the `figment` crate. Support for JSON5 and
-YAML formats is optional via the `json5` and `yaml` feature flags. These
-features pull in the `figment-json5` and `serde_yaml` crates, respectively.
+`vk` reads configuration files using `ortho-config`, which layers values from
+files, environment variables and CLI arguments. JSON5 and YAML formats are
+enabled through the `json5` and `yaml` features on `ortho-config`, which pull
+in the required parsers as transitive dependencies.
