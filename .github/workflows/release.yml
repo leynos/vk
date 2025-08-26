@@ -69,6 +69,7 @@ jobs:
           name: ${{ env.REPO_NAME }}
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: ${{ steps.download.outputs.download-path }}/${{ env.REPO_NAME }}
