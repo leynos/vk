@@ -84,15 +84,16 @@ fn write_entry_body<W: std::io::Write>(
     skin: &MadSkin,
     display_info: &EntryDisplayInfo,
     body: &str,
-) -> anyhow::Result<()> {
+) -> std::io::Result<()> {
     write_author_line(
         out,
         display_info.icon,
         display_info.login,
         display_info.suffix.as_ref(),
     )?;
-    let body = collapse_details(body);
-    skin.write_text_on(out, &body)?;
+    let collapsed = collapse_details(body);
+    skin.write_text_on(out, &collapsed)
+        .map_err(std::io::Error::other)?;
     writeln!(out)?;
     Ok(())
 }
@@ -103,7 +104,8 @@ fn write_entry<W: std::io::Write>(
     entry: &Entry<'_>,
 ) -> anyhow::Result<()> {
     let info = entry.display_info();
-    write_entry_body(out, skin, &info, entry.body())
+    write_entry_body(out, skin, &info, entry.body())?;
+    Ok(())
 }
 
 /// Format the body of a single review comment.
@@ -328,6 +330,8 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains(expected_login));
         assert!(out.contains("wrote"));
+        // Guard the banner icon
+        assert!(out.contains("\u{1f4ac}"));
     }
 
     #[test]
