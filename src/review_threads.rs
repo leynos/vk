@@ -5,7 +5,7 @@
 //! unresolved review threads along with their comments. It also provides
 //! utilities for filtering threads by file path.
 
-use futures::stream::{FuturesUnordered, StreamExt};
+use futures::stream::{self, StreamExt};
 use serde::Deserialize;
 use serde_json::{Map, json};
 use std::collections::HashSet;
@@ -159,8 +159,9 @@ async fn fetch_all_comments(
 /// let filtered = filter_unresolved_threads(threads);
 /// assert!(filtered.iter().all(|t| !t.is_resolved));
 /// ```
-fn filter_unresolved_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
-    threads.into_iter().filter(|t| !t.is_resolved).collect()
+fn filter_unresolved_threads(mut threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
+    threads.retain(|t| !t.is_resolved);
+    threads
 }
 
 /// Fetch all unresolved review threads for a pull request.
@@ -190,8 +191,8 @@ pub async fn fetch_review_threads(
         })
         .await?;
     let mut threads = filter_unresolved_threads(threads);
-    // Fetch comment pages concurrently to avoid N+1 latency.
-    let fetch_futures = threads
+    // Fetch comment pages concurrently with a cap to avoid rate-limit spikes.
+    let futures = threads
         .iter_mut()
         .enumerate()
         .map(|(idx, thread)| {
@@ -199,11 +200,12 @@ pub async fn fetch_review_threads(
             let id = thread.id.clone();
             async move { (idx, fetch_all_comments(client, &id, initial).await) }
         })
-        .collect::<FuturesUnordered<_>>();
+        .collect::<Vec<_>>();
 
-    let results = fetch_futures.collect::<Vec<_>>().await;
+    let limit = usize::min(futures.len(), 16);
+    let mut stream = stream::iter(futures).buffer_unordered(limit);
 
-    for (idx, comments_result) in results {
+    while let Some((idx, comments_result)) = stream.next().await {
         let thread = threads
             .get_mut(idx)
             .expect("thread index yielded by enumeration");
