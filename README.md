@@ -52,7 +52,7 @@ neither source is available, `vk` will refuse to run with only a number.
 not set, you'll get a warning and anonymous requests may be rate limited.
 
 The token only needs read access. Select the `public_repo` scope (or `repo` for
-private repositories). See [docs/GITHUB_TOKEN.md](docs/GITHUB_TOKEN.md) for a
+private repositories). See [docs/github-token.md](docs/github-token.md) for a
 detailed guide to creating one.
 
 ## Example
