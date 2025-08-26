@@ -24,13 +24,9 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
-          toml_path="${CARGO_TOML_PATH:-Cargo.toml}"
-          cargo_version="$(
-            CARGO_TOML_PATH="$toml_path" \
-            "${{ steps.setup-python.outputs.python-path }}" - <<'PY' || echo ""
-            import os, pathlib, tomllib; print(tomllib.loads(pathlib.Path(os.environ['CARGO_TOML_PATH']).read_text(encoding='utf-8'))['package']['version'])
-            PY
-          )"
+          export CARGO_TOML_PATH="${CARGO_TOML_PATH:-Cargo.toml}"
+          python_script="import os, pathlib, tomllib; print(tomllib.loads(pathlib.Path(os.environ['CARGO_TOML_PATH']).read_text(encoding='utf-8'))['package']['version'])"
+          cargo_version="$(echo "${python_script}" | "${{ steps.setup-python.outputs.python-path }}")"
           if [ -z "${cargo_version:-}" ]; then
             echo "::error title=Cargo.toml parse failure::Could not read package.version from ${toml_path}. Ensure Python ≥3.11 (tomllib available) and that the manifest contains [package], or set CARGO_TOML_PATH to the crate's Cargo.toml."
             exit 1
