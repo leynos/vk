@@ -19,7 +19,7 @@ use crate::{ReviewComment, ReviewThread};
 /// # Examples
 ///
 /// ```ignore
-/// use vk::printer::{write_entry_body, EntryDisplayInfo};
+/// use crate::printer::{write_entry_body, EntryDisplayInfo};
 /// use termimad::MadSkin;
 /// use std::borrow::Cow;
 /// let info = EntryDisplayInfo {
@@ -30,6 +30,7 @@ use crate::{ReviewComment, ReviewThread};
 /// let mut buf = Vec::new();
 /// write_entry_body(&mut buf, &MadSkin::default(), &info, "Hi").unwrap();
 /// ```
+#[derive(Debug, Clone)]
 struct EntryDisplayInfo<'a> {
     icon: &'a str,
     login: Option<&'a str>,
@@ -37,6 +38,7 @@ struct EntryDisplayInfo<'a> {
 }
 
 /// A comment or review rendered by [`write_entry`].
+#[derive(Debug, Copy, Clone)]
 enum Entry<'a> {
     Comment(&'a ReviewComment),
     Review(&'a PullRequestReview),
