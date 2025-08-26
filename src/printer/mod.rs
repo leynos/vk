@@ -3,70 +3,12 @@
 //! These functions format comments with syntax highlighting using
 //! `termimad`. They are separated from the rest of the application so
 //! behaviour can be unit tested without capturing stdout.
-use std::borrow::Cow;
 use termimad::MadSkin;
 
 use crate::diff::format_comment_diff;
 use crate::html::collapse_details;
 use crate::reviews::PullRequestReview;
 use crate::{ReviewComment, ReviewThread};
-
-/// Display information for a comment or review entry.
-///
-/// This data drives the banner line above rendered markdown, keeping
-/// formatting details bundled together.
-///
-/// # Examples
-///
-/// ```ignore
-/// use crate::printer::{write_entry_body, EntryDisplayInfo};
-/// use termimad::MadSkin;
-/// use std::borrow::Cow;
-/// let info = EntryDisplayInfo {
-///     icon: "\u{1f4ac}",
-///     login: Some("alice"),
-///     suffix: Cow::Borrowed(" wrote:"),
-/// };
-/// let mut buf = Vec::new();
-/// write_entry_body(&mut buf, &MadSkin::default(), &info, "Hi").unwrap();
-/// ```
-#[derive(Debug, Clone)]
-struct EntryDisplayInfo<'a> {
-    icon: &'a str,
-    login: Option<&'a str>,
-    suffix: Cow<'a, str>,
-}
-
-/// A comment or review rendered by [`write_entry`].
-#[derive(Debug, Copy, Clone)]
-enum Entry<'a> {
-    Comment(&'a ReviewComment),
-    Review(&'a PullRequestReview),
-}
-
-impl<'a> Entry<'a> {
-    fn display_info(&self) -> EntryDisplayInfo<'a> {
-        match self {
-            Entry::Comment(comment) => EntryDisplayInfo {
-                icon: "\u{1f4ac}",
-                login: comment.author.as_ref().map(|u| u.login.as_str()),
-                suffix: Cow::Borrowed(" wrote:"),
-            },
-            Entry::Review(review) => EntryDisplayInfo {
-                icon: "\u{1f4dd}",
-                login: review.author.as_ref().map(|u| u.login.as_str()),
-                suffix: Cow::Owned(format!(" {}:", review.state)),
-            },
-        }
-    }
-
-    fn body(&self) -> &str {
-        match self {
-            Entry::Comment(c) => &c.body,
-            Entry::Review(r) => &r.body,
-        }
-    }
-}
 
 fn write_author_line<W: std::io::Write>(
     out: &mut W,
@@ -81,32 +23,19 @@ fn write_author_line<W: std::io::Write>(
     )
 }
 
-fn write_entry_body<W: std::io::Write>(
-    out: &mut W,
+fn write_body_with_banner<W: std::io::Write>(
+    mut out: W,
     skin: &MadSkin,
-    display_info: &EntryDisplayInfo,
+    icon: &str,
+    login: Option<&str>,
+    suffix: &str,
     body: &str,
-) -> std::io::Result<()> {
-    write_author_line(
-        out,
-        display_info.icon,
-        display_info.login,
-        display_info.suffix.as_ref(),
-    )?;
-    let collapsed = collapse_details(body);
-    skin.write_text_on(out, &collapsed)
-        .map_err(std::io::Error::other)?;
-    writeln!(out)?;
-    Ok(())
-}
-
-fn write_entry<W: std::io::Write>(
-    out: &mut W,
-    skin: &MadSkin,
-    entry: &Entry<'_>,
 ) -> anyhow::Result<()> {
-    let info = entry.display_info();
-    write_entry_body(out, skin, &info, entry.body())?;
+    write_author_line(&mut out, icon, login, suffix)?;
+    let collapsed = collapse_details(body);
+    skin.write_text_on(&mut out, &collapsed)
+        .map_err(anyhow::Error::from)?;
+    writeln!(out)?;
     Ok(())
 }
 
@@ -127,11 +56,18 @@ fn write_entry<W: std::io::Write>(
 /// write_comment_body(&mut buf, &skin, &comment).unwrap();
 /// ```
 pub fn write_comment_body<W: std::io::Write>(
-    mut out: W,
+    out: W,
     skin: &MadSkin,
     comment: &ReviewComment,
 ) -> anyhow::Result<()> {
-    write_entry(&mut out, skin, &Entry::Comment(comment))
+    write_body_with_banner(
+        out,
+        skin,
+        "💬",
+        comment.author.as_ref().map(|u| u.login.as_str()),
+        " wrote:",
+        &comment.body,
+    )
 }
 
 /// Write a single comment including its diff hunk.
@@ -236,11 +172,18 @@ pub fn print_reviews<W: std::io::Write>(
 /// write_review(&mut buf, &MadSkin::default(), &review).unwrap();
 /// ```
 pub fn write_review<W: std::io::Write>(
-    mut out: W,
+    out: W,
     skin: &MadSkin,
     review: &PullRequestReview,
 ) -> anyhow::Result<()> {
-    write_entry(&mut out, skin, &Entry::Review(review))
+    write_body_with_banner(
+        out,
+        skin,
+        "📝",
+        review.author.as_ref().map(|u| u.login.as_str()),
+        &format!(" {}:", review.state),
+        &review.body,
+    )
 }
 
 #[cfg(test)]
