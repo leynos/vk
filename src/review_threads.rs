@@ -132,19 +132,34 @@ pub struct User {
 
 /// Fetch all unresolved review threads for a pull request.
 ///
+/// Note:
+/// - GitHub GraphQL `Int` is a 32-bit signed integer (range −2^31..=2^31−1).
+///   This function accepts a non-negative `number`; values above `i32::MAX`
+///   are rejected with [`VkError::InvalidNumber`].
+/// - The token must have sufficient scopes (for example, `repo` for private
+///   repositories) or the API may return partial data that fails to
+///   deserialise.
+///
 /// # Errors
 ///
-/// Returns an error if any API request fails or the response is malformed.
+/// Returns [`VkError::InvalidNumber`] if `number` exceeds `i32::MAX`, or a
+/// general [`VkError`] if any API request fails or the response is malformed.
 pub async fn fetch_review_threads(
     client: &GraphQLClient,
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
+    debug_assert!(
+        i32::try_from(number).is_ok(),
+        "pull-request number {number} exceeds GraphQL Int (i32) range",
+    );
+    let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
+
     // GitHub's API lacks filtering for unresolved threads, so filter client-side.
     let mut vars = Map::new();
     vars.insert("owner".into(), json!(repo.owner.clone()));
     vars.insert("name".into(), json!(repo.name.clone()));
-    vars.insert("number".into(), json!(number));
+    vars.insert("number".into(), json!(number_i32));
     let mut threads = client
         .paginate_all(THREADS_QUERY, vars, None, |data: ThreadData| {
             let conn = data.repository.pull_request.review_threads;

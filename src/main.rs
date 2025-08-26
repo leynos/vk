@@ -97,6 +97,8 @@ pub enum VkError {
     },
     #[error("invalid reference")]
     InvalidRef,
+    #[error("pull request number out of range")]
+    InvalidNumber,
     #[error("expected URL path segment in {expected:?}, found '{found}'")]
     WrongResourceType {
         expected: &'static [&'static str],

@@ -50,6 +50,7 @@ hyper = "1.6.0"
 hyper-util = { version = "0.1.16", features = ["server", "http1", "tokio"] }
 http-body-util = "0.1"
 bytes = "1"
+futures = "0.3"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
