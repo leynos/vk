@@ -95,7 +95,7 @@ impl PageInfo {
     /// ```
     /// use vk::PageInfo;
     /// let info = PageInfo { has_next_page: true, end_cursor: Some("c1".into()) };
-    /// assert_eq!(info.next_cursor().unwrap(), Some("c1"));
+    /// assert_eq!(info.next_cursor().expect("cursor"), Some("c1"));
     /// ```
     pub fn next_cursor(&self) -> Result<Option<&str>, VkError> {
         if self.has_next_page {
