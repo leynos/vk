@@ -7,7 +7,7 @@
 
 use serde::Deserialize;
 use serde_json::{Map, json};
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
 use crate::boxed::BoxedStr;
 use crate::graphql_queries::{COMMENT_QUERY, THREADS_QUERY};
@@ -165,7 +165,7 @@ pub async fn fetch_review_threads(
                 .paginate_all(
                     COMMENT_QUERY,
                     vars,
-                    Some(cursor.into()),
+                    Some(Cow::Borrowed(cursor)),
                     move |wrapper: NodeWrapper<CommentNode>| {
                         let conn = wrapper
                             .node

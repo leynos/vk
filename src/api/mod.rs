@@ -11,7 +11,7 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
-use std::env;
+use std::{borrow::Cow, env};
 use tokio::time::{Duration, sleep};
 
 use crate::VkError;
@@ -479,36 +479,39 @@ impl GraphQLClient {
 
     /// Fetch and concatenate all pages from a cursor-based connection.
     ///
-    /// `query` and `variables` define the base request. The `map` closure
+    /// `query` and `vars` define the base request. The `map` closure
     /// extracts the items and pagination info from each page's response.
     ///
     /// # Errors
     ///
     /// Propagates any [`VkError`] returned by the underlying request or mapper
     /// closure.
-    pub async fn paginate_all<T, U, M>(
+    pub async fn paginate_all<T, F, U>(
         &self,
-        query: impl Into<Query>,
-        variables: Map<String, Value>,
-        start: Option<Cursor>,
-        map: M,
-    ) -> Result<Vec<U>, VkError>
+        query: &str,
+        vars: Map<String, Value>,
+        start_cursor: Option<Cow<'_, str>>,
+        mut map: F,
+    ) -> Result<Vec<T>, VkError>
     where
-        T: DeserializeOwned,
-        M: Fn(T) -> Result<(Vec<U>, crate::PageInfo), VkError>,
+        F: FnMut(U) -> Result<(Vec<T>, crate::PageInfo), VkError>,
+        U: DeserializeOwned,
     {
-        let query = query.into();
         let mut items = Vec::new();
-        let mut cursor = start;
+        let mut cursor = start_cursor;
         loop {
-            let vars = variables.clone();
+            let vars = vars.clone();
             let data = self
-                .fetch_page::<T, _>(query.clone(), cursor.clone(), vars)
+                .fetch_page::<U, _>(
+                    query,
+                    cursor.take().map(|c| Cursor::from(c.into_owned())),
+                    vars,
+                )
                 .await?;
             let (mut page, info) = map(data)?;
             items.append(&mut page);
             if let Some(next) = info.next_cursor()? {
-                cursor = Some(next.into());
+                cursor = Some(Cow::Owned(next.to_string()));
             } else {
                 break;
             }
