@@ -142,9 +142,12 @@ By default, each field receives a long flag derived from its name in kebab-case
 and a short flag. The macro chooses the short flag using these rules:
 
 - Use the field's first ASCII alphanumeric character.
-- If that character is taken or reserved, try its upper-case form.
+- If that character is taken or reserved, try its upper‑case form.
 - If both are unavailable, no short flag is assigned; specify `cli_short` to
   resolve the collision.
+
+Collisions are evaluated against short flags already assigned within the same
+parser and any reserved flags.
 
 The macro does not scan other characters in the field name when deriving the
 short flag. Short flags must be single ASCII alphanumeric characters and may
@@ -237,7 +240,7 @@ following steps:
       automatically by the derive macro; if the user defines a `config_path`
       field in their struct then that will override the hidden option.
       Alternatively, the environment variable `<PREFIX>CONFIG_PATH` (for
-      example, `APP_CONFIG_PATH`; or `CONFIG_PATH` if no prefix is set) can
+      example, `APP_CONFIG_PATH`, or `CONFIG_PATH` if no prefix is set) can
       specify an explicit file.
 
    1. A dotfile named `.config.toml` or `.<prefix>.toml` in the current working
