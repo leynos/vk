@@ -138,11 +138,36 @@ Unrecognized keys are ignored by the derive macro for forwards compatibility.
 Unknown keys will therefore silently do nothing. Developers who require
 stricter validation may add manual `compile_error!` guards.
 
-By default, each field receives a long flag derived from its name in kebab-case
-and a short flag. Collisions must be resolved explicitly via `cli_short`. Short
-flags must be single ASCII alphanumeric characters and may not use clap's
-global `-h` or `-V` options. Long flags must contain only ASCII alphanumeric
-characters, hyphens or underscores and cannot be named `help` or `version`.
+By default, each field receives a long-flag derived from its name in kebab-case
+and a short-flag. The macro chooses the short-flag using these rules:
+
+- Use the field's first ASCII alphanumeric character.
+- If that character is already taken or reserved, try its upper-case form.
+- If both are unavailable, no short-flag is assigned; specify `cli_short` to
+  resolve the collision.
+
+Collisions are evaluated against short-flags already assigned within the same
+parser and reserved characters such as clap's `-h` and `-V`. A character is
+considered taken if it matches either set.
+
+The macro does not scan other characters in the field name when deriving the
+short-flag. Short-flags must be single ASCII alphanumeric characters and may
+not use clap's global `-h` or `-V` options. Long-flags must contain only ASCII
+alphanumeric characters, hyphens or underscores and cannot be named `help` or
+`version`.
+
+For example, when multiple fields begin with the same character, `cli_short`
+can disambiguate the final field:
+
+```rust
+#[derive(OrthoConfig)]
+struct Options {
+    port: u16,                         // -p
+    path: String,                      // -P
+    #[ortho_config(cli_short = 'r')]
+    peer: String,                      // -r via override
+}
+```
 
 ### Example configuration struct
 
@@ -215,8 +240,8 @@ following steps:
    1. A `--config-path` CLI argument. A hidden option is generated
       automatically by the derive macro; if the user defines a `config_path`
       field in their struct then that will override the hidden option.
-      Alternatively the environment variable `<PREFIX>CONFIG_PATH` (for
-      example, `APP_CONFIG_PATH`; or `CONFIG_PATH` if no prefix is set) can
+      Alternatively, the environment variable `<PREFIX>CONFIG_PATH` (for
+      example, `APP_CONFIG_PATH`, or `CONFIG_PATH` if no prefix is set) can
       specify an explicit file.
 
    1. A dotfile named `.config.toml` or `.<prefix>.toml` in the current working
