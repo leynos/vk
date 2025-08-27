@@ -2,21 +2,21 @@
 //!
 //! This module provides the main entry point and orchestrates the `vk` command
 //! line tool, which fetches unresolved review comments from GitHub's GraphQL
-//! API. The core functionality is delegated to specialised modules:
+//! API. The core functionality is delegated to specialized modules:
 //! `review_threads` for fetching review data, `issues` for issue retrieval,
-//! `summary` for summarising comments, and `config` for configuration
-//! management. When a thread has multiple comments on the same diff, the diff
+//! `summary` for summarizing comments. Configuration defaults are merged using
+//! `ortho_config`. When a thread has multiple comments on the same diff, the diff
 //! is shown only once. Output is framed by a `code review` banner at the start
 //! and an `end of code review` banner at the end so calling processes can
-//! reliably detect boundaries. The module re-exports banner helpers
-//! [`print_start_banner`] and [`print_end_banner`] alongside summary utilities
-//! [`print_summary`], [`summarize_files`], and [`write_summary`] so consumers can
-//! reuse the framing and summarisation logic.
+//! reliably detect boundaries. Banner helpers [`print_start_banner`] and
+//! [`print_end_banner`] frame output while summary utilities
+//! [`print_summary`], [`summarize_files`], and [`write_summary`] collate
+//! comments so consumers can reuse the framing logic.
 
 pub mod api;
 mod boxed;
 mod cli_args;
-mod config;
+// configuration helpers have been folded into `ortho_config`
 mod diff;
 mod graphql_queries;
 mod html;
@@ -30,15 +30,12 @@ mod summary;
 mod test_utils;
 
 pub use crate::api::{GraphQLClient, paginate};
-pub use config::load_with_reference_fallback;
 pub use issues::{Issue, fetch_issue};
 pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
     filter_threads_by_files,
 };
-pub use summary::{
-    print_end_banner, print_start_banner, print_summary, summarize_files, write_summary,
-};
+use summary::{print_end_banner, print_start_banner, print_summary, summarize_files};
 
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use crate::printer::{print_reviews, write_thread};
@@ -46,6 +43,7 @@ use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_reference};
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
 use log::{error, warn};
+use ortho_config::{OrthoConfig, subcommand::load_and_merge_subcommand_for};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -143,7 +141,7 @@ fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
 
 /// Create a [`GraphQLClient`], falling back to no transcript on failure.
 ///
-/// This attempts to initialise the client with the provided `transcript`.
+/// This attempts to initialize the client with the provided `transcript`.
 /// If the transcript cannot be created, it logs a warning and retries
 /// without one.
 fn build_graphql_client(
@@ -312,11 +310,11 @@ async fn main() -> Result<(), VkError> {
     global.merge(cli.global);
     match cli.command {
         Commands::Pr(pr_cli) => {
-            let args = load_with_reference_fallback::<PrArgs>(pr_cli.clone())?;
+            let args = load_and_merge_subcommand_for(&pr_cli)?;
             run_pr(args, &global).await
         }
         Commands::Issue(issue_cli) => {
-            let args = load_with_reference_fallback::<IssueArgs>(issue_cli.clone())?;
+            let args = load_and_merge_subcommand_for(&issue_cli)?;
             run_issue(args, &global).await
         }
     }

@@ -150,7 +150,7 @@ grow. Because `run_query` only returns after a full page has been fetched,
 `paginate_all` never appends partial results, preserving order and avoiding
 duplicates.
 
-The diagram below illustrates how deserialisation errors surface the JSON path
+The diagram below illustrates how deserialization errors surface the JSON path
 and a response snippet, helping developers quickly locate schema mismatches.
 
 ```mermaid
@@ -173,6 +173,7 @@ sequenceDiagram
 
 ## Configuration and features
 
-`vk` reads configuration files using the `figment` crate. Support for JSON5 and
-YAML formats is optional via the `json5` and `yaml` feature flags. These
-features pull in the `figment-json5` and `serde_yaml` crates, respectively.
+`vk` reads configuration files using `ortho_config`, which layers values from
+files, environment variables and CLI arguments. JSON5 and YAML formats are
+enabled through the `json5` and `yaml` features on `ortho_config`, which pull
+in the required parsers as transitive dependencies.

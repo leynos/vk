@@ -22,7 +22,7 @@ design and its focus on optimizing interactions within the GitHub ecosystem.1
 
 A core feature of `vk` is its commitment to a rich user experience, achieved
 through the use of the `termimad` crate.2 This library enables the rendering of
-formatted text, including Markdown, with colors, tables, and other styling
+formatted text, including Markdown, with colours, tables, and other styling
 elements directly in the terminal.3 This focus on richly formatted output is a
 key consideration for testing, as simple string comparisons are inadequate to
 validate the visual correctness of the tool's output.
@@ -57,7 +57,7 @@ it is essential for several critical reasons:
   in another, a cornerstone of maintainable software development.6
 
 - **User Experience (UX) Validation:** The use of `termimad` signifies that the
-  visual presentation of data is a primary feature.7 The colors, layout, and
+  visual presentation of data is a primary feature.7 The colours, layout, and
   formatting are integral to the tool's value. E2E tests, when combined with
   snapshot testing, provide the only effective means to validate this complex,
   styled output and prevent visual regressions.
@@ -100,7 +100,7 @@ provide a holistic solution.
 - `insta`: This crate is the output verifier, specialized for snapshot testing.
   Given that `vk` produces complex, styled terminal output via `termimad`,
   `insta` is used to capture this raw output—including all ANSI escape codes
-  for color and formatting—and save it to a "snapshot" file.12 On subsequent
+  for colour and formatting—and save it to a "snapshot" file.12 On subsequent
   test runs,
 
   `insta` compares the new output against the saved snapshot. Any deviation
@@ -616,7 +616,7 @@ While `assert_cmd` is excellent for verifying process outcomes and `stderr`, it
 is not well-suited for validating the complex output `vk` prints to standard
 output (`stdout`). Because `vk` uses the `termimad` crate, its output is not
 plain text; it is a rich tapestry of content formatted with ANSI escape codes
-that control colors, bolding, table layouts, and more.2
+that control colours, bolding, table layouts, and more.2
 
 ### The Case for Snapshot Testing with termimad
 
@@ -682,7 +682,7 @@ intuitive, revolving around the `cargo-insta` command-line tool.13
    of manually managing files, the recommended workflow is to use the
    interactive review tool. After running the tests, the developer runs
    `cargo insta review`. This tool will find all pending (new or changed)
-   snapshots and present them one by one with a colorful diff. The developer
+   snapshots and present them one by one with a colourful diff. The developer
    has several options for each snapshot 13:
 
    - **Accept (**`a` **or** `Enter`**):** Approves the new snapshot. `insta`

@@ -30,7 +30,7 @@ sets the default repository when passing only a pull request number.
 The CLI provides two subcommands:
 
 - `pr` — show unresolved pull request comments. It begins with a
-  `code review banner`, summarises files and comment counts, then prints an
+  `code review banner`, summarizes files and comment counts, then prints an
   `end of code review` banner. Pass file paths after the pull request to
   restrict output to those paths.
 - `issue` — read a GitHub issue (**to do**)
@@ -52,7 +52,7 @@ neither source is available, `vk` will refuse to run with only a number.
 not set, you'll get a warning and anonymous requests may be rate limited.
 
 The token only needs read access. Select the `public_repo` scope (or `repo` for
-private repositories). See [docs/GITHUB_TOKEN.md](docs/GITHUB_TOKEN.md) for a
+private repositories). See [docs/github-token.md](docs/github-token.md) for a
 detailed guide to creating one.
 
 ## Example
