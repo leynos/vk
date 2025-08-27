@@ -11,7 +11,7 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
-use std::env;
+use std::{borrow::Cow, env};
 use tokio::time::{Duration, sleep};
 
 use crate::VkError;
@@ -106,39 +106,6 @@ impl From<String> for Endpoint {
 impl Default for Endpoint {
     fn default() -> Self {
         Self(GITHUB_GRAPHQL_URL.to_string())
-    }
-}
-
-/// A pagination cursor for GraphQL connections.
-#[derive(Debug, Clone)]
-pub struct Cursor(String);
-
-impl Cursor {
-    pub fn new(cursor: impl Into<String>) -> Self {
-        Self(cursor.into())
-    }
-
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Consume the cursor and return the inner `String`.
-    #[must_use]
-    pub fn into_inner(self) -> String {
-        self.0
-    }
-}
-
-impl From<String> for Cursor {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl From<&str> for Cursor {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
     }
 }
 
@@ -457,7 +424,7 @@ impl GraphQLClient {
     pub async fn fetch_page<T, V>(
         &self,
         query: impl Into<Query>,
-        cursor: Option<Cursor>,
+        cursor: Option<Cow<'_, str>>,
         variables: V,
     ) -> Result<T, VkError>
     where
@@ -472,43 +439,74 @@ impl GraphQLClient {
             VkError::BadResponse("variables for fetch_page must be a JSON object".boxed())
         })?;
         if let Some(c) = cursor {
-            obj.insert("cursor".into(), Value::String(c.into_inner()));
+            obj.insert("cursor".into(), Value::String(c.into_owned()));
         }
         self.run_query(query, variables).await
     }
 
     /// Fetch and concatenate all pages from a cursor-based connection.
     ///
-    /// `query` and `variables` define the base request. The `map` closure
+    /// `query` and `vars` define the base request. The `map` closure
     /// extracts the items and pagination info from each page's response.
+    ///
+    /// # Examples
+    /// Borrowed and owned cursors both avoid allocations until needed.
+    ///
+    /// ```no_run
+    /// use std::borrow::Cow;
+    /// use serde_json::Map;
+    /// use vk::{api::GraphQLClient, PageInfo, VkError};
+    ///
+    /// # async fn run(client: GraphQLClient) -> Result<(), VkError> {
+    /// let vars = Map::new();
+    /// client
+    ///     .paginate_all::<(), _, serde_json::Value>(
+    ///         "query",
+    ///         vars.clone(),
+    ///         Some(Cow::Borrowed("c1")),
+    ///         |_page| Ok((Vec::new(), PageInfo::default())),
+    ///     )
+    ///     .await?;
+    /// let owned = String::from("c2");
+    /// client
+    ///     .paginate_all::<(), _, serde_json::Value>(
+    ///         "query",
+    ///         vars,
+    ///         Some(Cow::Owned(owned)),
+    ///         |_page| Ok((Vec::new(), PageInfo::default())),
+    ///     )
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     /// # Errors
     ///
     /// Propagates any [`VkError`] returned by the underlying request or mapper
     /// closure.
-    pub async fn paginate_all<T, U, M>(
+    pub async fn paginate_all<Item, Mapper, Page>(
         &self,
         query: impl Into<Query>,
-        variables: Map<String, Value>,
-        start: Option<Cursor>,
-        map: M,
-    ) -> Result<Vec<U>, VkError>
+        vars: Map<String, Value>,
+        start_cursor: Option<Cow<'_, str>>,
+        mut map: Mapper,
+    ) -> Result<Vec<Item>, VkError>
     where
-        T: DeserializeOwned,
-        M: Fn(T) -> Result<(Vec<U>, crate::PageInfo), VkError>,
+        Mapper: FnMut(Page) -> Result<(Vec<Item>, crate::PageInfo), VkError>,
+        Page: DeserializeOwned,
     {
         let query = query.into();
         let mut items = Vec::new();
-        let mut cursor = start;
+        let mut cursor = start_cursor;
         loop {
-            let vars = variables.clone();
+            let vars = vars.clone();
             let data = self
-                .fetch_page::<T, _>(query.clone(), cursor.clone(), vars)
+                .fetch_page::<Page, _>(query.clone(), cursor.take(), vars)
                 .await?;
             let (mut page, info) = map(data)?;
             items.append(&mut page);
             if let Some(next) = info.next_cursor()? {
-                cursor = Some(next.into());
+                cursor = Some(Cow::Owned(next.to_string()));
             } else {
                 break;
             }

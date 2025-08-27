@@ -5,6 +5,7 @@ use crate::PageInfo;
 use rstest::{fixture, rstest};
 use serde_json::{Map, Value, json};
 use std::{
+    borrow::Cow,
     cell::RefCell,
     sync::{
         Arc, Mutex,
@@ -154,7 +155,31 @@ async fn fetch_page_cursor_handling(
 ) {
     let (client, captured, join) = mock_server_with_capture;
     let _: Value = client
-        .fetch_page("query", Some(cursor.into()), variables)
+        .fetch_page("query", Some(Cow::Borrowed(cursor)), variables)
+        .await
+        .expect("fetch");
+    join.abort();
+    let _ = join.await;
+    assert_cursor_in_request(&captured, expected);
+}
+
+#[rstest]
+#[case(Map::new(), "abc", "abc")]
+#[case({
+    let mut vars = Map::new();
+    vars.insert("cursor".into(), json!("stale"));
+    vars
+}, "fresh", "fresh")]
+#[tokio::test]
+async fn fetch_page_cursor_handling_owned(
+    mock_server_with_capture: (GraphQLClient, Arc<Mutex<String>>, JoinHandle<()>),
+    #[case] variables: Map<String, Value>,
+    #[case] cursor: &str,
+    #[case] expected: &str,
+) {
+    let (client, captured, join) = mock_server_with_capture;
+    let _: Value = client
+        .fetch_page("query", Some(Cow::Owned(String::from(cursor))), variables)
         .await
         .expect("fetch");
     join.abort();

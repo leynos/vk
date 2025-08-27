@@ -7,7 +7,7 @@
 
 use serde::Deserialize;
 use serde_json::{Map, json};
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
 use crate::boxed::BoxedStr;
 use crate::graphql_queries::{COMMENT_QUERY, THREADS_QUERY};
@@ -155,59 +155,89 @@ pub async fn fetch_review_threads(
     );
     let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
 
-    // GitHub's API lacks filtering for unresolved threads, so filter client-side.
     let mut vars = Map::new();
     vars.insert("owner".into(), json!(repo.owner.clone()));
     vars.insert("name".into(), json!(repo.name.clone()));
     vars.insert("number".into(), json!(number_i32));
-    let mut threads = client
+
+    let threads = client
         .paginate_all(THREADS_QUERY, vars, None, |data: ThreadData| {
             let conn = data.repository.pull_request.review_threads;
             Ok((conn.nodes, conn.page_info))
         })
         .await?;
-    threads.retain(|t| !t.is_resolved);
 
+    let mut threads = filter_unresolved_threads(threads);
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
-        let mut comments = initial.nodes;
-        // Propagate invalid pagination info as an error.
-        if let Some(cursor) = initial.page_info.next_cursor()? {
-            let thread_id = thread.id.clone();
-            let mut vars = Map::new();
-            vars.insert("id".into(), json!(&thread_id));
-            let more = client
-                .paginate_all(
-                    COMMENT_QUERY,
-                    vars,
-                    Some(cursor.into()),
-                    move |wrapper: NodeWrapper<CommentNode>| {
-                        let conn = wrapper
-                            .node
-                            .ok_or_else(|| {
-                                VkError::BadResponse(
-                                    format!(
-                                        "Missing comment node in response for thread {thread_id}"
-                                    )
-                                    .boxed(),
-                                )
-                            })?
-                            .comments;
-                        Ok((conn.nodes, conn.page_info))
-                    },
-                )
-                .await?;
-            comments.extend(more);
-        }
-        thread.comments = CommentConnection {
-            nodes: comments,
-            page_info: PageInfo {
-                has_next_page: false,
-                end_cursor: None,
-            },
-        };
+        thread.comments = fetch_all_comments(client, &thread.id, initial).await?;
     }
     Ok(threads)
+}
+
+/// Fetch all comments for a thread, following pagination when required.
+///
+/// # Errors
+///
+/// Propagates any API or pagination errors from the underlying client.
+async fn fetch_all_comments(
+    client: &GraphQLClient,
+    thread_id: &str,
+    initial: CommentConnection,
+) -> Result<CommentConnection, VkError> {
+    let CommentConnection {
+        nodes: mut comments,
+        page_info,
+    } = initial;
+    if let Some(cursor) = page_info.next_cursor()? {
+        let mut vars = Map::new();
+        vars.insert("id".into(), json!(thread_id));
+        let more = client
+            .paginate_all(
+                COMMENT_QUERY,
+                vars,
+                Some(Cow::Borrowed(cursor)),
+                |wrapper: NodeWrapper<CommentNode>| {
+                    let conn = wrapper
+                        .node
+                        .ok_or_else(|| {
+                            VkError::BadResponse(
+                                format!("Missing comment node in response for thread {thread_id}")
+                                    .boxed(),
+                            )
+                        })?
+                        .comments;
+                    Ok((conn.nodes, conn.page_info))
+                },
+            )
+            .await?;
+        comments.extend(more);
+    }
+    Ok(CommentConnection {
+        nodes: comments,
+        page_info: PageInfo {
+            has_next_page: false,
+            end_cursor: None,
+        },
+    })
+}
+
+/// Retain only unresolved review threads.
+///
+/// # Examples
+///
+/// ```ignore
+/// use vk::review_threads::{filter_unresolved_threads, ReviewThread};
+/// let threads = vec![
+///     ReviewThread { is_resolved: true, ..Default::default() },
+///     ReviewThread { is_resolved: false, ..Default::default() },
+/// ];
+/// let filtered = filter_unresolved_threads(threads);
+/// assert_eq!(filtered.len(), 1);
+/// assert!(!filtered[0].is_resolved);
+/// ```
+fn filter_unresolved_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
+    threads.into_iter().filter(|t| !t.is_resolved).collect()
 }
 
 /// Filter review threads to those whose first comment matches one of `files`.
