@@ -139,10 +139,13 @@ Unknown keys will therefore silently do nothing. Developers who require
 stricter validation may add manual `compile_error!` guards.
 
 By default, each field receives a long flag derived from its name in kebab-case
-and a short flag. Collisions must be resolved explicitly via `cli_short`. Short
-flags must be single ASCII alphanumeric characters and may not use clap's
-global `-h` or `-V` options. Long flags must contain only ASCII alphanumeric
-characters, hyphens or underscores and cannot be named `help` or `version`.
+and a short flag. The short flag is generated from the field's first ASCII
+alphanumeric character; if that character is taken or reserved, its upper-case
+form is tried next. Collisions that remain must be resolved explicitly via
+`cli_short`. Short flags must be single ASCII alphanumeric characters and may
+not use clap's global `-h` or `-V` options. Long flags must contain only ASCII
+alphanumeric characters, hyphens or underscores and cannot be named `help` or
+`version`.
 
 ### Example configuration struct
 
@@ -215,7 +218,7 @@ following steps:
    1. A `--config-path` CLI argument. A hidden option is generated
       automatically by the derive macro; if the user defines a `config_path`
       field in their struct then that will override the hidden option.
-      Alternatively the environment variable `<PREFIX>CONFIG_PATH` (for
+      Alternatively, the environment variable `<PREFIX>CONFIG_PATH` (for
       example, `APP_CONFIG_PATH`; or `CONFIG_PATH` if no prefix is set) can
       specify an explicit file.
 
