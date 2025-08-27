@@ -23,6 +23,80 @@ fn write_author_line<W: std::io::Write>(
     )
 }
 
+/// Item that can be formatted with an author banner and body.
+trait Formattable {
+    /// Login for the author, if available.
+    fn author_login(&self) -> Option<&str>;
+    /// Text content to render below the banner.
+    fn body(&self) -> &str;
+    /// Icon prefixing the banner.
+    fn icon(&self) -> &'static str;
+    /// Suffix appended after the author.
+    fn suffix(&self) -> String;
+}
+
+impl Formattable for ReviewComment {
+    fn author_login(&self) -> Option<&str> {
+        self.author.as_ref().map(|u| u.login.as_str())
+    }
+
+    fn body(&self) -> &str {
+        &self.body
+    }
+
+    fn icon(&self) -> &'static str {
+        "💬"
+    }
+
+    fn suffix(&self) -> String {
+        " wrote:".to_string()
+    }
+}
+
+impl Formattable for PullRequestReview {
+    fn author_login(&self) -> Option<&str> {
+        self.author.as_ref().map(|u| u.login.as_str())
+    }
+
+    fn body(&self) -> &str {
+        &self.body
+    }
+
+    fn icon(&self) -> &'static str {
+        "📝"
+    }
+
+    fn suffix(&self) -> String {
+        format!(" {}:", self.state)
+    }
+}
+
+/// Write a [`Formattable`] item with a banner and rendered markdown body.
+///
+/// # Examples
+///
+/// ```ignore
+/// use vk::printer::write_formattable;
+/// use vk::ReviewComment;
+/// use termimad::MadSkin;
+/// let comment = ReviewComment { body: "hi".into(), ..Default::default() };
+/// let mut buf = Vec::new();
+/// write_formattable(&mut buf, &MadSkin::default(), &comment).unwrap();
+/// ```
+fn write_formattable<W: std::io::Write, T: Formattable>(
+    mut out: W,
+    skin: &MadSkin,
+    item: &T,
+) -> anyhow::Result<()> {
+    let suffix = item.suffix();
+    write_author_line(&mut out, item.icon(), item.author_login(), &suffix)?;
+    let collapsed = collapse_details(item.body());
+    skin.write_text_on(&mut out, &collapsed)
+        .map_err(anyhow::Error::from)?;
+    writeln!(out)?;
+    Ok(())
+}
+
 /// Format the body of a single review comment.
 ///
 /// The author's login appears in bold followed by the rendered markdown
@@ -40,20 +114,11 @@ fn write_author_line<W: std::io::Write>(
 /// write_comment_body(&mut buf, &skin, &comment).unwrap();
 /// ```
 pub fn write_comment_body<W: std::io::Write>(
-    mut out: W,
+    out: W,
     skin: &MadSkin,
     comment: &ReviewComment,
 ) -> anyhow::Result<()> {
-    write_author_line(
-        &mut out,
-        "\u{1f4ac}",
-        comment.author.as_ref().map(|u| u.login.as_str()),
-        " wrote:",
-    )?;
-    let body = collapse_details(&comment.body);
-    skin.write_text_on(&mut out, &body)?;
-    writeln!(out)?;
-    Ok(())
+    write_formattable(out, skin, comment)
 }
 
 /// Write a single comment including its diff hunk.
@@ -158,21 +223,11 @@ pub fn print_reviews<W: std::io::Write>(
 /// write_review(&mut buf, &MadSkin::default(), &review).unwrap();
 /// ```
 pub fn write_review<W: std::io::Write>(
-    mut out: W,
+    out: W,
     skin: &MadSkin,
     review: &PullRequestReview,
 ) -> anyhow::Result<()> {
-    let suffix = format!(" {}:", review.state);
-    write_author_line(
-        &mut out,
-        "\u{1f4dd}",
-        review.author.as_ref().map(|u| u.login.as_str()),
-        &suffix,
-    )?;
-    let body = collapse_details(&review.body);
-    skin.write_text_on(&mut out, &body)?;
-    writeln!(out)?;
-    Ok(())
+    write_formattable(out, skin, review)
 }
 
 #[cfg(test)]
@@ -181,7 +236,7 @@ mod tests {
     use chrono::Utc;
     use rstest::rstest;
 
-    use crate::User;
+    use crate::{ReviewComment, User};
 
     #[test]
     fn print_reviews_formats_authors_and_states() {
@@ -242,6 +297,40 @@ mod tests {
         };
         let mut buf = Vec::new();
         write_review(&mut buf, &MadSkin::default(), &review).expect("write review");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains("▶ sum"));
+        assert!(!out.contains("hidden"));
+    }
+
+    #[rstest]
+    #[case(Some("carol"), "carol")]
+    #[case(None, "(unknown)")]
+    fn write_comment_body_formats_banner(
+        #[case] login: Option<&str>,
+        #[case] expected_login: &str,
+    ) {
+        let comment = ReviewComment {
+            body: "Hi".into(),
+            author: login.map(|l| User { login: l.into() }),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        write_comment_body(&mut buf, &MadSkin::default(), &comment).expect("write comment");
+        let out = String::from_utf8(buf).expect("utf8");
+        assert!(out.contains(expected_login));
+        assert!(out.contains("wrote"));
+        // Guard the banner icon
+        assert!(out.contains("\u{1f4ac}"));
+    }
+
+    #[test]
+    fn write_comment_body_collapses_details() {
+        let comment = ReviewComment {
+            body: "<details><summary>sum</summary>hidden</details>".into(),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        write_comment_body(&mut buf, &MadSkin::default(), &comment).expect("write comment");
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("▶ sum"));
         assert!(!out.contains("hidden"));

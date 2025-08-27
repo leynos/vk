@@ -2,6 +2,8 @@
 //!
 //! Isolates clap derivations so lint expectations remain scoped, keeping
 //! `main.rs` focused on runtime logic.
+#![allow(non_snake_case, reason = "clap generates non-snake-case modules")]
+#![allow(unused_imports, reason = "clap derives import the struct internally")]
 
 use clap::Parser;
 use ortho_config::OrthoConfig;

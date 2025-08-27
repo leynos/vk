@@ -507,16 +507,11 @@ impl GraphQLClient {
                 .await?;
             let (mut page, info) = map(data)?;
             items.append(&mut page);
-            if !info.has_next_page {
+            if let Some(next) = info.next_cursor()? {
+                cursor = Some(next.into());
+            } else {
                 break;
             }
-            cursor = Some(
-                info.end_cursor
-                    .ok_or_else(|| {
-                        VkError::BadResponse("hasNextPage=true but endCursor missing".boxed())
-                    })?
-                    .into(),
-            );
         }
         Ok(items)
     }
@@ -568,12 +563,11 @@ where
     loop {
         let (mut page, info) = fetch(cursor.clone()).await?;
         items.append(&mut page);
-        if !info.has_next_page {
+        if let Some(next) = info.next_cursor()? {
+            cursor = Some(next.into());
+        } else {
             break;
         }
-        cursor = Some(info.end_cursor.ok_or_else(|| {
-            VkError::BadResponse("hasNextPage=true but endCursor missing".boxed())
-        })?);
     }
     Ok(items)
 }

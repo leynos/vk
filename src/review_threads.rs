@@ -83,6 +83,47 @@ pub struct PageInfo {
     pub end_cursor: Option<String>,
 }
 
+impl PageInfo {
+    /// Return the cursor for the next page when available.
+    /// Returns `Ok(None)` when there are no more pages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VkError::BadResponse`] when `has_next_page` is `true` but
+    /// `end_cursor` is absent.
+    ///
+    /// # Examples
+    /// ```
+    /// use vk::PageInfo;
+    /// let info = PageInfo { has_next_page: true, end_cursor: Some("c1".into()) };
+    /// assert_eq!(info.next_cursor().expect("cursor"), Some("c1"));
+    /// ```
+    /// ```
+    /// use vk::PageInfo;
+    /// let info = PageInfo { has_next_page: true, end_cursor: None };
+    /// assert!(info.next_cursor().is_err());
+    /// ```
+    /// ```
+    /// use vk::PageInfo;
+    /// let info = PageInfo { has_next_page: false, end_cursor: None };
+    /// assert_eq!(info.next_cursor().expect("cursor"), None);
+    /// ```
+    #[inline]
+    #[must_use = "inspect the returned cursor to advance pagination"]
+    pub fn next_cursor(&self) -> Result<Option<&str>, VkError> {
+        match (self.has_next_page, self.end_cursor.as_deref()) {
+            (true, Some(cursor)) => Ok(Some(cursor)),
+            (true, None) => Err(VkError::BadResponse(
+                format!(
+                    "PageInfo invariant violated: hasNextPage=true but endCursor missing | pageInfo: {self:?}"
+                )
+                .boxed(),
+            )),
+            (false, _) => Ok(None),
+        }
+    }
+}
+
 /// Minimal user representation for authorship information.
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct User {
@@ -91,19 +132,34 @@ pub struct User {
 
 /// Fetch all unresolved review threads for a pull request.
 ///
+/// Note:
+/// - GitHub GraphQL `Int` is a 32-bit signed integer (range −2^31..=2^31−1).
+///   This function accepts a non-negative `number`; values above `i32::MAX`
+///   are rejected with [`VkError::InvalidNumber`].
+/// - The token must have sufficient scopes (for example, `repo` for private
+///   repositories) or the API may return partial data that fails to
+///   deserialise.
+///
 /// # Errors
 ///
-/// Returns an error if any API request fails or the response is malformed.
+/// Returns [`VkError::InvalidNumber`] if `number` exceeds `i32::MAX`, or a
+/// general [`VkError`] if any API request fails or the response is malformed.
 pub async fn fetch_review_threads(
     client: &GraphQLClient,
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
+    debug_assert!(
+        i32::try_from(number).is_ok(),
+        "pull-request number {number} exceeds GraphQL Int (i32) range",
+    );
+    let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
+
     // GitHub's API lacks filtering for unresolved threads, so filter client-side.
     let mut vars = Map::new();
     vars.insert("owner".into(), json!(repo.owner.clone()));
     vars.insert("name".into(), json!(repo.name.clone()));
-    vars.insert("number".into(), json!(number));
+    vars.insert("number".into(), json!(number_i32));
     let mut threads = client
         .paginate_all(THREADS_QUERY, vars, None, |data: ThreadData| {
             let conn = data.repository.pull_request.review_threads;
@@ -115,13 +171,12 @@ pub async fn fetch_review_threads(
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
         let mut comments = initial.nodes;
-        if initial.page_info.has_next_page
-            && let Some(cursor) = initial.page_info.end_cursor
-        {
+        // Propagate invalid pagination info as an error.
+        if let Some(cursor) = initial.page_info.next_cursor()? {
             let thread_id = thread.id.clone();
             let mut vars = Map::new();
             vars.insert("id".into(), json!(&thread_id));
-            let mut more = client
+            let more = client
                 .paginate_all(
                     COMMENT_QUERY,
                     vars,
@@ -142,7 +197,7 @@ pub async fn fetch_review_threads(
                     },
                 )
                 .await?;
-            comments.append(&mut more);
+            comments.extend(more);
         }
         thread.comments = CommentConnection {
             nodes: comments,
