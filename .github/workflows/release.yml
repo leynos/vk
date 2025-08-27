@@ -67,9 +67,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ${{ env.REPO_NAME }}
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: ${{ steps.download.outputs.download-path }}/${{ env.REPO_NAME }}
+      #- uses: softprops/action-gh-release@v2
+      #  with:
+      #    tag_name: ${{ github.ref_name }}
+      #    generate_release_notes: true
+      #    fail_on_unmatched_files: true
+      #    files: ${{ steps.download.outputs.download-path }}/${{ env.REPO_NAME }}
+      - name: Upload release
+        run: |
+          gh release upload "${{ github.ref_name }}" ${{ steps.download.outputs.download-path }}/${{ env.REPO_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
