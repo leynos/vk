@@ -73,8 +73,8 @@ async fn pagination_client() -> TestClient {
     start_server(vec![thread_body, comment_body])
 }
 
-#[fixture]
-async fn empty_path_client() -> TestClient {
+#[allow(clippy::unused_async, reason = "rstest requires async fixtures")]
+async fn create_path_test_client(path: serde_json::Value) -> TestClient {
     let body = serde_json::json!({
         "data": {"repository": {"pullRequest": {"reviewThreads": {
             "nodes": [{
@@ -85,7 +85,7 @@ async fn empty_path_client() -> TestClient {
                     "diffHunk": "",
                     "originalPosition": null,
                     "position": null,
-                    "path": "",
+                    "path": path,
                     "url": "",
                     "author": null
                 }], "pageInfo": {"hasNextPage": false, "endCursor": null}}
@@ -95,54 +95,21 @@ async fn empty_path_client() -> TestClient {
     })
     .to_string();
     start_server(vec![body])
+}
+
+#[fixture]
+async fn empty_path_client() -> TestClient {
+    create_path_test_client(serde_json::Value::String(String::new())).await
 }
 
 #[fixture]
 async fn whitespace_path_client() -> TestClient {
-    let body = serde_json::json!({
-        "data": {"repository": {"pullRequest": {"reviewThreads": {
-            "nodes": [{
-                "id": "t",
-                "isResolved": false,
-                "comments": {"nodes": [{
-                    "body": "c",
-                    "diffHunk": "",
-                    "originalPosition": null,
-                    "position": null,
-                    "path": " ",
-                    "url": "",
-                    "author": null
-                }], "pageInfo": {"hasNextPage": false, "endCursor": null}}
-            }],
-            "pageInfo": {"hasNextPage": false, "endCursor": null}
-        }}}}
-    })
-    .to_string();
-    start_server(vec![body])
+    create_path_test_client(serde_json::Value::String(String::from(" "))).await
 }
 
 #[fixture]
 async fn null_path_client() -> TestClient {
-    let body = serde_json::json!({
-        "data": {"repository": {"pullRequest": {"reviewThreads": {
-            "nodes": [{
-                "id": "t",
-                "isResolved": false,
-                "comments": {"nodes": [{
-                    "body": "c",
-                    "diffHunk": "",
-                    "originalPosition": null,
-                    "position": null,
-                    "path": null,
-                    "url": "",
-                    "author": null
-                }], "pageInfo": {"hasNextPage": false, "endCursor": null}}
-            }],
-            "pageInfo": {"hasNextPage": false, "endCursor": null}
-        }}}}
-    })
-    .to_string();
-    start_server(vec![body])
+    create_path_test_client(serde_json::Value::Null).await
 }
 
 #[rstest]

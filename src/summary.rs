@@ -195,15 +195,6 @@ pub fn print_end_banner() -> std::io::Result<()> {
 mod tests {
     use super::*;
     use crate::review_threads::{CommentConnection, ReviewComment, ReviewThread};
-
-    #[fixture]
-    fn review_comment(#[default("test.rs")] path: &str) -> ReviewComment {
-        ReviewComment {
-            path: path.into(),
-            ..Default::default()
-        }
-    }
-
     use rstest::*;
     use serial_test::serial;
     use std::io::{self, Write};
@@ -219,6 +210,24 @@ mod tests {
         }
     }
 
+    fn assert_banner_propagates_io_error<F>(banner_fn: F)
+    where
+        F: FnOnce(&mut ErrorWriter) -> io::Result<()>,
+    {
+        let mut writer = ErrorWriter;
+        let err = banner_fn(&mut writer).expect_err("expect error");
+        assert_eq!(err.to_string(), "Simulated stdout write error");
+    }
+
+    #[fixture]
+    fn review_comment(#[default("test.rs")] path: &str) -> ReviewComment {
+        ReviewComment {
+            path: path.into(),
+            ..Default::default()
+        }
+    }
+
+    
     #[rstest]
     #[case(vec![], vec![])]
     #[case(
@@ -300,6 +309,7 @@ mod tests {
         assert!(buf.is_empty());
     }
 
+    
     #[rstest]
     #[case(|w: &mut ErrorWriter| write_start_banner(w))]
     #[case(|w: &mut ErrorWriter| write_comments_banner(w))]
@@ -310,7 +320,7 @@ mod tests {
         let mut writer = ErrorWriter;
         let err = write_fn(&mut writer).expect_err("expect error");
         assert_eq!(err.to_string(), "Simulated stdout write error");
-    }
+    
 
     #[test]
     fn write_start_banner_outputs_exact_text() {
