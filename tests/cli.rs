@@ -10,11 +10,10 @@ use hyper::{Request, Response, StatusCode, body::Incoming};
 use insta::assert_snapshot;
 use rstest::rstest;
 use serde_json::json;
-use std::process::Command;
 use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
 
 mod utils;
-use utils::start_mitm;
+use utils::{start_mitm, vk_cmd};
 
 /// Build a closure returning an empty `reviewThreads` payload.
 fn create_empty_review_handler()
@@ -64,15 +63,11 @@ async fn pr_empty_state(#[case] extra_args: Vec<&'static str>, #[case] expected_
     let output = expected_output;
 
     tokio::task::spawn_blocking(move || {
-        let mut cmd = Command::cargo_bin("vk").expect("binary");
-        cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
-            .env("GITHUB_TOKEN", "dummy")
-            .args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
-
+        let mut cmd = vk_cmd(addr);
+        cmd.args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
         for arg in extra_args {
             cmd.arg(arg);
         }
-
         cmd.assert().success().stdout(output);
     })
     .await
@@ -124,14 +119,10 @@ async fn pr_outputs_banner_when_threads_present() {
     });
 
     tokio::task::spawn_blocking(move || {
-        let mut cmd = Command::cargo_bin("vk").expect("binary");
-        cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
-            .env("GITHUB_TOKEN", "dummy")
-            .args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
-
+        let mut cmd = vk_cmd(addr);
+        cmd.args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
         let output = cmd.assert().success().get_output().stdout.clone();
         let output_str = String::from_utf8_lossy(&output);
-
         validate_banner_content(&output_str);
         validate_banner_ordering(&output_str);
     })
@@ -191,11 +182,12 @@ fn validate_banner_ordering(output: &str) {
 #[tokio::test]
 async fn pr_summarises_multiple_files() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
-    let threads_body = include_str!("fixtures/review_threads_multiple_files.json");
-    let reviews_body = include_str!("fixtures/reviews_empty.json");
-    let mut responses = vec![threads_body.to_string(), reviews_body.to_string()].into_iter();
+    let threads_body = include_str!("fixtures/review_threads_multiple_files.json").to_string();
+    let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
+    let last = reviews_body.clone();
+    let mut responses = vec![threads_body.clone(), reviews_body].into_iter();
     *handler.lock().expect("lock handler") = Box::new(move |_req| {
-        let body = responses.next().expect("response");
+        let body = responses.next().unwrap_or_else(|| last.clone());
         Response::builder()
             .status(StatusCode::OK)
             .header("Content-Type", "application/json")
@@ -204,12 +196,8 @@ async fn pr_summarises_multiple_files() {
     });
 
     let stdout = tokio::task::spawn_blocking(move || {
-        let mut cmd = Command::cargo_bin("vk").expect("binary");
-        cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
-            .env("GITHUB_TOKEN", "dummy")
-            .env("NO_COLOR", "1")
-            .env("CLICOLOR_FORCE", "0")
-            .args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
+        let mut cmd = vk_cmd(addr);
+        cmd.args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
         let output = cmd.output().expect("run command");
         assert!(
             output.status.success(),

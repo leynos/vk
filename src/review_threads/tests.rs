@@ -129,16 +129,21 @@ async fn run_query_missing_nodes_reports_path(
 async fn comment_path_validation_error(
     repo: RepoInfo,
     #[case] path_value: &str,
-    #[future] #[with(serde_json::Value::String(path_value.to_string()))] path_variant_client: TestClient,
+    #[future]
+    #[with(serde_json::Value::String(path_value.to_string()))]
+    path_variant_client: TestClient,
 ) {
     let TestClient { client, join, .. } = path_variant_client.await;
     let err = fetch_review_threads(&client, &repo, 1)
         .await
         .expect_err("expected error");
-    assert!(
-        matches!(err, VkError::EmptyCommentPath { .. }),
-        "expected EmptyCommentPath for {path_value:?}",
-    );
+    match err {
+        VkError::EmptyCommentPath { thread_id, index } => {
+            assert_eq!(thread_id.as_ref(), "t");
+            assert_eq!(index, 0, "unexpected index for {path_value:?}");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
     join.abort();
     let _ = join.await;
 }
@@ -147,7 +152,9 @@ async fn comment_path_validation_error(
 #[tokio::test]
 async fn null_comment_path_is_error(
     repo: RepoInfo,
-    #[future] #[with(serde_json::Value::Null)] path_variant_client: TestClient,
+    #[future]
+    #[with(serde_json::Value::Null)]
+    path_variant_client: TestClient,
 ) {
     let TestClient { client, join, .. } = path_variant_client.await;
     let err = fetch_review_threads(&client, &repo, 1)

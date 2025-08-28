@@ -3,6 +3,7 @@
 //! This module provides helper functions for end-to-end testing that require
 //! intercepting HTTP requests with customisable response handlers.
 
+use assert_cmd::prelude::*;
 use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{Request, Response, body::Incoming, service::service_fn};
@@ -10,6 +11,7 @@ use hyper_util::{rt::TokioExecutor, server::conn::auto};
 use std::io::ErrorKind;
 use std::{
     net::SocketAddr,
+    process::Command,
     sync::{Arc, Mutex},
 };
 use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
@@ -93,4 +95,23 @@ pub async fn start_mitm() -> Result<(SocketAddr, Handler, ShutdownHandle), std::
     });
 
     Ok((addr, handler, ShutdownHandle { join, stop: tx }))
+}
+
+/// Create a `vk` command configured for testing.
+///
+/// The command points at the MITM server and disables colour output to make
+/// assertions deterministic.
+#[allow(
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate,
+    reason = "helper for integration tests"
+)]
+#[allow(dead_code, reason = "invoked by other test modules")]
+pub fn vk_cmd(addr: SocketAddr) -> Command {
+    let mut cmd = Command::cargo_bin("vk").expect("binary");
+    cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
+        .env("GITHUB_TOKEN", "dummy")
+        .env("NO_COLOR", "1")
+        .env("CLICOLOR_FORCE", "0");
+    cmd
 }
