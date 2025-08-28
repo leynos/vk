@@ -13,6 +13,8 @@ use crate::review_threads::ReviewThread;
 pub const START_BANNER: &str = "========== code review ==========";
 /// Banner printed at the end of a code review.
 pub const END_BANNER: &str = "========== end of code review ==========";
+/// Banner printed before individual review comments.
+pub const COMMENTS_BANNER: &str = "======== review comments ========";
 
 /// Produce a count of comments per file path.
 ///
@@ -126,6 +128,39 @@ pub fn write_start_banner<W: Write>(out: W) -> std::io::Result<()> {
 /// ```
 pub fn print_start_banner() -> std::io::Result<()> {
     write_start_banner(std::io::stdout().lock())
+}
+
+/// Write a banner marking the start of review comments to any writer.
+///
+/// # Errors
+///
+/// Returns an error if writing to the provided writer fails.
+///
+/// # Examples
+///
+/// ```
+/// use vk::summary::write_comments_banner;
+/// let mut out = Vec::new();
+/// write_comments_banner(&mut out).expect("write comments banner");
+/// ```
+pub fn write_comments_banner<W: Write>(out: W) -> std::io::Result<()> {
+    write_banner(out, COMMENTS_BANNER)
+}
+
+/// Print a banner marking the start of review comments.
+///
+/// # Errors
+///
+/// Returns an error if writing to stdout fails.
+///
+/// # Examples
+///
+/// ```
+/// use vk::summary::print_comments_banner;
+/// print_comments_banner().expect("print comments banner");
+/// ```
+pub fn print_comments_banner() -> std::io::Result<()> {
+    write_comments_banner(std::io::stdout().lock())
 }
 
 /// Write a closing banner once all review threads have been displayed to any
@@ -256,6 +291,16 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).expect("utf8"),
             format!("{START_BANNER}\n"),
+        );
+    }
+
+    #[test]
+    fn write_comments_banner_outputs_exact_text() {
+        let mut buf = Vec::new();
+        write_comments_banner(&mut buf).expect("write comments banner");
+        assert_eq!(
+            String::from_utf8(buf).expect("utf8"),
+            format!("{COMMENTS_BANNER}\n"),
         );
     }
 

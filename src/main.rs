@@ -8,10 +8,12 @@
 //! `ortho_config`. When a thread has multiple comments on the same diff, the diff
 //! is shown only once. Output is framed by a `code review` banner at the start
 //! and an `end of code review` banner at the end so calling processes can
-//! reliably detect boundaries. Banner helpers [`print_start_banner`] and
-//! [`print_end_banner`] frame output while summary utilities
-//! [`print_summary`], [`summarize_files`], and [`write_summary`] collate
-//! comments so consumers can reuse the framing logic.
+//! reliably detect boundaries. A `review comments` banner separates reviewer
+//! summaries from the comment threads. Banner helpers [`print_start_banner`],
+//! [`print_comments_banner`] and [`print_end_banner`] frame output while
+//! summary utilities [`print_summary`], [`summarize_files`], and
+//! [`write_summary`] collate comments so consumers can reuse the framing
+//! logic.
 
 pub mod api;
 mod boxed;
@@ -35,7 +37,9 @@ pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
     filter_threads_by_files,
 };
-use summary::{print_end_banner, print_start_banner, print_summary, summarize_files};
+use summary::{
+    print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
+};
 
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use crate::printer::{print_reviews, write_thread};
@@ -245,6 +249,10 @@ fn generate_pr_output(
             return Ok(());
         }
         error!("error printing review: {e}");
+    }
+
+    if handle_banner(print_comments_banner, "comments") {
+        return Ok(());
     }
 
     for t in threads {

@@ -22,7 +22,8 @@ even when multiple comments reference the same code.
 - **Error visibility**: Failures encountered while printing a thread are logged
   to stderr instead of being silently discarded.
 - **Banners**: Output opens with a `code review` banner and ends with an
-  `end of code review` banner, framing the printed threads.
+  `end of code review` banner. A `review comments` banner separates reviewer
+  summaries from the printed threads.
 
 ## Architecture
 
@@ -35,10 +36,10 @@ The code centres on three printing helpers:
 
 `run_pr` fetches the latest review from each reviewer and all unresolved
 threads. After printing a `code review` banner and a summary, the reviews are
-printed before individual threads. Broken pipe errors terminate output early;
-other errors from `print_thread` and banner printing are surfaced via logging.
-Once all threads have been printed, a final banner reading `end of code review`
-confirms completion.
+printed, followed by a `review comments` banner and the individual threads.
+Broken pipe errors terminate output early; other errors from `print_thread` and
+banner printing are surfaced via logging. Once all threads have been printed, a
+final banner reading `end of code review` confirms completion.
 
 ### CLI arguments
 

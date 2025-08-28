@@ -127,6 +127,9 @@ async fn pr_outputs_banner_when_threads_present() {
             .args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
         cmd.assert().success().stdout(
             predicate::str::starts_with("========== code review ==========\n")
+                .and(predicate::str::contains(
+                    "======== review comments ========",
+                ))
                 .and(predicate::str::contains("Looks good")),
         );
     })
