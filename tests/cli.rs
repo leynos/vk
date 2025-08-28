@@ -43,21 +43,20 @@ fn create_empty_review_handler()
 #[rstest]
 #[case(
     Vec::new(),
-    "========== code review ==========\nNo unresolved comments.\n========== end of code review ==========\n"
+    format!("{START_BANNER}\nNo unresolved comments.\n{END_BANNER}\n"),
 )]
 #[case(
     vec!["no_such_file.rs"],
-    "========== code review ==========\nNo unresolved comments for the specified files.\n========== end of code review ==========\n",
+    format!(
+        "{START_BANNER}\nNo unresolved comments for the specified files.\n{END_BANNER}\n"
+    ),
 )]
 #[tokio::test]
-async fn pr_empty_state(
-    #[case] extra_args: Vec<&'static str>,
-    #[case] expected_output: &'static str,
-) {
+async fn pr_empty_state(#[case] extra_args: Vec<&'static str>, #[case] expected_output: String) {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     *handler.lock().expect("lock handler") = Box::new(create_empty_review_handler());
 
-    let output = expected_output.to_string();
+    let output = expected_output;
 
     tokio::task::spawn_blocking(move || {
         let mut cmd = Command::cargo_bin("vk").expect("binary");
