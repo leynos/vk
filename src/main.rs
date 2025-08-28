@@ -20,7 +20,6 @@ pub mod api;
 mod boxed;
 mod cli_args;
 // configuration helpers have been folded into `ortho_config`
-mod banners;
 mod diff;
 mod graphql_queries;
 mod html;
@@ -244,14 +243,16 @@ fn generate_pr_output(
 
     let skin = MadSkin::default();
     let latest = latest_reviews(reviews);
-    let stdout = std::io::stdout();
-    let mut handle = stdout.lock();
-    if let Err(e) = print_reviews(&mut handle, &skin, &latest) {
-        if caused_by_broken_pipe(&e) {
-            return Ok(());
+    {
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
+        if let Err(e) = print_reviews(&mut handle, &skin, &latest) {
+            if caused_by_broken_pipe(&e) {
+                return Ok(());
+            }
+            error!("error printing review: {e}");
         }
-        error!("error printing review: {e}");
-    }
+    } // drop handle before locking stdout again
 
     // Stop if the comments banner cannot be written, usually indicating stdout
     // has been closed, as printing threads would also fail.

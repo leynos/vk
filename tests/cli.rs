@@ -147,6 +147,11 @@ fn validate_banner_content(output: &str) {
         output.contains(COMMENTS_BANNER),
         "Output should contain review comments banner",
     );
+    let occurrences = output.match_indices(COMMENTS_BANNER).count();
+    assert_eq!(
+        occurrences, 1,
+        "Review comments banner should appear exactly once",
+    );
     assert!(
         output.contains("Looks good"),
         "Output should contain 'Looks good'",

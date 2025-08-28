@@ -7,10 +7,8 @@
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Write};
 
-use crate::{
-    banners::{COMMENTS_BANNER, END_BANNER, START_BANNER},
-    review_threads::ReviewThread,
-};
+use crate::review_threads::ReviewThread;
+use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
 
 /// Produce a count of comments per file path.
 ///
@@ -156,8 +154,7 @@ pub fn write_comments_banner<W: Write>(out: &mut W) -> std::io::Result<()> {
 /// print_comments_banner().expect("print comments banner");
 /// ```
 pub fn print_comments_banner() -> std::io::Result<()> {
-    let mut out = std::io::stdout().lock();
-    write_comments_banner(&mut out)
+    write_comments_banner(&mut std::io::stdout().lock())
 }
 
 /// Write a closing banner once all review threads have been displayed to any
