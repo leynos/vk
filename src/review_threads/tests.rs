@@ -73,6 +73,33 @@ async fn pagination_client() -> TestClient {
     start_server(vec![thread_body, comment_body])
 }
 
+#[allow(clippy::unused_async, reason = "rstest requires async fixtures")]
+#[fixture]
+async fn path_variant_client(
+    #[default(serde_json::Value::Null)] path_value: serde_json::Value,
+) -> TestClient {
+    let body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [{
+                "id": "t",
+                "isResolved": false,
+                "comments": {"nodes": [{
+                    "body": "c",
+                    "diffHunk": "",
+                    "originalPosition": null,
+                    "position": null,
+                    "path": path_value,
+                    "url": "",
+                    "author": null
+                }], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+            }],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    start_server(vec![body])
+}
+
 #[rstest]
 #[tokio::test]
 async fn run_query_missing_nodes_reports_path(
@@ -91,6 +118,49 @@ async fn run_query_missing_nodes_reports_path(
         err_msg.contains("snippet:"),
         "Error should contain JSON snippet",
     );
+    join.abort();
+    let _ = join.await;
+}
+
+#[rstest]
+#[case::empty("")]
+#[case::whitespace(" ")]
+#[tokio::test]
+async fn comment_path_validation_error(
+    repo: RepoInfo,
+    #[case] path_value: &str,
+    #[future]
+    #[with(serde_json::Value::String(path_value.to_string()))]
+    path_variant_client: TestClient,
+) {
+    let TestClient { client, join, .. } = path_variant_client.await;
+    let err = fetch_review_threads(&client, &repo, 1)
+        .await
+        .expect_err("expected error");
+    match err {
+        VkError::EmptyCommentPath { thread_id, index } => {
+            assert_eq!(thread_id.as_ref(), "t");
+            assert_eq!(index, 0, "unexpected index for {path_value:?}");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+    join.abort();
+    let _ = join.await;
+}
+
+#[rstest]
+#[tokio::test]
+async fn null_comment_path_is_error(
+    repo: RepoInfo,
+    #[future]
+    #[with(serde_json::Value::Null)]
+    path_variant_client: TestClient,
+) {
+    let TestClient { client, join, .. } = path_variant_client.await;
+    let err = fetch_review_threads(&client, &repo, 1)
+        .await
+        .expect_err("expected error");
+    assert!(matches!(err, VkError::BadResponseSerde(_)));
     join.abort();
     let _ = join.await;
 }

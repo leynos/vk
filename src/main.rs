@@ -80,13 +80,14 @@ struct Cli {
     global: GlobalArgs,
 }
 
-#[derive(Error, Debug)]
 /// Error type for the `vk` binary.
 ///
 /// String payloads and external errors are boxed to keep the enum small. A
 /// `Cow<'static, str>` would avoid allocations for static strings but would
 /// enlarge the type and still allocate for dynamic values, so boxing is
 /// preferred.
+#[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum VkError {
     #[error("unable to determine repository")]
     RepoNotFound,
@@ -107,6 +108,8 @@ pub enum VkError {
         expected: &'static [&'static str],
         found: Box<str>,
     },
+    #[error("missing comment path at index {index} in thread {thread_id}")]
+    EmptyCommentPath { thread_id: Box<str>, index: usize },
     #[error("bad response: {0}")]
     BadResponse(Box<str>),
     #[error("malformed response: {0}")]

@@ -1,0 +1,58 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "t1",
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "Needs changes",
+                    "diffHunk": "@@ -1 +1 @@\n-old\n+new\n",
+                    "originalPosition": null,
+                    "position": null,
+                    "path": "src/lib.rs",
+                    "url": "http://example.com/1",
+                    "author": {"login": "alice"}
+                  },
+                  {
+                    "body": "Add docs",
+                    "diffHunk": "@@ -2 +2 @@\n-foo\n+bar\n",
+                    "originalPosition": null,
+                    "position": null,
+                    "path": "src/lib.rs",
+                    "url": "http://example.com/2",
+                    "author": {"login": "bob"}
+                  }
+                ],
+                "pageInfo": {"hasNextPage": false, "endCursor": null}
+              }
+            },
+            {
+              "id": "t2",
+              "isResolved": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "Typo",
+                    "diffHunk": "@@ -3 +3 @@\n-a\n+b\n",
+                    "originalPosition": null,
+                    "position": null,
+                    "path": "README.md",
+                    "url": "http://example.com/3",
+                    "author": {"login": "carol"}
+                  }
+                ],
+                "pageInfo": {"hasNextPage": false, "endCursor": null}
+              }
+            }
+          ],
+          "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }
+      }
+    }
+  }
+}

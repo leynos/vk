@@ -195,15 +195,6 @@ pub fn print_end_banner() -> std::io::Result<()> {
 mod tests {
     use super::*;
     use crate::review_threads::{CommentConnection, ReviewComment, ReviewThread};
-
-    #[fixture]
-    fn review_comment(#[default("test.rs")] path: &str) -> ReviewComment {
-        ReviewComment {
-            path: path.into(),
-            ..Default::default()
-        }
-    }
-
     use rstest::*;
     use serial_test::serial;
     use std::io::{self, Write};
@@ -216,6 +207,23 @@ mod tests {
 
         fn flush(&mut self) -> io::Result<()> {
             Ok(())
+        }
+    }
+
+    fn assert_banner_propagates_io_error<F>(banner_fn: F)
+    where
+        F: FnOnce(&mut ErrorWriter) -> io::Result<()>,
+    {
+        let mut writer = ErrorWriter;
+        let err = banner_fn(&mut writer).expect_err("expect error");
+        assert_eq!(err.to_string(), "Simulated stdout write error");
+    }
+
+    #[fixture]
+    fn review_comment(#[default("test.rs")] path: &str) -> ReviewComment {
+        ReviewComment {
+            path: path.into(),
+            ..Default::default()
         }
     }
 
@@ -254,6 +262,35 @@ mod tests {
     }
 
     #[test]
+    fn summarize_files_returns_expected_pairs() {
+        let threads = vec![
+            ReviewThread {
+                comments: CommentConnection {
+                    nodes: vec![
+                        review_comment("src/lib.rs"),
+                        review_comment("src/lib.rs"),
+                        review_comment("README.md"),
+                    ],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ReviewThread {
+                comments: CommentConnection {
+                    nodes: vec![review_comment("README.md")],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ];
+        let summary = summarize_files(&threads);
+        assert_eq!(
+            summary,
+            vec![("README.md".into(), 2), ("src/lib.rs".into(), 2),]
+        );
+    }
+
+    #[test]
     fn write_summary_outputs_text() {
         let summary = vec![("foo.rs".into(), 1)];
         let mut buf = Vec::new();
@@ -278,9 +315,7 @@ mod tests {
     fn write_banner_propagates_io_errors(
         #[case] write_fn: fn(&mut ErrorWriter) -> std::io::Result<()>,
     ) {
-        let mut writer = ErrorWriter;
-        let err = write_fn(&mut writer).expect_err("expect error");
-        assert_eq!(err.to_string(), "Simulated stdout write error");
+        assert_banner_propagates_io_error(write_fn);
     }
 
     #[test]

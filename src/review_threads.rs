@@ -139,6 +139,20 @@ pub struct User {
 /// - The token must have sufficient scopes (for example, `repo` for private
 ///   repositories) or the API may return partial data that fails to
 ///   deserialise.
+/// - Pagination is fully exhausted so each returned thread's comments are
+///   complete.
+///
+/// ```no_run
+/// use vk::{api::GraphQLClient, ref_parser::RepoInfo};
+///
+/// # async fn run() -> Result<(), vk::VkError> {
+/// let client = GraphQLClient::new("token", None).expect("client");
+/// let repo = RepoInfo { owner: "o".into(), name: "r".into() };
+/// let threads = vk::review_threads::fetch_review_threads(&client, &repo, 1).await?;
+/// assert!(threads.iter().all(|t| !t.comments.nodes.is_empty()));
+/// # Ok(())
+/// # }
+/// ```
 ///
 /// # Errors
 ///
@@ -171,6 +185,14 @@ pub async fn fetch_review_threads(
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
         thread.comments = fetch_all_comments(client, &thread.id, initial).await?;
+        for (idx, comment) in thread.comments.nodes.iter().enumerate() {
+            if comment.path.trim().is_empty() {
+                return Err(VkError::EmptyCommentPath {
+                    thread_id: thread.id.clone().into_boxed_str(),
+                    index: idx,
+                });
+            }
+        }
     }
     Ok(threads)
 }

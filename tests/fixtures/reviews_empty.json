@@ -1,0 +1,12 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviews": {
+          "nodes": [],
+          "pageInfo": { "hasNextPage": false, "endCursor": null }
+        }
+      }
+    }
+  }
+}

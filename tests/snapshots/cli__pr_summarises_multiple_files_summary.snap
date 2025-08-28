@@ -1,0 +1,8 @@
+---
+source: tests/cli.rs
+assertion_line: 221
+expression: summary
+---
+Summary:
+src/lib.rs: 2 comments
+README.md: 1 comment
