@@ -97,6 +97,54 @@ async fn empty_path_client() -> TestClient {
     start_server(vec![body])
 }
 
+#[fixture]
+async fn whitespace_path_client() -> TestClient {
+    let body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [{
+                "id": "t",
+                "isResolved": false,
+                "comments": {"nodes": [{
+                    "body": "c",
+                    "diffHunk": "",
+                    "originalPosition": null,
+                    "position": null,
+                    "path": " ",
+                    "url": "",
+                    "author": null
+                }], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+            }],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    start_server(vec![body])
+}
+
+#[fixture]
+async fn null_path_client() -> TestClient {
+    let body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [{
+                "id": "t",
+                "isResolved": false,
+                "comments": {"nodes": [{
+                    "body": "c",
+                    "diffHunk": "",
+                    "originalPosition": null,
+                    "position": null,
+                    "path": null,
+                    "url": "",
+                    "author": null
+                }], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+            }],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    start_server(vec![body])
+}
+
 #[rstest]
 #[tokio::test]
 async fn run_query_missing_nodes_reports_path(
@@ -126,7 +174,34 @@ async fn empty_comment_path_is_error(repo: RepoInfo, #[future] empty_path_client
     let err = fetch_review_threads(&client, &repo, 1)
         .await
         .expect_err("expected error");
-    assert!(matches!(err, VkError::BadResponse(_)));
+    assert!(matches!(err, VkError::EmptyCommentPath { .. }));
+    join.abort();
+    let _ = join.await;
+}
+
+#[rstest]
+#[tokio::test]
+async fn whitespace_comment_path_is_error(
+    repo: RepoInfo,
+    #[future] whitespace_path_client: TestClient,
+) {
+    let TestClient { client, join, .. } = whitespace_path_client.await;
+    let err = fetch_review_threads(&client, &repo, 1)
+        .await
+        .expect_err("expected error");
+    assert!(matches!(err, VkError::EmptyCommentPath { .. }));
+    join.abort();
+    let _ = join.await;
+}
+
+#[rstest]
+#[tokio::test]
+async fn null_comment_path_is_error(repo: RepoInfo, #[future] null_path_client: TestClient) {
+    let TestClient { client, join, .. } = null_path_client.await;
+    let err = fetch_review_threads(&client, &repo, 1)
+        .await
+        .expect_err("expected error");
+    assert!(matches!(err, VkError::BadResponseSerde(_)));
     join.abort();
     let _ = join.await;
 }
