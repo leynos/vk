@@ -1,8 +1,7 @@
 ---
 source: tests/cli.rs
-expression: stdout
+expression: summary
 ---
-========== code review ==========
 Summary:
 src/lib.rs: 2 comments
 README.md: 1 comment

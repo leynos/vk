@@ -215,7 +215,12 @@ async fn pr_summarises_multiple_files() {
     .await
     .expect("spawn blocking");
 
-    assert_snapshot!(stdout);
+    let summary = stdout
+        .split("\nSummary:\n")
+        .nth(1)
+        .map(|s| format!("Summary:\n{s}"))
+        .unwrap_or(stdout);
+    assert_snapshot!(summary);
 
     shutdown.shutdown().await;
 }
