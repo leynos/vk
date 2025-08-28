@@ -21,9 +21,11 @@ even when multiple comments reference the same code.
   reducing clutter when multiple remarks target the same line.
 - **Error visibility**: Failures encountered while printing a thread are logged
   to stderr instead of being silently discarded.
-- **Banners**: Output opens with a `code review` banner and ends with an
-  `end of code review` banner. A `review comments` banner separates reviewer
-  summaries from the printed threads.
+- **Banners**: Output opens with a `code review` banner
+  (`========== code review ==========`) and ends with an `end of code review`
+  banner (`========== end of code review ==========`). A `review comments`
+  banner (`========== review comments ==========`) separates reviewer summaries
+  from the printed threads.
 
 ## Architecture
 
