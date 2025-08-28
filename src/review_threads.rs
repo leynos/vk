@@ -171,6 +171,13 @@ pub async fn fetch_review_threads(
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
         thread.comments = fetch_all_comments(client, &thread.id, initial).await?;
+        for (idx, comment) in thread.comments.nodes.iter().enumerate() {
+            if comment.path.trim().is_empty() {
+                return Err(VkError::BadResponse(
+                    format!("empty path in comment {idx} of thread {}", thread.id).boxed(),
+                ));
+            }
+        }
     }
     Ok(threads)
 }

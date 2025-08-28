@@ -280,6 +280,8 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         return Ok(());
     };
 
+    // `fetch_review_threads` exhausts pagination so each thread's comments are
+    // fully populated before the summary is generated.
     let threads = filter_threads_by_files(
         fetch_review_threads(&client, &repo, number).await?,
         &args.files,

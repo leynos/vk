@@ -254,6 +254,35 @@ mod tests {
     }
 
     #[test]
+    fn summarize_files_returns_expected_pairs() {
+        let threads = vec![
+            ReviewThread {
+                comments: CommentConnection {
+                    nodes: vec![
+                        review_comment("src/lib.rs"),
+                        review_comment("src/lib.rs"),
+                        review_comment("README.md"),
+                    ],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ReviewThread {
+                comments: CommentConnection {
+                    nodes: vec![review_comment("README.md")],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ];
+        let summary = summarize_files(&threads);
+        assert_eq!(
+            summary,
+            vec![("README.md".into(), 2), ("src/lib.rs".into(), 2),]
+        );
+    }
+
+    #[test]
     fn write_summary_outputs_text() {
         let summary = vec![("foo.rs".into(), 1)];
         let mut buf = Vec::new();

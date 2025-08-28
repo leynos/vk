@@ -73,6 +73,30 @@ async fn pagination_client() -> TestClient {
     start_server(vec![thread_body, comment_body])
 }
 
+#[fixture]
+async fn empty_path_client() -> TestClient {
+    let body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [{
+                "id": "t",
+                "isResolved": false,
+                "comments": {"nodes": [{
+                    "body": "c",
+                    "diffHunk": "",
+                    "originalPosition": null,
+                    "position": null,
+                    "path": "",
+                    "url": "",
+                    "author": null
+                }], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+            }],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    start_server(vec![body])
+}
+
 #[rstest]
 #[tokio::test]
 async fn run_query_missing_nodes_reports_path(
@@ -91,6 +115,18 @@ async fn run_query_missing_nodes_reports_path(
         err_msg.contains("snippet:"),
         "Error should contain JSON snippet",
     );
+    join.abort();
+    let _ = join.await;
+}
+
+#[rstest]
+#[tokio::test]
+async fn empty_comment_path_is_error(repo: RepoInfo, #[future] empty_path_client: TestClient) {
+    let TestClient { client, join, .. } = empty_path_client.await;
+    let err = fetch_review_threads(&client, &repo, 1)
+        .await
+        .expect_err("expected error");
+    assert!(matches!(err, VkError::BadResponse(_)));
     join.abort();
     let _ = join.await;
 }

@@ -26,6 +26,10 @@ fn create_empty_review_handler()
                         "reviewThreads": {
                             "nodes": [],
                             "pageInfo": { "hasNextPage": false, "endCursor": null }
+                        },
+                        "reviews": {
+                            "nodes": [],
+                            "pageInfo": { "hasNextPage": false, "endCursor": null }
                         }
                     }
                 }
