@@ -128,65 +128,86 @@ async fn run_query_retries_missing_data() {
     let _ = join.await;
 }
 
-#[tokio::test]
-async fn run_query_empty_response_reports_details() {
-    let TestClient { client, join } = start_server(Vec::new());
-    let err = client
-        .run_query::<_, Value>("query EmptyOp { }", serde_json::json!({}))
-        .await
-        .expect_err("error");
-    match err {
-        VkError::BadResponse(msg) => {
-            let s = msg.to_string();
-            assert!(s.contains("status 200"), "{s}");
-            assert!(s.contains("EmptyOp"), "{s}");
-            assert!(s.contains("{}"), "{s}");
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
-    join.abort();
-    let _ = join.await;
+#[derive(Debug)]
+struct TestCase {
+    responses: Vec<String>,
+    status: StatusCode,
+    op: &'static str,
+    expect: Expected,
 }
 
-#[tokio::test]
-async fn run_query_empty_response_non_200_status_reports_details() {
-    let TestClient { client, join } =
-        start_server_with_status(Vec::new(), StatusCode::INTERNAL_SERVER_ERROR);
-    let err = client
-        .run_query::<_, Value>("query FailOp { }", serde_json::json!({}))
-        .await
-        .expect_err("error");
-    match err {
-        VkError::BadResponse(msg) => {
-            let s = msg.to_string();
-            assert!(s.contains("status 500"), "{s}");
-            assert!(s.contains("FailOp"), "{s}");
-            assert!(s.contains("{}"), "{s}");
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
-    join.abort();
-    let _ = join.await;
+#[derive(Debug)]
+enum Expected {
+    BadResponse { fragments: [&'static str; 3] },
+    ApiErrors { fragment: &'static str },
 }
 
-#[tokio::test]
-async fn run_query_errors_no_data_reports_error() {
+#[rstest]
+#[case(TestCase {
+    responses: vec![],
+    status: StatusCode::OK,
+    op: "query EmptyOp { }",
+    expect: Expected::BadResponse {
+        fragments: ["status 200", "EmptyOp", "{}"],
+    },
+})]
+#[case(TestCase {
+    responses: vec![],
+    status: StatusCode::INTERNAL_SERVER_ERROR,
+    op: "query FailOp { }",
+    expect: Expected::BadResponse {
+        fragments: ["status 500", "FailOp", "{}"],
+    },
+})]
+#[case({
     let error_response = serde_json::json!({
         "errors": [
             { "message": "Something went wrong", "locations": [{ "line": 1, "column": 2 }] }
         ]
     })
     .to_string();
-    let TestClient { client, join } = start_server(vec![error_response]);
+    TestCase {
+        responses: vec![error_response],
+        status: StatusCode::OK,
+        op: "query ErrOp { }",
+        expect: Expected::ApiErrors {
+            fragment: "Something went wrong",
+        },
+    }
+})]
+#[tokio::test]
+async fn run_query_reports_details(#[case] case: TestCase) {
+    let TestCase {
+        responses,
+        status,
+        op,
+        expect,
+    } = case;
+    let TestClient { client, join } = if status == StatusCode::OK {
+        start_server(responses)
+    } else {
+        start_server_with_status(responses, status)
+    };
     let err = client
-        .run_query::<_, Value>("query ErrOp { }", serde_json::json!({}))
+        .run_query::<_, Value>(op, serde_json::json!({}))
         .await
         .expect_err("error");
-    match err {
-        VkError::ApiErrors(msg) => {
-            assert!(msg.contains("Something went wrong"), "{msg}");
-        }
-        other => panic!("unexpected error: {other:?}"),
+    match expect {
+        Expected::BadResponse { fragments } => match err {
+            VkError::BadResponse(msg) => {
+                let s = msg.to_string();
+                for frag in fragments {
+                    assert!(s.contains(frag), "{s}");
+                }
+            }
+            other => panic!("unexpected error: {other:?}"),
+        },
+        Expected::ApiErrors { fragment } => match err {
+            VkError::ApiErrors(msg) => {
+                assert!(msg.contains(fragment), "{msg}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        },
     }
     join.abort();
     let _ = join.await;
