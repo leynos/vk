@@ -2966,6 +2966,7 @@ dependencies = [
  "http-body-util",
  "hyper 1.7.0",
  "hyper-util",
+ "libc",
  "log",
  "markup5ever_rcdom",
  "ortho_config",

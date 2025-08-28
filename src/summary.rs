@@ -143,7 +143,7 @@ pub fn print_start_banner() -> std::io::Result<()> {
 /// let mut out = Vec::new();
 /// write_comments_banner(&mut out).expect("write comments banner");
 /// ```
-pub fn write_comments_banner<W: Write>(out: W) -> std::io::Result<()> {
+pub fn write_comments_banner<W: Write>(out: &mut W) -> std::io::Result<()> {
     write_banner(out, COMMENTS_BANNER)
 }
 
@@ -160,7 +160,8 @@ pub fn write_comments_banner<W: Write>(out: W) -> std::io::Result<()> {
 /// print_comments_banner().expect("print comments banner");
 /// ```
 pub fn print_comments_banner() -> std::io::Result<()> {
-    write_comments_banner(std::io::stdout().lock())
+    let mut out = std::io::stdout().lock();
+    write_comments_banner(&mut out)
 }
 
 /// Write a closing banner once all review threads have been displayed to any
@@ -211,6 +212,7 @@ mod tests {
     }
 
     use rstest::*;
+    use serial_test::serial;
 
     #[rstest]
     #[case(vec![], vec![])]
@@ -302,6 +304,55 @@ mod tests {
             String::from_utf8(buf).expect("utf8"),
             format!("{COMMENTS_BANNER}\n"),
         );
+    }
+
+    #[test]
+    fn write_comments_banner_propagates_io_errors() {
+        use std::io::{self, Write};
+
+        struct ErrorWriter;
+        impl Write for ErrorWriter {
+            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+                Err(io::Error::other("Simulated stdout write error"))
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut writer = ErrorWriter;
+        let err = write_comments_banner(&mut writer).expect_err("expect error");
+        assert_eq!(err.to_string(), "Simulated stdout write error");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn print_comments_banner_propagates_io_errors() {
+        use std::io;
+        use std::os::unix::io::AsRawFd;
+
+        // Redirect stdout to a closed pipe so writes fail with BrokenPipe.
+        unsafe {
+            let mut fds = [0; 2];
+            assert_eq!(libc::pipe(fds.as_mut_ptr()), 0, "pipe");
+            let read_end = fds[0];
+            let write_end = fds[1];
+            libc::close(read_end);
+
+            let stdout_fd = std::io::stdout().as_raw_fd();
+            let dup_fd = libc::dup(stdout_fd);
+
+            libc::dup2(write_end, stdout_fd);
+            libc::close(write_end);
+
+            let err = print_comments_banner().expect_err("expect error");
+            assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+
+            libc::dup2(dup_fd, stdout_fd);
+            libc::close(dup_fd);
+        }
     }
 
     #[test]

@@ -251,6 +251,8 @@ fn generate_pr_output(
         error!("error printing review: {e}");
     }
 
+    // Stop if the comments banner cannot be written, usually indicating stdout
+    // has been closed, as printing threads would also fail.
     if handle_banner(print_comments_banner, "comments") {
         return Ok(());
     }

@@ -11,8 +11,6 @@ use rstest::rstest;
 use serde_json::json;
 use std::process::Command;
 
-use predicates::prelude::*;
-
 mod utils;
 use utils::start_mitm;
 
@@ -125,12 +123,37 @@ async fn pr_outputs_banner_when_threads_present() {
         cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
             .env("GITHUB_TOKEN", "dummy")
             .args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
-        cmd.assert().success().stdout(
-            predicate::str::starts_with("========== code review ==========\n")
-                .and(predicate::str::contains(
-                    "======== review comments ========",
-                ))
-                .and(predicate::str::contains("Looks good")),
+
+        let output = cmd.assert().success().get_output().stdout.clone();
+        let output_str = String::from_utf8_lossy(&output);
+
+        assert!(
+            output_str.starts_with("========== code review ==========\n"),
+            "Output should start with code review banner"
+        );
+        assert!(
+            output_str.contains("======== review comments ========"),
+            "Output should contain review comments banner"
+        );
+        assert!(
+            output_str.contains("Looks good"),
+            "Output should contain 'Looks good'"
+        );
+
+        let code_idx = output_str
+            .find("========== code review ==========")
+            .expect("code review banner");
+        let review_idx = output_str
+            .find("======== review comments ========")
+            .expect("review comments banner");
+        let thread_idx = output_str.find("Looks good").expect("thread output");
+        assert!(
+            code_idx < review_idx,
+            "Review comments banner should appear after code review banner"
+        );
+        assert!(
+            review_idx < thread_idx,
+            "Thread output should appear after review comments banner"
         );
     })
     .await
