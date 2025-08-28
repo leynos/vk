@@ -127,37 +127,46 @@ async fn pr_outputs_banner_when_threads_present() {
         let output = cmd.assert().success().get_output().stdout.clone();
         let output_str = String::from_utf8_lossy(&output);
 
-        assert!(
-            output_str.starts_with("========== code review ==========\n"),
-            "Output should start with code review banner"
-        );
-        assert!(
-            output_str.contains("======== review comments ========"),
-            "Output should contain review comments banner"
-        );
-        assert!(
-            output_str.contains("Looks good"),
-            "Output should contain 'Looks good'"
-        );
-
-        let code_idx = output_str
-            .find("========== code review ==========")
-            .expect("code review banner");
-        let review_idx = output_str
-            .find("======== review comments ========")
-            .expect("review comments banner");
-        let thread_idx = output_str.find("Looks good").expect("thread output");
-        assert!(
-            code_idx < review_idx,
-            "Review comments banner should appear after code review banner"
-        );
-        assert!(
-            review_idx < thread_idx,
-            "Thread output should appear after review comments banner"
-        );
+        validate_banner_content(&output_str);
+        validate_banner_ordering(&output_str);
     })
     .await
     .expect("spawn blocking");
 
     shutdown.shutdown().await;
+}
+
+/// Confirm banners and comment text are present in the output.
+fn validate_banner_content(output: &str) {
+    assert!(
+        output.starts_with("========== code review ==========\n"),
+        "Output should start with code review banner"
+    );
+    assert!(
+        output.contains("======== review comments ========"),
+        "Output should contain review comments banner"
+    );
+    assert!(
+        output.contains("Looks good"),
+        "Output should contain 'Looks good'"
+    );
+}
+
+/// Ensure banners and thread output appear in the expected order.
+fn validate_banner_ordering(output: &str) {
+    let code_idx = output
+        .find("========== code review ==========")
+        .expect("code review banner");
+    let review_idx = output
+        .find("======== review comments ========")
+        .expect("review comments banner");
+    let thread_idx = output.find("Looks good").expect("thread output");
+    assert!(
+        code_idx < review_idx,
+        "Review comments banner should appear after code review banner"
+    );
+    assert!(
+        review_idx < thread_idx,
+        "Thread output should appear after review comments banner"
+    );
 }
