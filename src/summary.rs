@@ -213,6 +213,18 @@ mod tests {
 
     use rstest::*;
     use serial_test::serial;
+    use std::io::{self, Write};
+
+    struct ErrorWriter;
+    impl Write for ErrorWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("Simulated stdout write error"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[rstest]
     #[case(vec![], vec![])]
@@ -266,23 +278,15 @@ mod tests {
         assert!(buf.is_empty());
     }
 
-    #[test]
-    fn write_start_banner_propagates_io_errors() {
-        use std::io::{self, Write};
-
-        struct ErrorWriter;
-        impl Write for ErrorWriter {
-            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
-                Err(io::Error::other("Simulated stdout write error"))
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-
+    #[rstest]
+    #[case(|w: &mut ErrorWriter| write_start_banner(w))]
+    #[case(|w: &mut ErrorWriter| write_comments_banner(w))]
+    #[case(|w: &mut ErrorWriter| write_end_banner(w))]
+    fn write_banner_propagates_io_errors(
+        #[case] write_fn: fn(&mut ErrorWriter) -> std::io::Result<()>,
+    ) {
         let mut writer = ErrorWriter;
-        let err = write_start_banner(&mut writer).expect_err("expect error");
+        let err = write_fn(&mut writer).expect_err("expect error");
         assert_eq!(err.to_string(), "Simulated stdout write error");
     }
 
@@ -304,26 +308,6 @@ mod tests {
             String::from_utf8(buf).expect("utf8"),
             format!("{COMMENTS_BANNER}\n"),
         );
-    }
-
-    #[test]
-    fn write_comments_banner_propagates_io_errors() {
-        use std::io::{self, Write};
-
-        struct ErrorWriter;
-        impl Write for ErrorWriter {
-            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
-                Err(io::Error::other("Simulated stdout write error"))
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-
-        let mut writer = ErrorWriter;
-        let err = write_comments_banner(&mut writer).expect_err("expect error");
-        assert_eq!(err.to_string(), "Simulated stdout write error");
     }
 
     #[cfg(unix)]
@@ -353,26 +337,6 @@ mod tests {
             libc::dup2(dup_fd, stdout_fd);
             libc::close(dup_fd);
         }
-    }
-
-    #[test]
-    fn write_end_banner_propagates_io_errors() {
-        use std::io::{self, Write};
-
-        struct ErrorWriter;
-        impl Write for ErrorWriter {
-            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
-                Err(io::Error::other("Simulated stdout write error"))
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-
-        let mut writer = ErrorWriter;
-        let err = write_end_banner(&mut writer).expect_err("expect error");
-        assert_eq!(err.to_string(), "Simulated stdout write error");
     }
 
     #[test]
