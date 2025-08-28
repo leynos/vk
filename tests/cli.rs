@@ -211,11 +211,12 @@ async fn pr_summarises_multiple_files() {
     .expect("spawn blocking");
 
     let stdout = stdout.replace("\r\n", "\n");
-    let summary = stdout
-        .split("\nSummary:\n")
-        .nth(1)
-        .map(|s| format!("Summary:\n{s}"))
-        .unwrap_or(stdout);
+    let body = stdout
+        .split_once("Summary:\n")
+        .map_or(stdout.as_str(), |(_, rest)| {
+            rest.split("\n\n").next().unwrap_or(rest)
+        });
+    let summary = format!("Summary:\n{body}");
     assert_snapshot!("pr_summarises_multiple_files_summary", summary);
 
     shutdown.shutdown().await;

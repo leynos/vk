@@ -3005,6 +3005,7 @@ dependencies = [
  "hyper 1.7.0",
  "hyper-util",
  "insta",
+ "libc",
  "log",
  "markup5ever_rcdom",
  "ortho_config",

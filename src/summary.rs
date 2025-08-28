@@ -227,7 +227,6 @@ mod tests {
         }
     }
 
-    
     #[rstest]
     #[case(vec![], vec![])]
     #[case(
@@ -309,7 +308,6 @@ mod tests {
         assert!(buf.is_empty());
     }
 
-    
     #[rstest]
     #[case(|w: &mut ErrorWriter| write_start_banner(w))]
     #[case(|w: &mut ErrorWriter| write_comments_banner(w))]
@@ -317,10 +315,8 @@ mod tests {
     fn write_banner_propagates_io_errors(
         #[case] write_fn: fn(&mut ErrorWriter) -> std::io::Result<()>,
     ) {
-        let mut writer = ErrorWriter;
-        let err = write_fn(&mut writer).expect_err("expect error");
-        assert_eq!(err.to_string(), "Simulated stdout write error");
-    
+        assert_banner_propagates_io_error(write_fn);
+    }
 
     #[test]
     fn write_start_banner_outputs_exact_text() {

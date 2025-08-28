@@ -1,25 +1,8 @@
 ---
 source: tests/cli.rs
+assertion_line: 221
 expression: summary
 ---
 Summary:
 src/lib.rs: 2 comments
 README.md: 1 comment
-
-    1|-old
-    1|+new
-💬  [1malice[0m wrote:
-Needs changes
-
-http://example.com/1
-💬  [1mbob[0m wrote:
-Add docs
-
-http://example.com/2
-    3|-a
-    3|+b
-💬  [1mcarol[0m wrote:
-Typo
-
-http://example.com/3
-========== end of code review ==========
