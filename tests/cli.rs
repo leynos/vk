@@ -207,20 +207,28 @@ async fn pr_summarises_multiple_files() {
         let mut cmd = Command::cargo_bin("vk").expect("binary");
         cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
             .env("GITHUB_TOKEN", "dummy")
+            .env("NO_COLOR", "1")
+            .env("CLICOLOR_FORCE", "0")
             .args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
         let output = cmd.output().expect("run command");
-        assert!(output.status.success());
+        assert!(
+            output.status.success(),
+            "vk exited with {:?}. Stderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
         String::from_utf8(output.stdout).expect("utf8")
     })
     .await
     .expect("spawn blocking");
 
+    let stdout = stdout.replace("\r\n", "\n");
     let summary = stdout
         .split("\nSummary:\n")
         .nth(1)
         .map(|s| format!("Summary:\n{s}"))
         .unwrap_or(stdout);
-    assert_snapshot!(summary);
+    assert_snapshot!("pr_summarises_multiple_files_summary", summary);
 
     shutdown.shutdown().await;
 }

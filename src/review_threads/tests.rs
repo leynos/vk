@@ -74,7 +74,10 @@ async fn pagination_client() -> TestClient {
 }
 
 #[allow(clippy::unused_async, reason = "rstest requires async fixtures")]
-async fn create_path_test_client(path: serde_json::Value) -> TestClient {
+#[fixture]
+async fn path_variant_client(
+    #[default(serde_json::Value::Null)] path_value: serde_json::Value,
+) -> TestClient {
     let body = serde_json::json!({
         "data": {"repository": {"pullRequest": {"reviewThreads": {
             "nodes": [{
@@ -85,7 +88,7 @@ async fn create_path_test_client(path: serde_json::Value) -> TestClient {
                     "diffHunk": "",
                     "originalPosition": null,
                     "position": null,
-                    "path": path,
+                    "path": path_value,
                     "url": "",
                     "author": null
                 }], "pageInfo": {"hasNextPage": false, "endCursor": null}}
@@ -95,21 +98,6 @@ async fn create_path_test_client(path: serde_json::Value) -> TestClient {
     })
     .to_string();
     start_server(vec![body])
-}
-
-#[fixture]
-async fn empty_path_client() -> TestClient {
-    create_path_test_client(serde_json::Value::String(String::new())).await
-}
-
-#[fixture]
-async fn whitespace_path_client() -> TestClient {
-    create_path_test_client(serde_json::Value::String(String::from(" "))).await
-}
-
-#[fixture]
-async fn null_path_client() -> TestClient {
-    create_path_test_client(serde_json::Value::Null).await
 }
 
 #[rstest]
@@ -135,36 +123,33 @@ async fn run_query_missing_nodes_reports_path(
 }
 
 #[rstest]
+#[case::empty("")]
+#[case::whitespace(" ")]
 #[tokio::test]
-async fn empty_comment_path_is_error(repo: RepoInfo, #[future] empty_path_client: TestClient) {
-    let TestClient { client, join, .. } = empty_path_client.await;
-    let err = fetch_review_threads(&client, &repo, 1)
-        .await
-        .expect_err("expected error");
-    assert!(matches!(err, VkError::EmptyCommentPath { .. }));
-    join.abort();
-    let _ = join.await;
-}
-
-#[rstest]
-#[tokio::test]
-async fn whitespace_comment_path_is_error(
+async fn comment_path_validation_error(
     repo: RepoInfo,
-    #[future] whitespace_path_client: TestClient,
+    #[case] path_value: &str,
+    #[future] #[with(serde_json::Value::String(path_value.to_string()))] path_variant_client: TestClient,
 ) {
-    let TestClient { client, join, .. } = whitespace_path_client.await;
+    let TestClient { client, join, .. } = path_variant_client.await;
     let err = fetch_review_threads(&client, &repo, 1)
         .await
         .expect_err("expected error");
-    assert!(matches!(err, VkError::EmptyCommentPath { .. }));
+    assert!(
+        matches!(err, VkError::EmptyCommentPath { .. }),
+        "expected EmptyCommentPath for {path_value:?}",
+    );
     join.abort();
     let _ = join.await;
 }
 
 #[rstest]
 #[tokio::test]
-async fn null_comment_path_is_error(repo: RepoInfo, #[future] null_path_client: TestClient) {
-    let TestClient { client, join, .. } = null_path_client.await;
+async fn null_comment_path_is_error(
+    repo: RepoInfo,
+    #[future] #[with(serde_json::Value::Null)] path_variant_client: TestClient,
+) {
+    let TestClient { client, join, .. } = path_variant_client.await;
     let err = fetch_review_threads(&client, &repo, 1)
         .await
         .expect_err("expected error");
