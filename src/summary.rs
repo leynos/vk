@@ -8,11 +8,7 @@ use std::collections::BTreeMap;
 use std::io::{ErrorKind, Write};
 
 use crate::review_threads::ReviewThread;
-
-/// Banner printed at the start of a code review.
-pub const START_BANNER: &str = "========== code review ==========";
-/// Banner printed at the end of a code review.
-pub const END_BANNER: &str = "========== end of code review ==========";
+use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
 
 /// Produce a count of comments per file path.
 ///
@@ -128,6 +124,39 @@ pub fn print_start_banner() -> std::io::Result<()> {
     write_start_banner(std::io::stdout().lock())
 }
 
+/// Write a banner marking the start of review comments to any writer.
+///
+/// # Errors
+///
+/// Returns an error if writing to the provided writer fails.
+///
+/// # Examples
+///
+/// ```
+/// use vk::summary::write_comments_banner;
+/// let mut out = Vec::new();
+/// write_comments_banner(&mut out).expect("write comments banner");
+/// ```
+pub fn write_comments_banner<W: Write>(out: &mut W) -> std::io::Result<()> {
+    write_banner(out, COMMENTS_BANNER)
+}
+
+/// Print a banner marking the start of review comments.
+///
+/// # Errors
+///
+/// Returns an error if writing to stdout fails.
+///
+/// # Examples
+///
+/// ```
+/// use vk::summary::print_comments_banner;
+/// print_comments_banner().expect("print comments banner");
+/// ```
+pub fn print_comments_banner() -> std::io::Result<()> {
+    write_comments_banner(&mut std::io::stdout().lock())
+}
+
 /// Write a closing banner once all review threads have been displayed to any
 /// writer.
 ///
@@ -176,6 +205,19 @@ mod tests {
     }
 
     use rstest::*;
+    use serial_test::serial;
+    use std::io::{self, Write};
+
+    struct ErrorWriter;
+    impl Write for ErrorWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("Simulated stdout write error"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[rstest]
     #[case(vec![], vec![])]
@@ -229,23 +271,15 @@ mod tests {
         assert!(buf.is_empty());
     }
 
-    #[test]
-    fn write_start_banner_propagates_io_errors() {
-        use std::io::{self, Write};
-
-        struct ErrorWriter;
-        impl Write for ErrorWriter {
-            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
-                Err(io::Error::other("Simulated stdout write error"))
-            }
-
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-
+    #[rstest]
+    #[case(|w: &mut ErrorWriter| write_start_banner(w))]
+    #[case(|w: &mut ErrorWriter| write_comments_banner(w))]
+    #[case(|w: &mut ErrorWriter| write_end_banner(w))]
+    fn write_banner_propagates_io_errors(
+        #[case] write_fn: fn(&mut ErrorWriter) -> std::io::Result<()>,
+    ) {
         let mut writer = ErrorWriter;
-        let err = write_start_banner(&mut writer).expect_err("expect error");
+        let err = write_fn(&mut writer).expect_err("expect error");
         assert_eq!(err.to_string(), "Simulated stdout write error");
     }
 
@@ -260,23 +294,45 @@ mod tests {
     }
 
     #[test]
-    fn write_end_banner_propagates_io_errors() {
-        use std::io::{self, Write};
+    fn write_comments_banner_outputs_exact_text() {
+        let mut buf = Vec::new();
+        write_comments_banner(&mut buf).expect("write comments banner");
+        assert_eq!(
+            String::from_utf8(buf).expect("utf8"),
+            format!("{COMMENTS_BANNER}\n"),
+        );
+    }
 
-        struct ErrorWriter;
-        impl Write for ErrorWriter {
-            fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
-                Err(io::Error::other("Simulated stdout write error"))
-            }
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn print_comments_banner_propagates_io_errors() {
+        use std::io;
+        use std::os::unix::io::AsRawFd;
 
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
+        // Redirect stdout to a closed pipe so writes fail with BrokenPipe.
+        // SAFETY: All libc calls are provided valid FDs; this test runs under
+        // `#[serial]` to avoid concurrent mutation of process stdout; the
+        // original stdout FD is restored before exiting the unsafe block.
+        unsafe {
+            let mut fds = [0; 2];
+            assert_eq!(libc::pipe(fds.as_mut_ptr()), 0, "pipe");
+            let read_end = fds[0];
+            let write_end = fds[1];
+            libc::close(read_end);
+
+            let stdout_fd = std::io::stdout().as_raw_fd();
+            let dup_fd = libc::dup(stdout_fd);
+
+            libc::dup2(write_end, stdout_fd);
+            libc::close(write_end);
+
+            let err = print_comments_banner().expect_err("expect error");
+            assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+
+            libc::dup2(dup_fd, stdout_fd);
+            libc::close(dup_fd);
         }
-
-        let mut writer = ErrorWriter;
-        let err = write_end_banner(&mut writer).expect_err("expect error");
-        assert_eq!(err.to_string(), "Simulated stdout write error");
     }
 
     #[test]
