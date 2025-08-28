@@ -125,6 +125,26 @@ async fn run_query_retries_missing_data() {
 }
 
 #[tokio::test]
+async fn run_query_empty_response_reports_details() {
+    let TestClient { client, join } = start_server(Vec::new());
+    let err = client
+        .run_query::<_, Value>("query", serde_json::json!({}))
+        .await
+        .expect_err("error");
+    match err {
+        VkError::BadResponse(msg) => {
+            let s = msg.to_string();
+            assert!(s.contains("status 200"), "{s}");
+            assert!(s.contains("query"), "{s}");
+            assert!(s.contains("{}"), "{s}");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    join.abort();
+    let _ = join.await;
+}
+
+#[tokio::test]
 async fn fetch_page_rejects_non_object_variables() {
     let client = GraphQLClient::with_endpoint("token", "http://127.0.0.1:9", None).expect("client");
     let err = client

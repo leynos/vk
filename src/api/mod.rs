@@ -262,12 +262,12 @@ impl GraphQLClient {
     fn should_retry(err: &VkError) -> bool {
         match err {
             VkError::RequestContext { .. } | VkError::Request(_) => true,
-            VkError::BadResponse(msg) => msg.starts_with("Missing data in response"),
+            VkError::BadResponse(msg) => msg.starts_with("Empty GraphQL response"),
             _ => false,
         }
     }
 
-    /// Execute an HTTP request and return the raw response body.
+    /// Execute an HTTP request and return the status code and body.
     ///
     /// # Errors
     ///
@@ -277,7 +277,7 @@ impl GraphQLClient {
         &self,
         payload: &serde_json::Value,
         ctx: &str,
-    ) -> Result<String, VkError> {
+    ) -> Result<(u16, String), VkError> {
         let response = self
             .client
             .post(self.endpoint.as_str())
@@ -289,10 +289,12 @@ impl GraphQLClient {
                 context: ctx.to_owned().boxed(),
                 source: e.into(),
             })?;
-        response.text().await.map_err(|e| VkError::RequestContext {
+        let status = response.status().as_u16();
+        let body = response.text().await.map_err(|e| VkError::RequestContext {
             context: ctx.to_owned().boxed(),
             source: e.into(),
-        })
+        })?;
+        Ok((status, body))
     }
 
     /// Write the request and response to the transcript if enabled.
@@ -321,7 +323,7 @@ impl GraphQLClient {
     ///
     /// Returns a [`VkError`] if the body cannot be deserialised or contains
     /// GraphQL errors.
-    fn process_graphql_response<T>(body: &str) -> Result<T, VkError>
+    fn process_graphql_response<T>(body: &str, status: u16, operation: &str) -> Result<T, VkError>
     where
         T: DeserializeOwned,
     {
@@ -329,13 +331,16 @@ impl GraphQLClient {
             let snippet = snippet(body, BODY_SNIPPET_LEN);
             VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}").boxed())
         })?;
-        let resp_debug = format!("{resp:?}");
         if let Some(errs) = resp.errors {
             return Err(handle_graphql_errors(errs));
         }
-        let value = resp.data.ok_or_else(|| {
-            VkError::BadResponse(format!("Missing data in response: {resp_debug}").boxed())
-        })?;
+        let Some(value) = resp.data else {
+            let snippet = snippet(body, BODY_SNIPPET_LEN);
+            return Err(VkError::BadResponse(
+                format!("Empty GraphQL response (status {status}) for {operation}: {snippet}")
+                    .boxed(),
+            ));
+        };
         match serde_path_to_error::deserialize::<_, T>(value.clone()) {
             Ok(v) => Ok(v),
             Err(e) => {
@@ -373,14 +378,15 @@ impl GraphQLClient {
         let payload_str =
             serde_json::to_string(&payload).expect("serialising GraphQL request payload");
         let ctx = snippet(&payload_str, 1024).boxed();
+        let operation = snippet(query.as_ref(), 64);
         let builder = ExponentialBuilder::default()
             .with_min_delay(self.retry.base_delay)
             .with_max_times(self.retry.attempts)
             .with_jitter();
         (|| async {
-            let body = self.execute_single_request(&payload, &ctx).await?;
+            let (status, body) = self.execute_single_request(&payload, &ctx).await?;
             self.log_transcript(&payload, &body);
-            Self::process_graphql_response::<T>(&body)
+            Self::process_graphql_response::<T>(&body, status, &operation)
         })
         .retry(builder)
         .sleep(sleep)
