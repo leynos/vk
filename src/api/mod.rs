@@ -114,6 +114,12 @@ const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
 const BODY_SNIPPET_LEN: usize = 500;
 const VALUE_SNIPPET_LEN: usize = 200;
 
+#[derive(Debug)]
+struct HttpResponse {
+    status: u16,
+    body: String,
+}
+
 /// Configuration for retrying failed GraphQL requests.
 #[derive(Clone, Copy)]
 pub struct RetryConfig {
@@ -140,6 +146,23 @@ fn snippet(text: &str, max: usize) -> String {
         out.push_str("...");
         out
     }
+}
+
+fn operation_name(query: &str) -> Option<&str> {
+    let trimmed = query.trim_start();
+    for prefix in ["query", "mutation", "subscription"] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            let rest = rest.trim_start();
+            let name = rest
+                .split(|c: char| c.is_whitespace() || c == '(' || c == '{')
+                .next()
+                .filter(|s| !s.is_empty());
+            if let Some(name) = name {
+                return Some(name);
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Deserialize)]
@@ -277,7 +300,7 @@ impl GraphQLClient {
         &self,
         payload: &serde_json::Value,
         ctx: &str,
-    ) -> Result<(u16, String), VkError> {
+    ) -> Result<HttpResponse, VkError> {
         let response = self
             .client
             .post(self.endpoint.as_str())
@@ -291,14 +314,14 @@ impl GraphQLClient {
             })?;
         let status = response.status().as_u16();
         let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: ctx.to_owned().boxed(),
+            context: format!("{ctx}; status {status}").boxed(),
             source: e.into(),
         })?;
-        Ok((status, body))
+        Ok(HttpResponse { status, body })
     }
 
     /// Write the request and response to the transcript if enabled.
-    fn log_transcript(&self, payload: &serde_json::Value, body: &str) {
+    fn log_transcript(&self, payload: &serde_json::Value, operation: &str, resp: &HttpResponse) {
         if let Some(t) = &self.transcript {
             use std::io::Write as _;
             match t.lock() {
@@ -306,8 +329,13 @@ impl GraphQLClient {
                     if let Err(e) = writeln!(
                         f,
                         "{}",
-                        serde_json::to_string(&json!({ "request": payload, "response": body }))
-                            .expect("serialising GraphQL transcript"),
+                        serde_json::to_string(&json!({
+                            "operation": operation,
+                            "status": resp.status,
+                            "request": payload,
+                            "response": &resp.body
+                        }))
+                        .expect("serialising GraphQL transcript"),
                     ) {
                         warn!("failed to write transcript: {e}");
                     }
@@ -323,10 +351,12 @@ impl GraphQLClient {
     ///
     /// Returns a [`VkError`] if the body cannot be deserialised or contains
     /// GraphQL errors.
-    fn process_graphql_response<T>(body: &str, status: u16, operation: &str) -> Result<T, VkError>
+    fn process_graphql_response<T>(resp: &HttpResponse, operation: &str) -> Result<T, VkError>
     where
         T: DeserializeOwned,
     {
+        let body = &resp.body;
+        let status = resp.status;
         let resp: GraphQLResponse<serde_json::Value> = serde_json::from_str(body).map_err(|e| {
             let snippet = snippet(body, BODY_SNIPPET_LEN);
             VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}").boxed())
@@ -374,19 +404,23 @@ impl GraphQLClient {
         T: DeserializeOwned,
     {
         let query = query.into();
-        let payload = json!({ "query": query.as_ref(), "variables": &variables });
+        let op_name = operation_name(query.as_ref());
+        let operation = op_name.map_or_else(|| snippet(query.as_ref(), 64), str::to_string);
+        let mut payload = json!({ "query": query.as_ref(), "variables": &variables });
+        if let (Some(_), Some(obj)) = (op_name, payload.as_object_mut()) {
+            obj.insert("operationName".into(), json!(operation.clone()));
+        }
         let payload_str =
             serde_json::to_string(&payload).expect("serialising GraphQL request payload");
-        let ctx = snippet(&payload_str, 1024).boxed();
-        let operation = snippet(query.as_ref(), 64);
+        let ctx = format!("operation {operation}; {}", snippet(&payload_str, 1024)).boxed();
         let builder = ExponentialBuilder::default()
             .with_min_delay(self.retry.base_delay)
             .with_max_times(self.retry.attempts)
             .with_jitter();
         (|| async {
-            let (status, body) = self.execute_single_request(&payload, &ctx).await?;
-            self.log_transcript(&payload, &body);
-            Self::process_graphql_response::<T>(&body, status, &operation)
+            let resp = self.execute_single_request(&payload, &ctx).await?;
+            self.log_transcript(&payload, &operation, &resp);
+            Self::process_graphql_response::<T>(&resp, &operation)
         })
         .retry(builder)
         .sleep(sleep)

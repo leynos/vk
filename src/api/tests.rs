@@ -24,6 +24,10 @@ struct TestClient {
 }
 
 fn start_server(responses: Vec<String>) -> TestClient {
+    start_server_with_status(responses, StatusCode::OK)
+}
+
+fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestClient {
     let responses = Arc::new(responses);
     let counter = Arc::new(AtomicUsize::new(0));
     let svc = make_service_fn(move |_conn| {
@@ -39,7 +43,7 @@ fn start_server(responses: Vec<String>) -> TestClient {
                 async move {
                     Ok::<_, std::convert::Infallible>(
                         Response::builder()
-                            .status(StatusCode::OK)
+                            .status(status)
                             .header("Content-Type", "application/json")
                             .body(Body::from(body))
                             .expect("response"),
@@ -116,7 +120,7 @@ async fn run_query_retries_missing_data() {
     ];
     let TestClient { client, join } = start_server(responses);
     let result: serde_json::Value = client
-        .run_query("query", serde_json::json!({}))
+        .run_query("query RetryOp { __typename }", serde_json::json!({}))
         .await
         .expect("success");
     assert_eq!(result, serde_json::json!({"x": 1}));
@@ -128,15 +132,59 @@ async fn run_query_retries_missing_data() {
 async fn run_query_empty_response_reports_details() {
     let TestClient { client, join } = start_server(Vec::new());
     let err = client
-        .run_query::<_, Value>("query", serde_json::json!({}))
+        .run_query::<_, Value>("query EmptyOp { }", serde_json::json!({}))
         .await
         .expect_err("error");
     match err {
         VkError::BadResponse(msg) => {
             let s = msg.to_string();
             assert!(s.contains("status 200"), "{s}");
-            assert!(s.contains("query"), "{s}");
+            assert!(s.contains("EmptyOp"), "{s}");
             assert!(s.contains("{}"), "{s}");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    join.abort();
+    let _ = join.await;
+}
+
+#[tokio::test]
+async fn run_query_empty_response_non_200_status_reports_details() {
+    let TestClient { client, join } =
+        start_server_with_status(Vec::new(), StatusCode::INTERNAL_SERVER_ERROR);
+    let err = client
+        .run_query::<_, Value>("query FailOp { }", serde_json::json!({}))
+        .await
+        .expect_err("error");
+    match err {
+        VkError::BadResponse(msg) => {
+            let s = msg.to_string();
+            assert!(s.contains("status 500"), "{s}");
+            assert!(s.contains("FailOp"), "{s}");
+            assert!(s.contains("{}"), "{s}");
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    join.abort();
+    let _ = join.await;
+}
+
+#[tokio::test]
+async fn run_query_errors_no_data_reports_error() {
+    let error_response = serde_json::json!({
+        "errors": [
+            { "message": "Something went wrong", "locations": [{ "line": 1, "column": 2 }] }
+        ]
+    })
+    .to_string();
+    let TestClient { client, join } = start_server(vec![error_response]);
+    let err = client
+        .run_query::<_, Value>("query ErrOp { }", serde_json::json!({}))
+        .await
+        .expect_err("error");
+    match err {
+        VkError::ApiErrors(msg) => {
+            assert!(msg.contains("Something went wrong"), "{msg}");
         }
         other => panic!("unexpected error: {other:?}"),
     }
