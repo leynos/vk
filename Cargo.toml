@@ -53,9 +53,11 @@ predicates = "3.1"
 hyper = "1.6.0"
 hyper-util = { version = "0.1.16", features = ["server", "http1", "tokio"] }
 http-body-util = "0.1"
-libc = "0.2"
 bytes = "1"
 futures = "0.3"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

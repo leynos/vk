@@ -10,6 +10,7 @@ use hyper::{Request, Response, StatusCode, body::Incoming};
 use rstest::rstest;
 use serde_json::json;
 use std::process::Command;
+use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
 
 mod utils;
 use utils::start_mitm;
@@ -139,34 +140,41 @@ async fn pr_outputs_banner_when_threads_present() {
 /// Confirm banners and comment text are present in the output.
 fn validate_banner_content(output: &str) {
     assert!(
-        output.starts_with("========== code review ==========\n"),
-        "Output should start with code review banner"
+        output.starts_with(&format!("{START_BANNER}\n")),
+        "Output should start with code review banner",
     );
     assert!(
-        output.contains("======== review comments ========"),
-        "Output should contain review comments banner"
+        output.contains(COMMENTS_BANNER),
+        "Output should contain review comments banner",
     );
     assert!(
         output.contains("Looks good"),
-        "Output should contain 'Looks good'"
+        "Output should contain 'Looks good'",
+    );
+    assert!(
+        output.contains(END_BANNER),
+        "Output should contain end banner",
     );
 }
 
 /// Ensure banners and thread output appear in the expected order.
 fn validate_banner_ordering(output: &str) {
-    let code_idx = output
-        .find("========== code review ==========")
-        .expect("code review banner");
+    let code_idx = output.find(START_BANNER).expect("code review banner");
     let review_idx = output
-        .find("======== review comments ========")
+        .find(COMMENTS_BANNER)
         .expect("review comments banner");
     let thread_idx = output.find("Looks good").expect("thread output");
+    let end_idx = output.rfind(END_BANNER).expect("end banner");
     assert!(
         code_idx < review_idx,
-        "Review comments banner should appear after code review banner"
+        "Review comments banner should appear after code review banner",
     );
     assert!(
         review_idx < thread_idx,
-        "Thread output should appear after review comments banner"
+        "Thread output should appear after review comments banner",
+    );
+    assert!(
+        thread_idx < end_idx,
+        "End banner should appear after thread output",
     );
 }

@@ -9,7 +9,8 @@
 //! is shown only once. Output is framed by a `code review` banner at the start
 //! and an `end of code review` banner at the end so calling processes can
 //! reliably detect boundaries. A `review comments` banner separates reviewer
-//! summaries from the comment threads. Banner helpers [`print_start_banner`],
+//! summaries from the comment threads. When no threads are present this
+//! banner is omitted. Banner helpers [`print_start_banner`],
 //! [`print_comments_banner`] and [`print_end_banner`] frame output while
 //! summary utilities [`print_summary`], [`summarize_files`], and
 //! [`write_summary`] collate comments so consumers can reuse the framing
@@ -19,6 +20,7 @@ pub mod api;
 mod boxed;
 mod cli_args;
 // configuration helpers have been folded into `ortho_config`
+mod banners;
 mod diff;
 mod graphql_queries;
 mod html;

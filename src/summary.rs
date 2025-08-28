@@ -7,14 +7,10 @@
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Write};
 
-use crate::review_threads::ReviewThread;
-
-/// Banner printed at the start of a code review.
-pub const START_BANNER: &str = "========== code review ==========";
-/// Banner printed at the end of a code review.
-pub const END_BANNER: &str = "========== end of code review ==========";
-/// Banner printed before individual review comments.
-pub const COMMENTS_BANNER: &str = "======== review comments ========";
+use crate::{
+    banners::{COMMENTS_BANNER, END_BANNER, START_BANNER},
+    review_threads::ReviewThread,
+};
 
 /// Produce a count of comments per file path.
 ///
@@ -318,6 +314,9 @@ mod tests {
         use std::os::unix::io::AsRawFd;
 
         // Redirect stdout to a closed pipe so writes fail with BrokenPipe.
+        // SAFETY: All libc calls are provided valid FDs; this test runs under
+        // `#[serial]` to avoid concurrent mutation of process stdout; the
+        // original stdout FD is restored before exiting the unsafe block.
         unsafe {
             let mut fds = [0; 2];
             assert_eq!(libc::pipe(fds.as_mut_ptr()), 0, "pipe");
