@@ -34,7 +34,7 @@ async fn missing_nodes_client() -> TestClient {
         }
     })
     .to_string();
-    start_server(vec![body])
+    start_server(vec![body.clone(); 6])
 }
 
 fn comment(body: &str) -> serde_json::Value {

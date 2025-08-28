@@ -104,6 +104,12 @@ pub enum VkError {
     },
     #[error("bad response: {0}")]
     BadResponse(Box<str>),
+    #[error("empty GraphQL response (status {status}) for {operation}: {snippet}")]
+    EmptyResponse {
+        status: u16,
+        operation: Box<str>,
+        snippet: Box<str>,
+    },
     #[error("malformed response: {0}")]
     BadResponseSerde(Box<str>),
     #[error("API errors: {0}")]

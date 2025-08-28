@@ -41,10 +41,15 @@ fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestC
                     .cloned()
                     .unwrap_or_else(|| "{}".to_string());
                 async move {
+                    let content_type = if body.trim_start().starts_with('<') {
+                        "text/html"
+                    } else {
+                        "application/json"
+                    };
                     Ok::<_, std::convert::Infallible>(
                         Response::builder()
                             .status(status)
-                            .header("Content-Type", "application/json")
+                            .header("Content-Type", content_type)
                             .body(Body::from(body))
                             .expect("response"),
                     )
@@ -64,6 +69,58 @@ fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestC
     let client = GraphQLClient::with_endpoint_retry("token", format!("http://{addr}"), None, retry)
         .expect("create client");
     TestClient { client, join }
+}
+
+#[derive(Clone)]
+struct ScriptedResp {
+    status: StatusCode,
+    body: String,
+    content_type: &'static str,
+}
+
+fn start_server_scripted(
+    script: Vec<ScriptedResp>,
+) -> (GraphQLClient, JoinHandle<()>, Arc<AtomicUsize>) {
+    let responses = Arc::new(script);
+    let hits = Arc::new(AtomicUsize::new(0));
+    let hits_clone = Arc::clone(&hits);
+    let svc = make_service_fn(move |_conn| {
+        let responses = Arc::clone(&responses);
+        let hits = Arc::clone(&hits_clone);
+        async move {
+            Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
+                let responses = Arc::clone(&responses);
+                let hits = Arc::clone(&hits);
+                async move {
+                    let idx = hits.fetch_add(1, Ordering::SeqCst);
+                    let resp = responses.get(idx).cloned().unwrap_or_else(|| ScriptedResp {
+                        status: StatusCode::OK,
+                        body: "{}".to_string(),
+                        content_type: "application/json",
+                    });
+                    Ok::<_, std::convert::Infallible>(
+                        Response::builder()
+                            .status(resp.status)
+                            .header("Content-Type", resp.content_type)
+                            .body(Body::from(resp.body))
+                            .expect("response"),
+                    )
+                }
+            }))
+        }
+    });
+    let server = Server::bind(&"127.0.0.1:0".parse().expect("parse addr")).serve(svc);
+    let addr = server.local_addr();
+    let join = tokio::spawn(async move {
+        let _ = server.await;
+    });
+    let retry = RetryConfig {
+        base_delay: Duration::from_millis(1),
+        ..RetryConfig::default()
+    };
+    let client = GraphQLClient::with_endpoint_retry("token", format!("http://{addr}"), None, retry)
+        .expect("create client");
+    (client, join, hits)
 }
 
 #[fixture]
@@ -128,6 +185,31 @@ async fn run_query_retries_missing_data() {
     let _ = join.await;
 }
 
+#[tokio::test]
+async fn run_query_retries_html_5xx_then_succeeds() {
+    let script = vec![
+        ScriptedResp {
+            status: StatusCode::BAD_GATEWAY,
+            body: "<html>bad gateway</html>".into(),
+            content_type: "text/html",
+        },
+        ScriptedResp {
+            status: StatusCode::OK,
+            body: serde_json::json!({"data": {"x": 1}}).to_string(),
+            content_type: "application/json",
+        },
+    ];
+    let (client, join, hits) = start_server_scripted(script);
+    let result: Value = client
+        .run_query("query HtmlRetry { __typename }", serde_json::json!({}))
+        .await
+        .expect("success after retry");
+    assert_eq!(result, serde_json::json!({"x": 1}));
+    assert!(hits.load(Ordering::SeqCst) >= 2, "expected at least 2 hits");
+    join.abort();
+    let _ = join.await;
+}
+
 #[derive(Debug)]
 struct TestCase {
     responses: Vec<String>,
@@ -138,7 +220,7 @@ struct TestCase {
 
 #[derive(Debug)]
 enum Expected {
-    BadResponse { fragments: [&'static str; 3] },
+    EmptyResponse { fragments: [&'static str; 3] },
     ApiErrors { fragment: &'static str },
 }
 
@@ -147,7 +229,7 @@ enum Expected {
     responses: vec![],
     status: StatusCode::OK,
     op: "query EmptyOp { }",
-    expect: Expected::BadResponse {
+    expect: Expected::EmptyResponse {
         fragments: ["status 200", "EmptyOp", "{}"],
     },
 })]
@@ -155,7 +237,7 @@ enum Expected {
     responses: vec![],
     status: StatusCode::INTERNAL_SERVER_ERROR,
     op: "query FailOp { }",
-    expect: Expected::BadResponse {
+    expect: Expected::EmptyResponse {
         fragments: ["status 500", "FailOp", "{}"],
     },
 })]
@@ -175,6 +257,14 @@ enum Expected {
         },
     }
 })]
+#[case(TestCase {
+    responses: vec![],
+    status: StatusCode::TOO_MANY_REQUESTS,
+    op: "query RateLimited { }",
+    expect: Expected::EmptyResponse {
+        fragments: ["status 429", "RateLimited", "{}"],
+    },
+})]
 #[tokio::test]
 async fn run_query_reports_details(#[case] case: TestCase) {
     let TestCase {
@@ -183,19 +273,15 @@ async fn run_query_reports_details(#[case] case: TestCase) {
         op,
         expect,
     } = case;
-    let TestClient { client, join } = if status == StatusCode::OK {
-        start_server(responses)
-    } else {
-        start_server_with_status(responses, status)
-    };
+    let TestClient { client, join } = start_server_with_status(responses, status);
     let err = client
         .run_query::<_, Value>(op, serde_json::json!({}))
         .await
         .expect_err("error");
+    let s = err.to_string();
     match expect {
-        Expected::BadResponse { fragments } => match err {
-            VkError::BadResponse(msg) => {
-                let s = msg.to_string();
+        Expected::EmptyResponse { fragments } => match err {
+            VkError::EmptyResponse { .. } => {
                 for frag in fragments {
                     assert!(s.contains(frag), "{s}");
                 }

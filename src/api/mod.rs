@@ -283,11 +283,13 @@ impl GraphQLClient {
     }
 
     fn should_retry(err: &VkError) -> bool {
-        match err {
-            VkError::RequestContext { .. } | VkError::Request(_) => true,
-            VkError::BadResponse(msg) => msg.starts_with("Empty GraphQL response"),
-            _ => false,
-        }
+        matches!(
+            err,
+            VkError::RequestContext { .. }
+                | VkError::Request(_)
+                | VkError::EmptyResponse { .. }
+                | VkError::BadResponseSerde(_)
+        )
     }
 
     /// Execute an HTTP request and return the status code and body.
@@ -333,9 +335,9 @@ impl GraphQLClient {
                             "operation": operation,
                             "status": resp.status,
                             "request": payload,
-                            "response": &resp.body
+                            "response": snippet(&resp.body, BODY_SNIPPET_LEN)
                         }))
-                        .expect("serialising GraphQL transcript"),
+                        .expect("serializing GraphQL transcript"),
                     ) {
                         warn!("failed to write transcript: {e}");
                     }
@@ -349,7 +351,7 @@ impl GraphQLClient {
     ///
     /// # Errors
     ///
-    /// Returns a [`VkError`] if the body cannot be deserialised or contains
+    /// Returns a [`VkError`] if the body cannot be deserialized or contains
     /// GraphQL errors.
     fn process_graphql_response<T>(resp: &HttpResponse, operation: &str) -> Result<T, VkError>
     where
@@ -365,18 +367,19 @@ impl GraphQLClient {
             return Err(handle_graphql_errors(errs));
         }
         let Some(value) = resp.data else {
-            let snippet = snippet(body, BODY_SNIPPET_LEN);
-            return Err(VkError::BadResponse(
-                format!("Empty GraphQL response (status {status}) for {operation}: {snippet}")
-                    .boxed(),
-            ));
+            let body_snippet = snippet(body, BODY_SNIPPET_LEN);
+            return Err(VkError::EmptyResponse {
+                status,
+                operation: operation.to_string().boxed(),
+                snippet: body_snippet.boxed(),
+            });
         };
         match serde_path_to_error::deserialize::<_, T>(value.clone()) {
             Ok(v) => Ok(v),
             Err(e) => {
                 let snippet = snippet(
                     &serde_json::to_string_pretty(&value)
-                        .expect("serialising JSON snippet for error"),
+                        .expect("serializing JSON snippet for error"),
                     VALUE_SNIPPET_LEN,
                 );
                 let path = e.path().to_string();
@@ -393,7 +396,7 @@ impl GraphQLClient {
     /// # Errors
     ///
     /// Returns a [`VkError`] if the request fails or the response cannot be
-    /// deserialised.
+    /// deserialized.
     ///
     /// # Panics
     ///
@@ -411,7 +414,7 @@ impl GraphQLClient {
             obj.insert("operationName".into(), json!(operation.clone()));
         }
         let payload_str =
-            serde_json::to_string(&payload).expect("serialising GraphQL request payload");
+            serde_json::to_string(&payload).expect("serializing GraphQL request payload");
         let ctx = format!("operation {operation}; {}", snippet(&payload_str, 1024)).boxed();
         let builder = ExponentialBuilder::default()
             .with_min_delay(self.retry.base_delay)
@@ -437,7 +440,7 @@ impl GraphQLClient {
     ///
     /// # Errors
     ///
-    /// Returns [`VkError::BadResponse`] if `variables` serialise to a non-object
+    /// Returns [`VkError::BadResponse`] if `variables` serialize to a non-object
     /// value, or propagates any error from the underlying request.
     ///
     /// # Examples
@@ -473,7 +476,7 @@ impl GraphQLClient {
     {
         let query = query.into();
         let mut variables = serde_json::to_value(variables).map_err(|e| {
-            VkError::BadResponseSerde(format!("serialising fetch_page variables: {e}").boxed())
+            VkError::BadResponseSerde(format!("serializing fetch_page variables: {e}").boxed())
         })?;
         let obj = variables.as_object_mut().ok_or_else(|| {
             VkError::BadResponse("variables for fetch_page must be a JSON object".boxed())
