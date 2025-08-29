@@ -83,21 +83,20 @@ async fn run_query_missing_nodes_reports_path(
     let TestClient { client, join, .. } = missing_nodes_client.await;
     let result = fetch_review_threads(&client, &repo, 1).await;
     let err = result.expect_err("expected error");
-    match err {
-        VkError::BadResponseSerde {
-            status,
-            message,
-            snippet,
-        } => {
-            assert_eq!(status, 200);
-            assert!(
-                message.contains("repository.pullRequest.reviewThreads"),
-                "{message}"
-            );
-            assert!(!snippet.is_empty(), "JSON snippet should be captured");
-        }
-        other => panic!("unexpected error: {other:?}"),
-    }
+    let VkError::BadResponseSerde {
+        status,
+        message,
+        snippet,
+    } = err
+    else {
+        panic!("unexpected error: {err:?}");
+    };
+    assert_eq!(status, 200);
+    assert!(
+        message.contains("repository.pullRequest.reviewThreads"),
+        "{message}"
+    );
+    assert!(!snippet.is_empty(), "JSON snippet should be captured");
     join.abort();
     let _ = join.await;
 }
