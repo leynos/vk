@@ -23,11 +23,10 @@ anyhow = "1.0"
 backon = "1.5.2"
 html5ever = "0.35.0"
 markup5ever_rcdom = "0.35.0+unofficial"
-ortho_config = { version = "0.5.0-beta1", features = ["json5", "yaml"] }
-# Enabling these features expands file formats; precedence stays: defaults < file < env < CLI.
+ortho_config = "0.5.0-beta1"
 
 [features]
-default = ["ortho_config/toml"]
+default = ["toml"]
 toml = ["ortho_config/toml"]
 json5 = ["ortho_config/json5"]
 yaml = ["ortho_config/yaml"]
