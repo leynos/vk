@@ -112,8 +112,18 @@ pub enum VkError {
     EmptyCommentPath { thread_id: Box<str>, index: usize },
     #[error("bad response: {0}")]
     BadResponse(Box<str>),
-    #[error("malformed response: {0}")]
-    BadResponseSerde(Box<str>),
+    #[error("empty GraphQL response (status {status}) for {operation}: {snippet}")]
+    EmptyResponse {
+        status: u16,
+        operation: Box<str>,
+        snippet: Box<str>,
+    },
+    #[error("malformed response (status {status}): {message} | snippet:{snippet}")]
+    BadResponseSerde {
+        status: u16,
+        message: Box<str>,
+        snippet: Box<str>,
+    },
     #[error("API errors: {0}")]
     ApiErrors(Box<str>),
     #[error("io error: {0}")]

@@ -34,7 +34,8 @@ async fn missing_nodes_client() -> TestClient {
         }
     })
     .to_string();
-    start_server(vec![body])
+    // Serve enough identical pages to cover retries/pagination during the test.
+    start_server(vec![body.clone(); 6])
 }
 
 fn comment(body: &str) -> serde_json::Value {
@@ -109,15 +110,20 @@ async fn run_query_missing_nodes_reports_path(
     let TestClient { client, join, .. } = missing_nodes_client.await;
     let result = fetch_review_threads(&client, &repo, 1).await;
     let err = result.expect_err("expected error");
-    let err_msg = format!("{err}");
+    let VkError::BadResponseSerde {
+        status,
+        message,
+        snippet,
+    } = err
+    else {
+        panic!("unexpected error: {err:?}");
+    };
+    assert_eq!(status, 200);
     assert!(
-        err_msg.contains("repository.pullRequest.reviewThreads"),
-        "Error should contain full JSON path",
+        message.contains("repository.pullRequest.reviewThreads"),
+        "{message}"
     );
-    assert!(
-        err_msg.contains("snippet:"),
-        "Error should contain JSON snippet",
-    );
+    assert!(!snippet.is_empty(), "JSON snippet should be captured");
     join.abort();
     let _ = join.await;
 }
