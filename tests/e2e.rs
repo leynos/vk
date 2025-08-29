@@ -93,7 +93,7 @@ async fn e2e_missing_nodes_reports_path() {
     });
 
     tokio::time::timeout(
-        std::time::Duration::from_secs(10),
+        Duration::from_secs(10),
         tokio::task::spawn_blocking(move || {
             Command::cargo_bin("vk")
                 .expect("binary")

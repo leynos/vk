@@ -283,13 +283,15 @@ impl GraphQLClient {
     }
 
     fn should_retry(err: &VkError) -> bool {
-        matches!(
-            err,
+        match err {
             VkError::RequestContext { .. }
-                | VkError::Request(_)
-                | VkError::EmptyResponse { .. }
-                | VkError::BadResponseSerde(_)
-        )
+            | VkError::Request(_)
+            | VkError::EmptyResponse { .. } => true,
+            VkError::BadResponseSerde {
+                status, snippet, ..
+            } => *status >= 500 || *status == 429 || snippet.trim_start().starts_with('<'),
+            _ => false,
+        }
     }
 
     /// Execute an HTTP request and return the status code and body.
@@ -361,7 +363,11 @@ impl GraphQLClient {
         let status = resp.status;
         let resp: GraphQLResponse<serde_json::Value> = serde_json::from_str(body).map_err(|e| {
             let snippet = snippet(body, BODY_SNIPPET_LEN);
-            VkError::BadResponseSerde(format!("{e} | response body snippet:{snippet}").boxed())
+            VkError::BadResponseSerde {
+                status,
+                message: e.to_string().boxed(),
+                snippet: snippet.boxed(),
+            }
         })?;
         if let Some(errs) = resp.errors {
             return Err(handle_graphql_errors(errs));
@@ -384,9 +390,11 @@ impl GraphQLClient {
                 );
                 let path = e.path().to_string();
                 let inner = e.into_inner();
-                Err(VkError::BadResponseSerde(
-                    format!("{inner} at {path} | snippet: {snippet}").boxed(),
-                ))
+                Err(VkError::BadResponseSerde {
+                    status,
+                    message: format!("{inner} at {path}").boxed(),
+                    snippet: snippet.boxed(),
+                })
             }
         }
     }
@@ -475,9 +483,12 @@ impl GraphQLClient {
         T: DeserializeOwned,
     {
         let query = query.into();
-        let mut variables = serde_json::to_value(variables).map_err(|e| {
-            VkError::BadResponseSerde(format!("serializing fetch_page variables: {e}").boxed())
-        })?;
+        let mut variables =
+            serde_json::to_value(variables).map_err(|e| VkError::BadResponseSerde {
+                status: 0,
+                message: format!("serializing fetch_page variables: {e}").boxed(),
+                snippet: "".boxed(),
+            })?;
         let obj = variables.as_object_mut().ok_or_else(|| {
             VkError::BadResponse("variables for fetch_page must be a JSON object".boxed())
         })?;

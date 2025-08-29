@@ -42,7 +42,7 @@ where
             Ok::<_, Infallible>(service_fn(move |_req: Request<Body>| {
                 let handler = Arc::clone(&handler);
                 let idx = counter.fetch_add(1, Ordering::SeqCst);
-                handler(idx)
+                (*handler)(idx)
             }))
         }
     });
@@ -74,9 +74,9 @@ fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestC
                 .cloned()
                 .unwrap_or_else(|| "{}".to_string());
             let content_type = if body.trim_start().starts_with('<') {
-                "text/html"
+                "text/html; charset=utf-8"
             } else {
-                "application/json"
+                "application/json; charset=utf-8"
             };
             Ok::<_, Infallible>(
                 Response::builder()
@@ -91,7 +91,7 @@ fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestC
     TestClient { client, join }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ScriptedResp {
     status: StatusCode,
     body: String,
@@ -108,7 +108,7 @@ fn start_server_scripted(
             let resp = responses.get(idx).cloned().unwrap_or_else(|| ScriptedResp {
                 status: StatusCode::OK,
                 body: "{}".to_string(),
-                content_type: "application/json",
+                content_type: "application/json; charset=utf-8",
             });
             Ok::<_, Infallible>(
                 Response::builder()
@@ -139,7 +139,7 @@ fn mock_server_with_capture() -> (GraphQLClient, Arc<Mutex<String>>, JoinHandle<
                     Ok::<_, std::convert::Infallible>(
                         Response::builder()
                             .status(StatusCode::OK)
-                            .header("Content-Type", "application/json")
+                            .header("Content-Type", "application/json; charset=utf-8")
                             .body(Body::from("{\"data\":{}}"))
                             .expect("response"),
                     )
@@ -190,12 +190,12 @@ async fn run_query_retries_html_5xx_then_succeeds() {
         ScriptedResp {
             status: StatusCode::BAD_GATEWAY,
             body: "<html>bad gateway</html>".into(),
-            content_type: "text/html",
+            content_type: "text/html; charset=utf-8",
         },
         ScriptedResp {
             status: StatusCode::OK,
             body: serde_json::json!({"data": {"x": 1}}).to_string(),
-            content_type: "application/json",
+            content_type: "application/json; charset=utf-8",
         },
     ];
     let (client, join, hits) = start_server_scripted(script);
@@ -207,6 +207,24 @@ async fn run_query_retries_html_5xx_then_succeeds() {
     assert!(hits.load(Ordering::SeqCst) >= 2, "expected at least 2 hits");
     join.abort();
     let _ = join.await;
+}
+
+#[tokio::test]
+async fn run_query_injects_operation_name() {
+    let (client, captured, join) = mock_server_with_capture();
+    let _: Value = client
+        .run_query("query RetryOp { __typename }", serde_json::json!({}))
+        .await
+        .expect("ok");
+    join.abort();
+    let _ = join.await;
+
+    let body = captured.lock().expect("lock").to_string();
+    let v: Value = serde_json::from_str(&body).expect("json body");
+    assert_eq!(
+        v.get("operationName").and_then(Value::as_str),
+        Some("RetryOp"),
+    );
 }
 
 #[derive(Debug)]
@@ -277,10 +295,10 @@ async fn run_query_reports_details(#[case] case: TestCase) {
         .run_query::<_, Value>(op, serde_json::json!({}))
         .await
         .expect_err("error");
-    let s = err.to_string();
     match expect {
-        Expected::EmptyResponse { fragments } => match err {
+        Expected::EmptyResponse { fragments } => match &err {
             VkError::EmptyResponse { .. } => {
+                let s = err.to_string();
                 for frag in fragments {
                     assert!(s.contains(frag), "{s}");
                 }

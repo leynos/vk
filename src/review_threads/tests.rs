@@ -34,6 +34,7 @@ async fn missing_nodes_client() -> TestClient {
         }
     })
     .to_string();
+    // Serve enough identical pages to cover retries/pagination during the test.
     start_server(vec![body.clone(); 6])
 }
 

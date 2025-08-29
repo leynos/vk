@@ -110,8 +110,12 @@ pub enum VkError {
         operation: Box<str>,
         snippet: Box<str>,
     },
-    #[error("malformed response: {0}")]
-    BadResponseSerde(Box<str>),
+    #[error("malformed response (status {status}): {message} | snippet:{snippet}")]
+    BadResponseSerde {
+        status: u16,
+        message: Box<str>,
+        snippet: Box<str>,
+    },
     #[error("API errors: {0}")]
     ApiErrors(Box<str>),
     #[error("io error: {0}")]
