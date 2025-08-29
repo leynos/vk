@@ -53,6 +53,7 @@ where
     });
     let retry = RetryConfig {
         base_delay: Duration::from_millis(1),
+        jitter: false,
         ..RetryConfig::default()
     };
     let client = GraphQLClient::with_endpoint_retry("token", format!("http://{addr}"), None, retry)
@@ -82,6 +83,34 @@ fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestC
                 Response::builder()
                     .status(status)
                     .header("Content-Type", content_type)
+                    .body(Body::from(body))
+                    .expect("response"),
+            )
+        }
+    };
+    let (client, join, _) = create_test_server(handler);
+    TestClient { client, join }
+}
+
+#[derive(Clone)]
+struct RespSpec {
+    status: StatusCode,
+    body: String,
+}
+
+fn start_server_sequence(specs: Vec<RespSpec>) -> TestClient {
+    let specs = Arc::new(specs);
+    let handler = move |idx: usize| {
+        let specs = Arc::clone(&specs);
+        async move {
+            let RespSpec { status, body } = specs.get(idx).cloned().unwrap_or_else(|| RespSpec {
+                status: StatusCode::OK,
+                body: "{}".into(),
+            });
+            Ok::<_, Infallible>(
+                Response::builder()
+                    .status(status)
+                    .header("Content-Type", "application/json; charset=utf-8")
                     .body(Body::from(body))
                     .expect("response"),
             )
@@ -185,6 +214,28 @@ async fn run_query_retries_missing_data() {
 }
 
 #[tokio::test]
+async fn run_query_retries_on_5xx_then_succeeds() {
+    let specs = vec![
+        RespSpec {
+            status: StatusCode::BAD_GATEWAY,
+            body: "<html>bad gateway</html>".into(),
+        },
+        RespSpec {
+            status: StatusCode::OK,
+            body: serde_json::json!({"data": {"x": 1}}).to_string(),
+        },
+    ];
+    let TestClient { client, join } = start_server_sequence(specs);
+    let result: Value = client
+        .run_query("query OkAfter { __typename }", serde_json::json!({}))
+        .await
+        .expect("ok");
+    assert_eq!(result, serde_json::json!({"x": 1}));
+    join.abort();
+    let _ = join.await;
+}
+
+#[tokio::test]
 async fn run_query_retries_html_5xx_then_succeeds() {
     let script = vec![
         ScriptedResp {
@@ -207,6 +258,21 @@ async fn run_query_retries_html_5xx_then_succeeds() {
     assert!(hits.load(Ordering::SeqCst) >= 2, "expected at least 2 hits");
     join.abort();
     let _ = join.await;
+}
+
+#[tokio::test]
+async fn run_query_includes_operation_name() {
+    let (client, captured, join) = mock_server_with_capture();
+    let _: Value = client
+        .run_query("query MyOp { __typename }", json!({}))
+        .await
+        .expect("ok");
+    join.abort();
+    let _ = join.await;
+
+    let body = captured.lock().expect("lock").to_string();
+    let v: Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(v.get("operationName").and_then(Value::as_str), Some("MyOp"));
 }
 
 #[derive(Debug)]
@@ -255,6 +321,7 @@ struct TestCase {
 enum Expected {
     EmptyResponse { fragments: [&'static str; 3] },
     ApiErrors { fragment: &'static str },
+    RequestCtx { fragments: [&'static str; 2] },
 }
 
 #[rstest]
@@ -270,8 +337,8 @@ enum Expected {
     responses: vec![],
     status: StatusCode::INTERNAL_SERVER_ERROR,
     op: "query FailOp { }",
-    expect: Expected::EmptyResponse {
-        fragments: ["status 500", "FailOp", "{}"],
+    expect: Expected::RequestCtx {
+        fragments: ["status 500", "body snippet: {}"],
     },
 })]
 #[case({
@@ -294,8 +361,8 @@ enum Expected {
     responses: vec![],
     status: StatusCode::TOO_MANY_REQUESTS,
     op: "query RateLimited { }",
-    expect: Expected::EmptyResponse {
-        fragments: ["status 429", "RateLimited", "{}"],
+    expect: Expected::RequestCtx {
+        fragments: ["status 429", "body snippet: {}"],
     },
 })]
 #[tokio::test]
@@ -327,6 +394,15 @@ async fn run_query_reports_details(#[case] case: TestCase) {
             }
             other => panic!("unexpected error: {other:?}"),
         },
+        Expected::RequestCtx { fragments } => match err {
+            VkError::RequestContext { .. } => {
+                let s = err.to_string();
+                for frag in fragments {
+                    assert!(s.contains(frag), "{s}");
+                }
+            }
+            other => panic!("unexpected error: {other:?}"),
+        },
     }
     join.abort();
     let _ = join.await;
@@ -348,48 +424,38 @@ async fn fetch_page_rejects_non_object_variables() {
 }
 
 #[rstest]
-#[case(Map::new(), "abc", "abc")]
-#[case({
+#[case(false, Map::new(), "abc", "abc")]
+#[case(true, Map::new(), "abc", "abc")]
+#[case(false, {
+    let mut vars = Map::new();
+    vars.insert("cursor".into(), json!("stale"));
+    vars
+}, "fresh", "fresh")]
+#[case(true, {
     let mut vars = Map::new();
     vars.insert("cursor".into(), json!("stale"));
     vars
 }, "fresh", "fresh")]
 #[tokio::test]
-async fn fetch_page_cursor_handling(
+async fn fetch_page_cursor_handling_param(
     mock_server_with_capture: (GraphQLClient, Arc<Mutex<String>>, JoinHandle<()>),
+    #[case] owned: bool,
     #[case] variables: Map<String, Value>,
     #[case] cursor: &str,
     #[case] expected: &str,
 ) {
     let (client, captured, join) = mock_server_with_capture;
-    let _: Value = client
-        .fetch_page("query", Some(Cow::Borrowed(cursor)), variables)
-        .await
-        .expect("fetch");
-    join.abort();
-    let _ = join.await;
-    assert_cursor_in_request(&captured, expected);
-}
-
-#[rstest]
-#[case(Map::new(), "abc", "abc")]
-#[case({
-    let mut vars = Map::new();
-    vars.insert("cursor".into(), json!("stale"));
-    vars
-}, "fresh", "fresh")]
-#[tokio::test]
-async fn fetch_page_cursor_handling_owned(
-    mock_server_with_capture: (GraphQLClient, Arc<Mutex<String>>, JoinHandle<()>),
-    #[case] variables: Map<String, Value>,
-    #[case] cursor: &str,
-    #[case] expected: &str,
-) {
-    let (client, captured, join) = mock_server_with_capture;
-    let _: Value = client
-        .fetch_page("query", Some(Cow::Owned(String::from(cursor))), variables)
-        .await
-        .expect("fetch");
+    let _: Value = if owned {
+        client
+            .fetch_page("query", Some(Cow::Owned(cursor.to_string())), variables)
+            .await
+            .expect("fetch")
+    } else {
+        client
+            .fetch_page("query", Some(Cow::Borrowed(cursor)), variables)
+            .await
+            .expect("fetch")
+    };
     join.abort();
     let _ = join.await;
     assert_cursor_in_request(&captured, expected);

@@ -127,6 +127,8 @@ pub struct RetryConfig {
     pub attempts: usize,
     /// Base delay for the exponential backoff.
     pub base_delay: Duration,
+    /// Whether to jitter the backoff delay.
+    pub jitter: bool,
 }
 
 impl Default for RetryConfig {
@@ -134,6 +136,7 @@ impl Default for RetryConfig {
         Self {
             attempts: 5,
             base_delay: Duration::from_millis(200),
+            jitter: true,
         }
     }
 }
@@ -309,6 +312,7 @@ impl GraphQLClient {
         &self,
         payload: &serde_json::Value,
         ctx: &str,
+        operation: &str,
     ) -> Result<HttpResponse, VkError> {
         let response = self
             .client
@@ -322,12 +326,33 @@ impl GraphQLClient {
                 context: ctx.to_owned().boxed(),
                 source: e.into(),
             })?;
-        let status = response.status().as_u16();
+        let status = response.status();
+        let status_u16 = status.as_u16();
+        let status_err = response.error_for_status_ref().err();
         let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: format!("{ctx}; status {status}").boxed(),
+            context: format!("{ctx}; status {status_u16}").boxed(),
             source: e.into(),
         })?;
-        Ok(HttpResponse { status, body })
+        if !(200..300).contains(&status_u16) {
+            let resp = HttpResponse {
+                status: status_u16,
+                body: body.clone(),
+            };
+            self.log_transcript(payload, operation, &resp);
+            let e = status_err.expect("status error for non-success status");
+            return Err(VkError::RequestContext {
+                context: format!(
+                    "HTTP status {status_u16} | body snippet: {}",
+                    snippet(&body, BODY_SNIPPET_LEN)
+                )
+                .boxed(),
+                source: e.into(),
+            });
+        }
+        Ok(HttpResponse {
+            status: status_u16,
+            body,
+        })
     }
 
     /// Write the request and response to the transcript if enabled.
@@ -430,12 +455,20 @@ impl GraphQLClient {
         let payload_str =
             serde_json::to_string(&payload).expect("serializing GraphQL request payload");
         let ctx = format!("operation {operation}; {}", snippet(&payload_str, 1024)).boxed();
-        let builder = ExponentialBuilder::default()
-            .with_min_delay(self.retry.base_delay)
-            .with_max_times(self.retry.attempts)
-            .with_jitter();
+        let builder = {
+            let b = ExponentialBuilder::default()
+                .with_min_delay(self.retry.base_delay)
+                .with_max_times(self.retry.attempts);
+            if self.retry.jitter {
+                b.with_jitter()
+            } else {
+                b
+            }
+        };
         (|| async {
-            let resp = self.execute_single_request(&payload, &ctx).await?;
+            let resp = self
+                .execute_single_request(&payload, &ctx, &operation)
+                .await?;
             self.log_transcript(&payload, &operation, &resp);
             Self::process_graphql_response::<T>(&resp, &operation)
         })
