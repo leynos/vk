@@ -260,21 +260,6 @@ async fn run_query_retries_html_5xx_then_succeeds() {
     let _ = join.await;
 }
 
-#[tokio::test]
-async fn run_query_includes_operation_name() {
-    let (client, captured, join) = mock_server_with_capture();
-    let _: Value = client
-        .run_query("query MyOp { __typename }", json!({}))
-        .await
-        .expect("ok");
-    join.abort();
-    let _ = join.await;
-
-    let body = captured.lock().expect("lock").to_string();
-    let v: Value = serde_json::from_str(&body).expect("json");
-    assert_eq!(v.get("operationName").and_then(Value::as_str), Some("MyOp"));
-}
-
 #[derive(Debug)]
 struct OperationNameCase {
     query: &'static str,
