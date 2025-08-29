@@ -157,7 +157,9 @@ fn operation_name(query: &str) -> Option<&str> {
         if let Some(rest) = trimmed.strip_prefix(prefix) {
             // Require a valid delimiter after the prefix to avoid false positives like "queryX".
             let first = rest.chars().next();
-            if !matches!(first, Some('{' | '(' | ' ' | '\n' | '\t' | '\r')) {
+            let is_delim =
+                matches!(first, Some(ch) if matches!(ch, '{' | '(' | ' ' | '\n' | '\t' | '\r'));
+            if !is_delim {
                 continue;
             }
             let rest = rest.trim_start();
@@ -290,6 +292,10 @@ impl GraphQLClient {
         })
     }
 
+    fn is_transient_serde_error(status: u16, snippet: &str) -> bool {
+        status >= 500 || status == 429 || snippet.trim_start().starts_with('<')
+    }
+
     fn should_retry(err: &VkError) -> bool {
         match err {
             VkError::RequestContext { .. }
@@ -297,7 +303,7 @@ impl GraphQLClient {
             | VkError::EmptyResponse { .. } => true,
             VkError::BadResponseSerde {
                 status, snippet, ..
-            } => *status >= 500 || *status == 429 || snippet.trim_start().starts_with('<'),
+            } => Self::is_transient_serde_error(*status, snippet),
             _ => false,
         }
     }
@@ -522,12 +528,9 @@ impl GraphQLClient {
         T: DeserializeOwned,
     {
         let query = query.into();
-        let mut variables =
-            serde_json::to_value(variables).map_err(|e| VkError::BadResponseSerde {
-                status: 0,
-                message: format!("serializing fetch_page variables: {e}").boxed(),
-                snippet: "".boxed(),
-            })?;
+        let mut variables = serde_json::to_value(variables).map_err(|e| {
+            VkError::BadResponse(format!("serialising fetch_page variables: {e}").boxed())
+        })?;
         let obj = variables.as_object_mut().ok_or_else(|| {
             VkError::BadResponse("variables for fetch_page must be a JSON object".boxed())
         })?;

@@ -92,7 +92,7 @@ fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestC
     TestClient { client, join }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct RespSpec {
     status: StatusCode,
     body: String,
@@ -107,10 +107,15 @@ fn start_server_sequence(specs: Vec<RespSpec>) -> TestClient {
                 status: StatusCode::OK,
                 body: "{}".into(),
             });
+            let content_type = if body.trim_start().starts_with('<') {
+                "text/html; charset=utf-8"
+            } else {
+                "application/json; charset=utf-8"
+            };
             Ok::<_, Infallible>(
                 Response::builder()
                     .status(status)
-                    .header("Content-Type", "application/json; charset=utf-8")
+                    .header("Content-Type", content_type)
                     .body(Body::from(body))
                     .expect("response"),
             )
