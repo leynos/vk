@@ -7,6 +7,8 @@ use serde_json::{Map, Value, json};
 use std::{
     borrow::Cow,
     cell::RefCell,
+    convert::Infallible,
+    future::Future,
     sync::{
         Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
@@ -23,37 +25,24 @@ struct TestClient {
     join: JoinHandle<()>,
 }
 
-fn start_server(responses: Vec<String>) -> TestClient {
-    start_server_with_status(responses, StatusCode::OK)
-}
-
-fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestClient {
-    let responses = Arc::new(responses);
+fn create_test_server<F, Fut>(
+    response_handler: F,
+) -> (GraphQLClient, JoinHandle<()>, Arc<AtomicUsize>)
+where
+    F: Fn(usize) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<Response<Body>, Infallible>> + Send + 'static,
+{
     let counter = Arc::new(AtomicUsize::new(0));
+    let counter_clone = Arc::clone(&counter);
+    let handler = Arc::new(response_handler);
     let svc = make_service_fn(move |_conn| {
-        let responses = Arc::clone(&responses);
-        let counter = Arc::clone(&counter);
+        let counter = Arc::clone(&counter_clone);
+        let handler = Arc::clone(&handler);
         async move {
-            Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
+            Ok::<_, Infallible>(service_fn(move |_req: Request<Body>| {
+                let handler = Arc::clone(&handler);
                 let idx = counter.fetch_add(1, Ordering::SeqCst);
-                let body = responses
-                    .get(idx)
-                    .cloned()
-                    .unwrap_or_else(|| "{}".to_string());
-                async move {
-                    let content_type = if body.trim_start().starts_with('<') {
-                        "text/html"
-                    } else {
-                        "application/json"
-                    };
-                    Ok::<_, std::convert::Infallible>(
-                        Response::builder()
-                            .status(status)
-                            .header("Content-Type", content_type)
-                            .body(Body::from(body))
-                            .expect("response"),
-                    )
-                }
+                handler(idx)
             }))
         }
     });
@@ -68,6 +57,37 @@ fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestC
     };
     let client = GraphQLClient::with_endpoint_retry("token", format!("http://{addr}"), None, retry)
         .expect("create client");
+    (client, join, counter)
+}
+
+fn start_server(responses: Vec<String>) -> TestClient {
+    start_server_with_status(responses, StatusCode::OK)
+}
+
+fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestClient {
+    let responses = Arc::new(responses);
+    let handler = move |idx: usize| {
+        let responses = Arc::clone(&responses);
+        async move {
+            let body = responses
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| "{}".to_string());
+            let content_type = if body.trim_start().starts_with('<') {
+                "text/html"
+            } else {
+                "application/json"
+            };
+            Ok::<_, Infallible>(
+                Response::builder()
+                    .status(status)
+                    .header("Content-Type", content_type)
+                    .body(Body::from(body))
+                    .expect("response"),
+            )
+        }
+    };
+    let (client, join, _) = create_test_server(handler);
     TestClient { client, join }
 }
 
@@ -82,45 +102,24 @@ fn start_server_scripted(
     script: Vec<ScriptedResp>,
 ) -> (GraphQLClient, JoinHandle<()>, Arc<AtomicUsize>) {
     let responses = Arc::new(script);
-    let hits = Arc::new(AtomicUsize::new(0));
-    let hits_clone = Arc::clone(&hits);
-    let svc = make_service_fn(move |_conn| {
+    let handler = move |idx: usize| {
         let responses = Arc::clone(&responses);
-        let hits = Arc::clone(&hits_clone);
         async move {
-            Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
-                let responses = Arc::clone(&responses);
-                let hits = Arc::clone(&hits);
-                async move {
-                    let idx = hits.fetch_add(1, Ordering::SeqCst);
-                    let resp = responses.get(idx).cloned().unwrap_or_else(|| ScriptedResp {
-                        status: StatusCode::OK,
-                        body: "{}".to_string(),
-                        content_type: "application/json",
-                    });
-                    Ok::<_, std::convert::Infallible>(
-                        Response::builder()
-                            .status(resp.status)
-                            .header("Content-Type", resp.content_type)
-                            .body(Body::from(resp.body))
-                            .expect("response"),
-                    )
-                }
-            }))
+            let resp = responses.get(idx).cloned().unwrap_or_else(|| ScriptedResp {
+                status: StatusCode::OK,
+                body: "{}".to_string(),
+                content_type: "application/json",
+            });
+            Ok::<_, Infallible>(
+                Response::builder()
+                    .status(resp.status)
+                    .header("Content-Type", resp.content_type)
+                    .body(Body::from(resp.body))
+                    .expect("response"),
+            )
         }
-    });
-    let server = Server::bind(&"127.0.0.1:0".parse().expect("parse addr")).serve(svc);
-    let addr = server.local_addr();
-    let join = tokio::spawn(async move {
-        let _ = server.await;
-    });
-    let retry = RetryConfig {
-        base_delay: Duration::from_millis(1),
-        ..RetryConfig::default()
     };
-    let client = GraphQLClient::with_endpoint_retry("token", format!("http://{addr}"), None, retry)
-        .expect("create client");
-    (client, join, hits)
+    create_test_server(handler)
 }
 
 #[fixture]
