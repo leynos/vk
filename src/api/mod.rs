@@ -152,6 +152,11 @@ fn operation_name(query: &str) -> Option<&str> {
     let trimmed = query.trim_start();
     for prefix in ["query", "mutation", "subscription"] {
         if let Some(rest) = trimmed.strip_prefix(prefix) {
+            // Require a valid delimiter after the prefix to avoid false positives like "queryX".
+            let first = rest.chars().next();
+            if !matches!(first, Some('{' | '(' | ' ' | '\n' | '\t' | '\r')) {
+                continue;
+            }
             let rest = rest.trim_start();
             let name = rest
                 .split(|c: char| c.is_whitespace() || c == '(' || c == '{')
@@ -168,15 +173,15 @@ fn operation_name(query: &str) -> Option<&str> {
 #[derive(Debug, Deserialize)]
 struct GraphQLResponse<T> {
     data: Option<T>,
-    errors: Option<Vec<GraphQlError>>,
+    errors: Option<Vec<GraphQLError>>,
 }
 
 #[derive(Debug, Deserialize)]
-struct GraphQlError {
+struct GraphQLError {
     message: String,
 }
 
-fn handle_graphql_errors(errors: Vec<GraphQlError>) -> VkError {
+fn handle_graphql_errors(errors: Vec<GraphQLError>) -> VkError {
     let msg = errors
         .into_iter()
         .map(|e| e.message)
@@ -310,6 +315,7 @@ impl GraphQLClient {
             .post(self.endpoint.as_str())
             .headers(self.headers.clone())
             .json(payload)
+            .timeout(Duration::from_secs(30))
             .send()
             .await
             .map_err(|e| VkError::RequestContext {
