@@ -209,29 +209,29 @@ async fn run_query_retries_html_5xx_then_succeeds() {
     let _ = join.await;
 }
 
-#[tokio::test]
-async fn run_query_injects_operation_name() {
-    let (client, captured, join) = mock_server_with_capture();
-    let _: Value = client
-        .run_query("query RetryOp { __typename }", serde_json::json!({}))
-        .await
-        .expect("ok");
-    join.abort();
-    let _ = join.await;
-
-    let body = captured.lock().expect("lock").to_string();
-    let v: Value = serde_json::from_str(&body).expect("json body");
-    assert_eq!(
-        v.get("operationName").and_then(Value::as_str),
-        Some("RetryOp"),
-    );
+#[derive(Debug)]
+struct OperationNameCase {
+    query: &'static str,
+    expected: Option<&'static str>,
 }
 
+#[rstest]
+#[case(OperationNameCase {
+    query: "query RetryOp { __typename }",
+    expected: Some("RetryOp"),
+})]
+#[case(OperationNameCase {
+    query: "queryFoo { __typename }",
+    expected: None,
+})]
 #[tokio::test]
-async fn run_query_ignores_prefix_without_delimiter() {
-    let (client, captured, join) = mock_server_with_capture();
+async fn run_query_operation_name_handling(
+    mock_server_with_capture: (GraphQLClient, Arc<Mutex<String>>, JoinHandle<()>),
+    #[case] case: OperationNameCase,
+) {
+    let (client, captured, join) = mock_server_with_capture;
     let _: Value = client
-        .run_query("queryFoo { __typename }", serde_json::json!({}))
+        .run_query(case.query, serde_json::json!({}))
         .await
         .expect("ok");
     join.abort();
@@ -239,7 +239,8 @@ async fn run_query_ignores_prefix_without_delimiter() {
 
     let body = captured.lock().expect("lock").to_string();
     let v: Value = serde_json::from_str(&body).expect("json body");
-    assert!(v.get("operationName").is_none(), "{v}");
+    let op = v.get("operationName").and_then(Value::as_str);
+    assert_eq!(op, case.expected);
 }
 
 #[derive(Debug)]
