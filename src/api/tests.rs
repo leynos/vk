@@ -61,19 +61,15 @@ where
     (client, join, counter)
 }
 
-fn start_server(responses: Vec<String>) -> TestClient {
-    start_server_with_status(responses, StatusCode::OK)
-}
-
-fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestClient {
-    let responses = Arc::new(responses);
-    let handler = move |idx: usize| {
-        let responses = Arc::clone(&responses);
+fn start_server_generic<F>(handler: F) -> TestClient
+where
+    F: Fn(usize) -> (StatusCode, String) + Send + Sync + 'static,
+{
+    let handler = Arc::new(handler);
+    let svc = move |idx: usize| {
+        let handler = Arc::clone(&handler);
         async move {
-            let body = responses
-                .get(idx)
-                .cloned()
-                .unwrap_or_else(|| "{}".to_string());
+            let (status, body) = handler(idx);
             let content_type = if body.trim_start().starts_with('<') {
                 "text/html; charset=utf-8"
             } else {
@@ -88,8 +84,23 @@ fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestC
             )
         }
     };
-    let (client, join, _) = create_test_server(handler);
+    let (client, join, _) = create_test_server(svc);
     TestClient { client, join }
+}
+
+fn start_server(responses: Vec<String>) -> TestClient {
+    start_server_with_status(responses, StatusCode::OK)
+}
+
+fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestClient {
+    let responses = Arc::new(responses);
+    start_server_generic(move |idx| {
+        let body = responses
+            .get(idx)
+            .cloned()
+            .unwrap_or_else(|| "{}".to_string());
+        (status, body)
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -100,29 +111,13 @@ struct RespSpec {
 
 fn start_server_sequence(specs: Vec<RespSpec>) -> TestClient {
     let specs = Arc::new(specs);
-    let handler = move |idx: usize| {
-        let specs = Arc::clone(&specs);
-        async move {
-            let RespSpec { status, body } = specs.get(idx).cloned().unwrap_or_else(|| RespSpec {
-                status: StatusCode::OK,
-                body: "{}".into(),
-            });
-            let content_type = if body.trim_start().starts_with('<') {
-                "text/html; charset=utf-8"
-            } else {
-                "application/json; charset=utf-8"
-            };
-            Ok::<_, Infallible>(
-                Response::builder()
-                    .status(status)
-                    .header("Content-Type", content_type)
-                    .body(Body::from(body))
-                    .expect("response"),
-            )
-        }
-    };
-    let (client, join, _) = create_test_server(handler);
-    TestClient { client, join }
+    start_server_generic(move |idx| {
+        let RespSpec { status, body } = specs.get(idx).cloned().unwrap_or_else(|| RespSpec {
+            status: StatusCode::OK,
+            body: "{}".into(),
+        });
+        (status, body)
+    })
 }
 
 #[derive(Clone, Debug)]
