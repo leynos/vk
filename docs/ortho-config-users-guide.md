@@ -4,8 +4,8 @@ The `ortho_config` crate provides the `OrthoConfig` derive macro to unify
 command-line arguments, environment variables and configuration files into a
 single, strongly typed configuration struct. It is inspired by tools such as
 `esbuild` and is designed to minimize boilerplate. The library uses `serde` for
-deserialization and `clap` for argument parsing, while `figment` provides
-layered configuration management. This guide covers the functionality currently
+deserialization and `clap` for argument parsing, while layered logic merges
+configuration sources. This guide covers the functionality currently
 implemented in the repository.
 
 ## Core concepts and motivation
@@ -45,7 +45,7 @@ Add `ortho_config` as a dependency in `Cargo.toml` along with `serde`:
 
 ```toml
 [dependencies]
-ortho_config = "0.5.0-alpha2"     # replace with the latest compatible version
+ortho_config = "0.5.0-beta1"     # replace with the latest compatible version
 serde = { version = "1.0", features = ["derive"] }
 clap = { version = "4.5", features = ["derive"] }       # required for CLI support
 ```
@@ -56,7 +56,7 @@ corresponding cargo features:
 
 ```toml
 [dependencies]
-ortho_config = { version = "0.5.0-alpha2", features = ["json5", "yaml"] }
+ortho_config = { version = "0.5.0-beta1", features = ["json5", "yaml"] }
 # Enabling these features expands file formats; precedence stays: defaults < file < env < CLI.
 ```
 
@@ -231,8 +231,8 @@ overwriting them.
 The `load_from_iter` method (used by the convenience `load`) performs the
 following steps:
 
-1. Builds a `figment` configuration profile. A defaults provider constructed
-   from the `#[ortho_config(default = …)]` attributes is added first.
+1. Builds a configuration profile. Defaults from the
+   `#[ortho_config(default = …)]` attributes are layered first.
 
 2. Attempts to load a configuration file. Candidate file paths are searched in
    the following order:
@@ -249,9 +249,9 @@ following steps:
 
    1. A dotfile of the same name in the user's home directory.
 
-   1. On Unix‑like systems, the XDG configuration directory (e.g.
-      `~/.config/app/config.toml`) is searched using the `xdg` crate; on
-      Windows, the `%APPDATA%` and `%LOCALAPPDATA%` directories are checked.
+   1. On Unix‑like systems, the standard XDG configuration directory (for
+      example, `~/.config/app/config.toml`) is searched; on Windows the
+      `%APPDATA%` and `%LOCALAPPDATA%` directories are examined.
 
    1. If the `json5` or `yaml` features are enabled, files with `.json`,
       `.json5`, `.yaml` or `.yml` extensions are also considered in these
@@ -459,15 +459,15 @@ for a complete example.
 ## Error handling
 
 `load` and `load_and_merge_subcommand_for` return a `Result<T, OrthoError>`.
-`OrthoError` wraps errors from `clap`, file I/O and `figment`. Failures during
-the final merge of CLI values over configuration sources surface as the `Merge`
-variant, providing clearer diagnostics when the combined data is invalid. When
-multiple sources fail, the errors are collected into the `Aggregate` variant so
-callers can inspect each individual failure. Consumers should handle these
-errors appropriately, for example by printing them to stderr and exiting. If
-required fields are missing after merging, the crate returns
-`OrthoError::MissingRequiredValues` with a user‑friendly list of missing paths
-and hints on how to provide them. For example:
+`OrthoError` wraps errors from `clap`, file I/O and the configuration layering
+logic. Failures during the final merge of CLI values over configuration sources
+surface as the `Merge` variant, providing clearer diagnostics when the combined
+data is invalid. When multiple sources fail, the errors are collected into the
+`Aggregate` variant so callers can inspect each individual failure. Consumers
+should handle these errors appropriately, for example by printing them to
+stderr and exiting. If required fields are missing after merging, the crate
+returns `OrthoError::MissingRequiredValues` with a user‑friendly list of
+missing paths and hints on how to provide them. For example:
 
 ```text
 Missing required values:
@@ -512,20 +512,17 @@ Missing required values:
 
 - **Testing** – Because the CLI and environment variables are merged at
   runtime, integration tests should set environment variables and construct CLI
-  argument vectors to exercise the merge logic. The `figment` crate makes it
-  easy to inject additional providers when writing unit tests.
+  argument vectors to exercise the merge logic. Layering helpers make it easy
+  to inject additional providers when writing unit tests.
 
-- **Sanitized providers** – The `sanitized_provider` helper returns a `Figment`
-  provider with `None` fields removed. It aids manual layering when bypassing
-  the derive macro. For example:
+- **Sanitized providers** – The `sanitized_provider` helper returns a provider
+  with `None` fields removed. It aids manual layering when bypassing the derive
+  macro. For example:
 
   ```rust
-  use figment::{Figment, providers::Serialized};
   use ortho_config::sanitized_provider;
 
-  let fig = Figment::from(Serialized::defaults(&Defaults::default()))
-      .merge(sanitized_provider(&cli)?);
-  let cfg: Defaults = fig.extract()?;
+  let layer = sanitized_provider(&cli)?; // merge with defaults as needed
   ```
 
 ## Conclusion

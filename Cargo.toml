@@ -23,20 +23,10 @@ anyhow = "1.0"
 backon = "1.5.2"
 html5ever = "0.35.0"
 markup5ever_rcdom = "0.35.0+unofficial"
-ortho_config = { version = "0.5.0-alpha2", features = ["json5", "yaml"] }
-# Enabling these features expands file formats; precedence stays: defaults < file < env < CLI.
-# Configuration parser crates required by the `OrthoConfig` derive macro.
-figment = { version = "0.10", default-features = false, features = ["env", "toml"] }
-xdg = "3"
-uncased = "0.9"
-figment-json5 = "0.1.1"
-# Use the maintained `serde_yaml_ok` fork (MIT/Apache-2.0).
-# Alias it as `serde_yaml` because the derive macro expects that crate name.
-serde_yaml = { package = "serde_yaml_ok", version = "0.9.36" }
-toml = "0.8"
+ortho_config = "0.5.0-beta1"
 
 [features]
-default = ["ortho_config/toml"]
+default = ["toml"]
 toml = ["ortho_config/toml"]
 json5 = ["ortho_config/json5"]
 yaml = ["ortho_config/yaml"]
