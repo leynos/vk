@@ -166,7 +166,14 @@ async fn null_comment_path_is_error(
     let err = fetch_review_threads(&client, &repo, 1)
         .await
         .expect_err("expected error");
-    assert!(matches!(err, VkError::BadResponseSerde(_)));
+    assert!(matches!(
+        err,
+        VkError::BadResponseSerde {
+            status: _,
+            message: _,
+            snippet: _
+        }
+    ));
     join.abort();
     let _ = join.await;
 }
