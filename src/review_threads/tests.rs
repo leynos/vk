@@ -166,14 +166,17 @@ async fn null_comment_path_is_error(
     let err = fetch_review_threads(&client, &repo, 1)
         .await
         .expect_err("expected error");
-    assert!(matches!(
-        err,
-        VkError::BadResponseSerde {
-            status: _,
-            message: _,
-            snippet: _
-        }
-    ));
+    let VkError::BadResponseSerde {
+        status,
+        message,
+        snippet,
+    } = err
+    else {
+        panic!("unexpected error: {err:?}");
+    };
+    assert_eq!(status, 200);
+    assert!(message.contains("comments.nodes[0].path"), "{message}");
+    assert!(snippet.contains("reviewThreads"), "{snippet}");
     join.abort();
     let _ = join.await;
 }
