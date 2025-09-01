@@ -74,8 +74,12 @@ async fn pagination_client() -> TestClient {
     start_server(vec![thread_body, comment_body])
 }
 
-#[allow(clippy::unused_async, reason = "rstest requires async fixtures")]
 #[fixture]
+#[expect(clippy::unused_async, reason = "rstest requires async fixtures")]
+#[allow(
+    unfulfilled_lint_expectations,
+    reason = "rstest macro suppresses lint, expectation kept for future safety"
+)]
 async fn path_variant_client(
     #[default(serde_json::Value::Null)] path_value: serde_json::Value,
 ) -> TestClient {
@@ -166,7 +170,17 @@ async fn null_comment_path_is_error(
     let err = fetch_review_threads(&client, &repo, 1)
         .await
         .expect_err("expected error");
-    assert!(matches!(err, VkError::BadResponseSerde(_)));
+    let VkError::BadResponseSerde {
+        status,
+        message,
+        snippet,
+    } = err
+    else {
+        panic!("unexpected error: {err:?}");
+    };
+    assert_eq!(status, 200);
+    assert!(message.contains("comments.nodes[0].path"), "{message}");
+    assert!(snippet.contains("reviewThreads"), "{snippet}");
     join.abort();
     let _ = join.await;
 }
