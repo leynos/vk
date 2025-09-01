@@ -34,7 +34,7 @@ yaml = ["ortho_config/yaml"]
 [dev-dependencies]
 tempfile = "3.20.0"
 serial_test = "3.2.0"
-rstest = "0.25.0"
+rstest = "0.26.1"
 assert_cmd = "2.0"
 third-wheel = "0.6"
 tokio = { version = "1.36.0", features = ["full"] }
