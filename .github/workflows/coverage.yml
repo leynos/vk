@@ -12,21 +12,21 @@ jobs:
       CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
       CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@c6559452842af6a83b83429129dccaf910e34562
+        uses: leynos/shared-actions/.github/actions/setup-rust@ebbaaa0d7a776ec3187f3940667e5c7c9379cdf5
       - name: Format
         run: make check-fmt
       - name: Lint
         run: make lint
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@c6559452842af6a83b83429129dccaf910e34562
+        uses: leynos/shared-actions/.github/actions/generate-coverage@ebbaaa0d7a776ec3187f3940667e5c7c9379cdf5
         with:
           output-path: lcov.info
           format: lcov
       - name: Upload coverage data to CodeScene
         if: ${{ env.CS_ACCESS_TOKEN != '' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@c6559452842af6a83b83429129dccaf910e34562
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@ebbaaa0d7a776ec3187f3940667e5c7c9379cdf5
         with:
           format: lcov
           access-token: ${{ env.CS_ACCESS_TOKEN }}

@@ -6,13 +6,13 @@ license = "ISC"
 
 [dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
-reqwest = { version = "0.11.23", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12.23", features = ["json", "rustls-tls"] }
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
 serde_path_to_error = "0.1.17"
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "macros"] }
 termimad = "0.34.0"
-thiserror = "1.0.57"
+thiserror = "2.0.16"
 log = "0.4"
 env_logger = "0.11"
 url = "2.5.0"
@@ -34,7 +34,7 @@ yaml = ["ortho_config/yaml"]
 [dev-dependencies]
 tempfile = "3.20.0"
 serial_test = "3.2.0"
-rstest = "0.25.0"
+rstest = "0.26.1"
 assert_cmd = "2.0"
 third-wheel = "0.6"
 tokio = { version = "1.36.0", features = ["full"] }
