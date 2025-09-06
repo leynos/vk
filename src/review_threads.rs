@@ -343,6 +343,9 @@ pub fn filter_threads_by_files(threads: Vec<ReviewThread>, files: &[String]) -> 
 /// ```
 #[must_use]
 pub fn thread_for_comment(threads: Vec<ReviewThread>, comment_id: u64) -> Option<ReviewThread> {
+    // GitHub permalinks to review comments end with `#discussion_r<ID>` as
+    // noted in GitHub's "linking to a pull request comment" docs, so matching
+    // by suffix is reliable
     let suffix = format!("#discussion_r{comment_id}");
     threads.into_iter().find_map(|mut t| {
         if let Some(idx) = t

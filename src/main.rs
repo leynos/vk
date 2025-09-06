@@ -317,6 +317,9 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     };
 
     let threads = {
+        // fetch_review_threads returns only unresolved threads
+        // When a discussion fragment is given we ignore file filters and
+        // slice the thread so printing starts at the referenced comment.
         let all = fetch_review_threads(&client, &repo, number).await?;
         if let Some(comment_id) = comment {
             thread_for_comment(all, comment_id).into_iter().collect()
