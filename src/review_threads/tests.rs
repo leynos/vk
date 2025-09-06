@@ -198,11 +198,7 @@ fn thread_for_comment_picks_correct_thread_among_multiple() {
     ];
     let thread = thread_for_comment(threads, 2).expect("thread present");
     assert_eq!(thread.comments.nodes.len(), 1);
-    let url = thread
-        .comments
-        .nodes
-        .first()
-        .map(|c| c.url.as_str());
+    let url = thread.comments.nodes.first().map(|c| c.url.as_str());
     assert_eq!(url, Some("https://example.com#discussion_r2"));
 }
 
