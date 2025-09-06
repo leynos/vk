@@ -315,6 +315,32 @@ pub fn filter_threads_by_files(threads: Vec<ReviewThread>, files: &[String]) -> 
 ///
 /// GitHub review comment permalinks always end with `#discussion_r<ID>`.
 /// See <https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/commenting-on-a-pull-request#linking-to-a-pull-request-comment>.
+///
+/// # Examples
+///
+/// ```
+/// # use crate::review_threads::{
+/// #     thread_for_comment, CommentConnection, ReviewComment, ReviewThread,
+/// # };
+/// let threads = vec![ReviewThread {
+///     comments: CommentConnection {
+///         nodes: vec![
+///             ReviewComment {
+///                 url: "https://example.com#discussion_r1".into(),
+///                 ..Default::default()
+///             },
+///             ReviewComment {
+///                 url: "https://example.com#discussion_r2".into(),
+///                 ..Default::default()
+///             },
+///         ],
+///         ..Default::default()
+///     },
+///     ..Default::default()
+/// }];
+/// let thread = thread_for_comment(threads, 2).expect("thread present");
+/// assert_eq!(thread.comments.nodes.len(), 1);
+/// ```
 #[must_use]
 pub fn thread_for_comment(threads: Vec<ReviewThread>, comment_id: u64) -> Option<ReviewThread> {
     let suffix = format!("#discussion_r{comment_id}");

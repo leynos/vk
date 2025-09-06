@@ -129,6 +129,18 @@ pub fn parse_pr_reference(
 /// and an optional `#discussion_r` fragment. Returns the repository, pull
 /// request number, and `Some(comment_id)` when a valid fragment is present.
 ///
+/// # Examples
+///
+/// ```
+/// # use crate::ref_parser::parse_pr_thread_reference;
+/// let (repo, number, comment) = parse_pr_thread_reference("https://github.com/o/r/pull/1#discussion_r2", None)
+///     .expect("valid reference");
+/// assert_eq!(repo.owner, "o");
+/// assert_eq!(repo.name, "r");
+/// assert_eq!(number, 1);
+/// assert_eq!(comment, Some(2));
+/// ```
+///
 /// # Errors
 ///
 /// Returns [`VkError::InvalidRef`] when the fragment is present but empty or
