@@ -61,7 +61,7 @@ async fn e2e_pr_42() {
     });
 
     Command::cargo_bin("vk")
-        .expect("binary")
+        .expect("binary executable")
         .env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
         .env("GITHUB_TOKEN", "dummy")
         .args(["pr", "https://github.com/leynos/shared-actions/pull/42"])
@@ -101,7 +101,7 @@ async fn e2e_missing_nodes_reports_path() {
         Duration::from_secs(10),
         tokio::task::spawn_blocking(move || {
             Command::cargo_bin("vk")
-                .expect("binary")
+                .expect("binary executable")
                 .env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
                 .env("GITHUB_TOKEN", "dummy")
                 .args(["pr", "https://github.com/leynos/cmd-mox/pull/25"])
@@ -147,15 +147,23 @@ async fn pr_discussion_reference_fetches_single_thread() {
             .expect("build response")
     });
 
-    Command::cargo_bin("vk")
-        .expect("binary")
-        .env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
-        .env("GITHUB_TOKEN", "dummy")
-        .args(["pr", "https://github.com/o/r/pull/1#discussion_r2"])
-        .assert()
-        .success()
-        .stdout(contains("second"))
-        .stdout(contains("first").not());
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            Command::cargo_bin("vk")
+                .expect("binary executable")
+                .env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
+                .env("GITHUB_TOKEN", "dummy")
+                .args(["pr", "https://github.com/o/r/pull/1#discussion_r2"])
+                .assert()
+                .success()
+                .stdout(contains("second"))
+                .stdout(contains("first").not());
+        }),
+    )
+    .await
+    .expect("command timed out")
+    .expect("spawn blocking");
     shutdown.shutdown().await;
 }
 

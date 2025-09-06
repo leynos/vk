@@ -312,6 +312,9 @@ pub fn filter_threads_by_files(threads: Vec<ReviewThread>, files: &[String]) -> 
         .collect()
 }
 /// Find the thread containing `comment_id` and trim preceding comments.
+///
+/// GitHub review comment permalinks always end with `#discussion_r<ID>`.
+/// See <https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/commenting-on-a-pull-request#linking-to-a-pull-request-comment>.
 #[must_use]
 pub fn thread_for_comment(threads: Vec<ReviewThread>, comment_id: u64) -> Option<ReviewThread> {
     let suffix = format!("#discussion_r{comment_id}");

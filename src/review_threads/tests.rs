@@ -151,10 +151,83 @@ fn thread_for_comment_returns_slice_starting_at_id() {
         },
         ..Default::default()
     }];
-    let thread = thread_for_comment(threads, 2).expect("thread");
+    let thread = thread_for_comment(threads, 2).expect("thread present");
     assert_eq!(thread.comments.nodes.len(), 1);
     let body = thread.comments.nodes.first().map(|c| c.body.as_str());
     assert_eq!(body, Some("second"));
+}
+
+#[test]
+fn thread_for_comment_returns_none_for_missing_id() {
+    let threads = vec![ReviewThread {
+        comments: CommentConnection {
+            nodes: vec![ReviewComment {
+                url: "https://example.com#discussion_r1".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    }];
+    assert!(thread_for_comment(threads, 2).is_none());
+}
+
+#[test]
+fn thread_for_comment_picks_correct_thread_among_multiple() {
+    let threads = vec![
+        ReviewThread {
+            comments: CommentConnection {
+                nodes: vec![ReviewComment {
+                    url: "https://example.com#discussion_r1".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ReviewThread {
+            comments: CommentConnection {
+                nodes: vec![ReviewComment {
+                    url: "https://example.com#discussion_r2".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    ];
+    let thread = thread_for_comment(threads, 2).expect("thread present");
+    assert_eq!(thread.comments.nodes.len(), 1);
+    let url = thread
+        .comments
+        .nodes
+        .first()
+        .map(|c| c.url.as_str());
+    assert_eq!(url, Some("https://example.com#discussion_r2"));
+}
+
+#[rstest]
+#[case(1, 2)]
+#[case(2, 1)]
+fn thread_for_comment_handles_position(#[case] id: u64, #[case] expected: usize) {
+    let threads = vec![ReviewThread {
+        comments: CommentConnection {
+            nodes: vec![
+                ReviewComment {
+                    url: "https://example.com#discussion_r1".into(),
+                    ..Default::default()
+                },
+                ReviewComment {
+                    url: "https://example.com#discussion_r2".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        },
+        ..Default::default()
+    }];
+    let thread = thread_for_comment(threads, id).expect("thread present");
+    assert_eq!(thread.comments.nodes.len(), expected);
 }
 
 #[rstest]
@@ -271,7 +344,7 @@ async fn threads_with_many_comments_do_not_duplicate_first_page(
     let threads = fetch_review_threads(&client, &repo, 1)
         .await
         .expect("fetch threads");
-    let thread = threads.first().expect("thread");
+    let thread = threads.first().expect("thread present");
     assert_eq!(thread.comments.nodes.len(), 101);
     let bodies: Vec<_> = thread
         .comments

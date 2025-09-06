@@ -2,7 +2,10 @@
 //!
 //! This module provides the main entry point and orchestrates the `vk` command
 //! line tool, which fetches unresolved review comments from GitHub's GraphQL
-//! API. The core functionality is delegated to specialized modules:
+//! API. Passing a pull request reference with a `#discussion_r<ID>` fragment
+//! prints only the matching thread starting from that comment. The unresolved
+//! filter remains in effect and any file filters are ignored. The core
+//! functionality is delegated to specialised modules:
 //! `review_threads` for fetching review data, `issues` for issue retrieval,
 //! `summary` for summarizing comments. Configuration defaults are merged using
 //! `ortho_config`. When a thread has multiple comments on the same diff, the diff
@@ -34,9 +37,10 @@ mod test_utils;
 
 pub use crate::api::{GraphQLClient, paginate};
 pub use issues::{Issue, fetch_issue};
+use review_threads::thread_for_comment;
 pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
-    filter_threads_by_files, thread_for_comment,
+    filter_threads_by_files,
 };
 use summary::{
     print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
@@ -57,11 +61,20 @@ use std::sync::LazyLock;
 use termimad::MadSkin;
 use thiserror::Error;
 
-type PrContext = (RepoInfo, u64, Option<u64>, GraphQLClient);
+struct PrContext {
+    repo: RepoInfo,
+    number: u64,
+    comment_id: Option<u64>,
+    client: GraphQLClient,
+}
 
 #[derive(Subcommand, Deserialize, Serialize, Clone, Debug)]
 enum Commands {
     /// Show unresolved pull request comments
+    ///
+    /// Passing a `#discussion_r<ID>` fragment prints only that discussion
+    /// thread starting from the referenced comment. Resolved threads are
+    /// still ignored.
     Pr(PrArgs),
     /// Read a GitHub issue (todo)
     Issue(IssueArgs),
@@ -218,7 +231,12 @@ fn setup_pr_output(args: &PrArgs, global: &GlobalArgs) -> Result<Option<PrContex
         return Ok(None);
     }
     let client = build_graphql_client(&token, global.transcript.as_ref())?;
-    Ok(Some((repo, number, comment, client)))
+    Ok(Some(PrContext {
+        repo,
+        number,
+        comment_id: comment,
+        client,
+    }))
 }
 
 /// Print an appropriate message when no threads match and append the end banner.
@@ -226,11 +244,11 @@ fn setup_pr_output(args: &PrArgs, global: &GlobalArgs) -> Result<Option<PrContex
     clippy::unnecessary_wraps,
     reason = "returns Result for interface symmetry"
 )]
-fn handle_empty_threads(files: &[String]) -> Result<(), VkError> {
-    let msg = if files.is_empty() {
-        "No unresolved comments."
-    } else {
-        "No unresolved comments for the specified files."
+fn handle_empty_threads(files: &[String], comment: Option<u64>) -> Result<(), VkError> {
+    let msg = match (comment.is_some(), files.is_empty()) {
+        (true, _) => "No unresolved comments in the requested discussion.",
+        (false, true) => "No unresolved comments.",
+        (false, false) => "No unresolved comments for the specified files.",
     };
     if let Err(e) = writeln!(std::io::stdout().lock(), "{msg}") {
         if is_broken_pipe_io(&e) {
@@ -288,7 +306,13 @@ fn generate_pr_output(
 }
 
 async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let Some((repo, number, comment, client)) = setup_pr_output(&args, global)? else {
+    let Some(PrContext {
+        repo,
+        number,
+        comment_id: comment,
+        client,
+    }) = setup_pr_output(&args, global)?
+    else {
         return Ok(());
     };
 
@@ -302,12 +326,7 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     };
 
     if threads.is_empty() {
-        let files = if comment.is_some() {
-            &[] as &[String]
-        } else {
-            &args.files
-        };
-        handle_empty_threads(files)?;
+        handle_empty_threads(&args.files, comment)?;
         return Ok(());
     }
 

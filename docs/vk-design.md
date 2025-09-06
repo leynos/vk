@@ -19,6 +19,12 @@ even when multiple comments reference the same code.
   comments for those files.
 - **Focused thread**: include a `#discussion_r<ID>` fragment in the pull
   request reference to view a single thread starting from that comment.
+- **Fragment semantics**: the unresolved filter still applies when a
+  `#discussion_r<ID>` fragment is supplied and file filters are ignored. If the
+  discussion has no unresolved comments, the tool prints an explicit message.
+- **Permalink format**: GitHub review comment links always end with a
+  `#discussion_r<ID>` fragment as documented in
+  [GitHub's guide to linking to pull request comments](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/commenting-on-a-pull-request#linking-to-a-pull-request-comment).
 - **Concise output**: Each thread shows the diff once followed by all comments,
   reducing clutter when multiple remarks target the same line.
 - **Error visibility**: Failures encountered while printing a thread are logged

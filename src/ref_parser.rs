@@ -1,4 +1,4 @@
-//! Parse pull request and issue references into repository and number pairs.
+//! Parse pull request and issue references into repository and number pairs, optionally including discussion comment IDs.
 
 use crate::VkError;
 use regex::Regex;
@@ -260,5 +260,15 @@ mod tests {
         assert_eq!(repo.name, "repo");
         assert_eq!(number, 1);
         assert_eq!(comment, Some(99));
+    }
+
+    use rstest::rstest;
+
+    #[rstest]
+    #[case("https://github.com/o/r/pull/1#discussion_r")]
+    #[case("https://github.com/o/r/pull/1#discussion_rabc")]
+    fn parse_pr_thread_reference_rejects_bad_fragment(#[case] input: &str) {
+        let err = parse_pr_thread_reference(input, None).expect_err("invalid ref");
+        assert!(matches!(err, VkError::InvalidRef));
     }
 }
