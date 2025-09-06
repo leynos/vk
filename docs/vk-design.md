@@ -20,8 +20,9 @@ even when multiple comments reference the same code.
 - **Focused thread**: include a `#discussion_r<ID>` fragment in the pull
   request reference to view a single thread starting from that comment.
 - **Fragment semantics**: the unresolved filter still applies when a
-  `#discussion_r<ID>` fragment is supplied and file filters are ignored. If the
-  discussion has no unresolved comments, the tool prints an explicit message.
+  `#discussion_r<ID>` fragment is supplied, and file filters are ignored. If
+  the discussion has no unresolved comments, the tool prints an explicit
+  message.
 - **Permalink format**: GitHub review comment links always end with a
   `#discussion_r<ID>` fragment as documented in
   [GitHub's guide to linking to pull request comments](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/commenting-on-a-pull-request#linking-to-a-pull-request-comment).
@@ -62,7 +63,7 @@ focused on orchestrating API calls and printing results. The public
 `GlobalArgs`, `PrArgs`, and `IssueArgs` structures are fully documented so
 their purpose and merge semantics are clear to downstream users. `PrArgs`
 accepts an optional list of file paths that limits output to matching comments.
-When the reference includes a `#discussion_r<ID>` fragment the command fetches
+When the reference includes a `#discussion_r<ID>` fragment, the command fetches
 all threads and selects the one containing the specified comment, trimming the
 thread so printing begins with that entry.
 

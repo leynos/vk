@@ -123,6 +123,16 @@ pub fn parse_pr_reference(
     parse_reference(input, default_repo, ResourceType::PullRequest)
 }
 
+/// Parse a pull request reference with an optional discussion fragment.
+///
+/// Accepts either a full GitHub URL or a bare number (using `default_repo`),
+/// and an optional `#discussion_r` fragment. Returns the repository, pull
+/// request number, and `Some(comment_id)` when a valid fragment is present.
+///
+/// # Errors
+///
+/// Returns [`VkError::InvalidRef`] when the fragment is present but empty or
+/// non-numeric, or when the input is not a valid pull request reference.
 pub fn parse_pr_thread_reference(
     input: &str,
     default_repo: Option<&str>,
