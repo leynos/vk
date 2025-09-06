@@ -36,7 +36,7 @@ pub use crate::api::{GraphQLClient, paginate};
 pub use issues::{Issue, fetch_issue};
 pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
-    filter_threads_by_files,
+    filter_threads_by_files, thread_for_comment,
 };
 use summary::{
     print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
@@ -44,7 +44,7 @@ use summary::{
 
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use crate::printer::{print_reviews, write_thread};
-use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_reference};
+use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_thread_reference};
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
 use log::{error, warn};
@@ -56,6 +56,8 @@ use std::io::{ErrorKind, Write};
 use std::sync::LazyLock;
 use termimad::MadSkin;
 use thiserror::Error;
+
+type PrContext = (RepoInfo, u64, Option<u64>, GraphQLClient);
 
 #[derive(Subcommand, Deserialize, Serialize, Clone, Debug)]
 enum Commands {
@@ -202,12 +204,9 @@ where
 /// Prepare PR context, validate environment and print the start banner.
 ///
 /// Returns `Ok(None)` when standard output is closed before printing.
-fn setup_pr_output(
-    args: &PrArgs,
-    global: &GlobalArgs,
-) -> Result<Option<(RepoInfo, u64, GraphQLClient)>, VkError> {
+fn setup_pr_output(args: &PrArgs, global: &GlobalArgs) -> Result<Option<PrContext>, VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
-    let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
+    let (repo, number, comment) = parse_pr_thread_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         warn!("GITHUB_TOKEN not set, using anonymous API access");
@@ -219,7 +218,7 @@ fn setup_pr_output(
         return Ok(None);
     }
     let client = build_graphql_client(&token, global.transcript.as_ref())?;
-    Ok(Some((repo, number, client)))
+    Ok(Some((repo, number, comment, client)))
 }
 
 /// Print an appropriate message when no threads match and append the end banner.
@@ -289,17 +288,26 @@ fn generate_pr_output(
 }
 
 async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let Some((repo, number, client)) = setup_pr_output(&args, global)? else {
+    let Some((repo, number, comment, client)) = setup_pr_output(&args, global)? else {
         return Ok(());
     };
 
-    let threads = filter_threads_by_files(
-        fetch_review_threads(&client, &repo, number).await?,
-        &args.files,
-    );
+    let threads = {
+        let all = fetch_review_threads(&client, &repo, number).await?;
+        if let Some(comment_id) = comment {
+            thread_for_comment(all, comment_id).into_iter().collect()
+        } else {
+            filter_threads_by_files(all, &args.files)
+        }
+    };
 
     if threads.is_empty() {
-        handle_empty_threads(&args.files)?;
+        let files = if comment.is_some() {
+            &[] as &[String]
+        } else {
+            &args.files
+        };
+        handle_empty_threads(files)?;
         return Ok(());
     }
 

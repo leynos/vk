@@ -17,6 +17,8 @@ even when multiple comments reference the same code.
   colourful formatting.
 - **Targeted review**: append file paths after the pull request to show only
   comments for those files.
+- **Focused thread**: include a `#discussion_r<ID>` fragment in the pull
+  request reference to view a single thread starting from that comment.
 - **Concise output**: Each thread shows the diff once followed by all comments,
   reducing clutter when multiple remarks target the same line.
 - **Error visibility**: Failures encountered while printing a thread are logged
@@ -54,6 +56,9 @@ focused on orchestrating API calls and printing results. The public
 `GlobalArgs`, `PrArgs`, and `IssueArgs` structures are fully documented so
 their purpose and merge semantics are clear to downstream users. `PrArgs`
 accepts an optional list of file paths that limits output to matching comments.
+When the reference includes a `#discussion_r<ID>` fragment the command fetches
+all threads and selects the one containing the specified comment, trimming the
+thread so printing begins with that entry.
 
 Networking logic resides in [src/api/mod.rs](../src/api/mod.rs). It exposes the
 `GraphQLClient` alongside `run_query`, `fetch_page`, and `paginate_all` helpers

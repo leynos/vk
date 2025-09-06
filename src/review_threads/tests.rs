@@ -132,6 +132,31 @@ async fn run_query_missing_nodes_reports_path(
     let _ = join.await;
 }
 
+#[test]
+fn thread_for_comment_returns_slice_starting_at_id() {
+    let threads = vec![ReviewThread {
+        comments: CommentConnection {
+            nodes: vec![
+                ReviewComment {
+                    url: "https://example.com#discussion_r1".into(),
+                    ..Default::default()
+                },
+                ReviewComment {
+                    body: "second".into(),
+                    url: "https://example.com#discussion_r2".into(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        },
+        ..Default::default()
+    }];
+    let thread = thread_for_comment(threads, 2).expect("thread");
+    assert_eq!(thread.comments.nodes.len(), 1);
+    let body = thread.comments.nodes.first().map(|c| c.body.as_str());
+    assert_eq!(body, Some("second"));
+}
+
 #[rstest]
 #[case::empty("")]
 #[case::whitespace(" ")]
