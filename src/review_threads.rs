@@ -163,38 +163,7 @@ pub async fn fetch_review_threads(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
-    debug_assert!(
-        i32::try_from(number).is_ok(),
-        "pull-request number {number} exceeds GraphQL Int (i32) range",
-    );
-    let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
-
-    let mut vars = Map::new();
-    vars.insert("owner".into(), json!(repo.owner.clone()));
-    vars.insert("name".into(), json!(repo.name.clone()));
-    vars.insert("number".into(), json!(number_i32));
-
-    let threads = client
-        .paginate_all(THREADS_QUERY, vars, None, |data: ThreadData| {
-            let conn = data.repository.pull_request.review_threads;
-            Ok((conn.nodes, conn.page_info))
-        })
-        .await?;
-
-    let mut threads = filter_unresolved_threads(threads);
-    for thread in &mut threads {
-        let initial = std::mem::take(&mut thread.comments);
-        thread.comments = fetch_all_comments(client, &thread.id, initial).await?;
-        for (idx, comment) in thread.comments.nodes.iter().enumerate() {
-            if comment.path.trim().is_empty() {
-                return Err(VkError::EmptyCommentPath {
-                    thread_id: thread.id.clone().into_boxed_str(),
-                    index: idx,
-                });
-            }
-        }
-    }
-    Ok(threads)
+    fetch_review_threads_with_resolution(client, repo, number, false).await
 }
 
 /// Fetch review threads from a pull request.
