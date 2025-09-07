@@ -2,7 +2,10 @@
 //!
 //! This module provides the main entry point and orchestrates the `vk` command
 //! line tool, which fetches unresolved review comments from GitHub's GraphQL
-//! API. The core functionality is delegated to specialized modules:
+//! API. Passing a pull request reference with a `#discussion_r<ID>` fragment
+//! prints only the matching thread starting from that comment. The unresolved
+//! filter remains in effect and any file filters are ignored. The core
+//! functionality is delegated to specialised modules:
 //! `review_threads` for fetching review data, `issues` for issue retrieval,
 //! `summary` for summarizing comments. Configuration defaults are merged using
 //! `ortho_config`. When a thread has multiple comments on the same diff, the diff
@@ -34,9 +37,10 @@ mod test_utils;
 
 pub use crate::api::{GraphQLClient, paginate};
 pub use issues::{Issue, fetch_issue};
+use review_threads::thread_for_comment;
 pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
-    filter_threads_by_files,
+    fetch_review_threads_with_resolution, filter_threads_by_files,
 };
 use summary::{
     print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
@@ -44,7 +48,7 @@ use summary::{
 
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
 use crate::printer::{print_reviews, write_thread};
-use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_reference};
+use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_thread_reference};
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
 use log::{error, warn};
@@ -57,9 +61,21 @@ use std::sync::LazyLock;
 use termimad::MadSkin;
 use thiserror::Error;
 
+struct PrContext {
+    repo: RepoInfo,
+    number: u64,
+    comment_id: Option<u64>,
+    client: GraphQLClient,
+}
+
 #[derive(Subcommand, Deserialize, Serialize, Clone, Debug)]
 enum Commands {
     /// Show unresolved pull request comments
+    ///
+    /// Passing a `#discussion_r<ID>` fragment prints only that discussion
+    /// thread starting from the referenced comment. When a fragment is
+    /// provided, both resolved and unresolved threads are searched.
+    /// Without a fragment, only unresolved threads are shown.
     Pr(PrArgs),
     /// Read a GitHub issue (todo)
     Issue(IssueArgs),
@@ -202,12 +218,9 @@ where
 /// Prepare PR context, validate environment and print the start banner.
 ///
 /// Returns `Ok(None)` when standard output is closed before printing.
-fn setup_pr_output(
-    args: &PrArgs,
-    global: &GlobalArgs,
-) -> Result<Option<(RepoInfo, u64, GraphQLClient)>, VkError> {
+fn setup_pr_output(args: &PrArgs, global: &GlobalArgs) -> Result<Option<PrContext>, VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
-    let (repo, number) = parse_pr_reference(reference, global.repo.as_deref())?;
+    let (repo, number, comment) = parse_pr_thread_reference(reference, global.repo.as_deref())?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         warn!("GITHUB_TOKEN not set, using anonymous API access");
@@ -219,7 +232,12 @@ fn setup_pr_output(
         return Ok(None);
     }
     let client = build_graphql_client(&token, global.transcript.as_ref())?;
-    Ok(Some((repo, number, client)))
+    Ok(Some(PrContext {
+        repo,
+        number,
+        comment_id: comment,
+        client,
+    }))
 }
 
 /// Print an appropriate message when no threads match and append the end banner.
@@ -227,11 +245,11 @@ fn setup_pr_output(
     clippy::unnecessary_wraps,
     reason = "returns Result for interface symmetry"
 )]
-fn handle_empty_threads(files: &[String]) -> Result<(), VkError> {
-    let msg = if files.is_empty() {
-        "No unresolved comments."
-    } else {
-        "No unresolved comments for the specified files."
+fn handle_empty_threads(files: &[String], comment: Option<u64>) -> Result<(), VkError> {
+    let msg = match (comment.is_some(), files.is_empty()) {
+        (true, _) => "No unresolved comments in the requested discussion.",
+        (false, true) => "No unresolved comments.",
+        (false, false) => "No unresolved comments for the specified files.",
     };
     if let Err(e) = writeln!(std::io::stdout().lock(), "{msg}") {
         if is_broken_pipe_io(&e) {
@@ -289,17 +307,33 @@ fn generate_pr_output(
 }
 
 async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let Some((repo, number, client)) = setup_pr_output(&args, global)? else {
+    let Some(PrContext {
+        repo,
+        number,
+        comment_id: comment,
+        client,
+    }) = setup_pr_output(&args, global)?
+    else {
         return Ok(());
     };
 
-    let threads = filter_threads_by_files(
-        fetch_review_threads(&client, &repo, number).await?,
-        &args.files,
-    );
+    let threads = {
+        // When a discussion fragment is given, fetch ALL threads (resolved + unresolved)
+        // and filter to the specific thread. Otherwise, fetch only unresolved threads
+        // and apply file filters.
+        let include_resolved = comment.is_some();
+        let all =
+            fetch_review_threads_with_resolution(&client, &repo, number, include_resolved).await?;
+
+        if let Some(comment_id) = comment {
+            thread_for_comment(all, comment_id).into_iter().collect()
+        } else {
+            filter_threads_by_files(all, &args.files)
+        }
+    };
 
     if threads.is_empty() {
-        handle_empty_threads(&args.files)?;
+        handle_empty_threads(&args.files, comment)?;
         return Ok(());
     }
 

@@ -1,4 +1,4 @@
-//! Parse pull request and issue references into repository and number pairs.
+//! Parse pull request and issue references into repository and number pairs, optionally including discussion comment IDs.
 
 use crate::VkError;
 use regex::Regex;
@@ -123,6 +123,45 @@ pub fn parse_pr_reference(
     parse_reference(input, default_repo, ResourceType::PullRequest)
 }
 
+/// Parse a pull request reference with an optional discussion fragment.
+///
+/// Accepts either a full GitHub URL or a bare number (using `default_repo`),
+/// and an optional `#discussion_r` fragment. Returns the repository, pull
+/// request number, and `Some(comment_id)` when a valid fragment is present.
+///
+/// # Examples
+///
+/// ```
+/// # use crate::ref_parser::parse_pr_thread_reference;
+/// let (repo, number, comment) = parse_pr_thread_reference("https://github.com/o/r/pull/1#discussion_r2", None)
+///     .expect("valid reference");
+/// assert_eq!(repo.owner, "o");
+/// assert_eq!(repo.name, "r");
+/// assert_eq!(number, 1);
+/// assert_eq!(comment, Some(2));
+/// ```
+///
+/// # Errors
+///
+/// Returns [`VkError::InvalidRef`] when the fragment is present but empty or
+/// non-numeric, or when the input is not a valid pull request reference.
+pub fn parse_pr_thread_reference(
+    input: &str,
+    default_repo: Option<&str>,
+) -> Result<(RepoInfo, u64, Option<u64>), VkError> {
+    const FRAG: &str = "#discussion_r";
+    let (base, comment) = match input.split_once(FRAG) {
+        Some((base, id)) if !id.is_empty() => {
+            let cid = id.parse().map_err(|_| VkError::InvalidRef)?;
+            (base, Some(cid))
+        }
+        Some(_) => return Err(VkError::InvalidRef),
+        None => (input, None),
+    };
+    let (repo, number) = parse_pr_reference(base, default_repo)?;
+    Ok((repo, number, comment))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,5 +271,26 @@ mod tests {
         assert_eq!(repo.owner, "baz");
         assert_eq!(repo.name, "qux");
         assert_eq!(number, 8);
+    }
+
+    #[test]
+    fn parse_pr_thread_reference_with_comment() {
+        let (repo, number, comment) =
+            parse_pr_thread_reference("https://github.com/owner/repo/pull/1#discussion_r99", None)
+                .expect("parse");
+        assert_eq!(repo.owner, "owner");
+        assert_eq!(repo.name, "repo");
+        assert_eq!(number, 1);
+        assert_eq!(comment, Some(99));
+    }
+
+    use rstest::rstest;
+
+    #[rstest]
+    #[case("https://github.com/o/r/pull/1#discussion_r")]
+    #[case("https://github.com/o/r/pull/1#discussion_rabc")]
+    fn parse_pr_thread_reference_rejects_bad_fragment(#[case] input: &str) {
+        let err = parse_pr_thread_reference(input, None).expect_err("invalid ref");
+        assert!(matches!(err, VkError::InvalidRef));
     }
 }

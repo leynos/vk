@@ -163,6 +163,46 @@ pub async fn fetch_review_threads(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
+    fetch_review_threads_with_resolution(client, repo, number, false).await
+}
+
+/// Fetch review threads from a pull request.
+///
+/// When `include_resolved` is true, returns both resolved and unresolved
+/// threads. When false, returns only unresolved threads (same as
+/// [`fetch_review_threads`]).
+///
+/// This function follows the same pagination and validation logic as
+/// [`fetch_review_threads`] but bypasses the unresolved filtering when
+/// requested.
+///
+/// # Examples
+/// ```no_run
+/// use vk::{api::GraphQLClient, ref_parser::RepoInfo};
+/// # async fn run() -> Result<(), vk::VkError> {
+/// let client = GraphQLClient::new("token", None).expect("client");
+/// let repo = RepoInfo { owner: "o".into(), name: "r".into() };
+/// let threads = vk::review_threads::fetch_review_threads_with_resolution(
+///     &client,
+///     &repo,
+///     1,
+///     true,
+/// ).await?;
+/// assert!(!threads.is_empty());
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// Returns [`VkError::InvalidNumber`] if `number` exceeds `i32::MAX`, or a
+/// general [`VkError`] if any API request fails or the response is malformed.
+pub async fn fetch_review_threads_with_resolution(
+    client: &GraphQLClient,
+    repo: &RepoInfo,
+    number: u64,
+    include_resolved: bool,
+) -> Result<Vec<ReviewThread>, VkError> {
     debug_assert!(
         i32::try_from(number).is_ok(),
         "pull-request number {number} exceeds GraphQL Int (i32) range",
@@ -181,7 +221,14 @@ pub async fn fetch_review_threads(
         })
         .await?;
 
-    let mut threads = filter_unresolved_threads(threads);
+    // Apply unresolved filtering only when include_resolved is false
+    let mut threads = if include_resolved {
+        threads
+    } else {
+        filter_unresolved_threads(threads)
+    };
+
+    // Rest of the function remains identical to fetch_review_threads
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
         thread.comments = fetch_all_comments(client, &thread.id, initial).await?;
@@ -311,5 +358,57 @@ pub fn filter_threads_by_files(threads: Vec<ReviewThread>, files: &[String]) -> 
         })
         .collect()
 }
+/// Find the thread containing `comment_id` and trim preceding comments.
+///
+/// GitHub review comment permalinks always end with `#discussion_r<ID>`.
+/// See <https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/commenting-on-a-pull-request#linking-to-a-pull-request-comment>.
+///
+/// # Examples
+///
+/// ```
+/// # use crate::review_threads::{
+/// #     thread_for_comment, CommentConnection, ReviewComment, ReviewThread,
+/// # };
+/// let threads = vec![ReviewThread {
+///     comments: CommentConnection {
+///         nodes: vec![
+///             ReviewComment {
+///                 url: "https://example.com#discussion_r1".into(),
+///                 ..Default::default()
+///             },
+///             ReviewComment {
+///                 url: "https://example.com#discussion_r2".into(),
+///                 ..Default::default()
+///             },
+///         ],
+///         ..Default::default()
+///     },
+///     ..Default::default()
+/// }];
+/// let thread = thread_for_comment(threads, 2).expect("thread present");
+/// assert_eq!(thread.comments.nodes.len(), 1);
+/// ```
+#[must_use]
+pub fn thread_for_comment(threads: Vec<ReviewThread>, comment_id: u64) -> Option<ReviewThread> {
+    // GitHub permalinks to review comments end with `#discussion_r<ID>` as
+    // noted in GitHub's "linking to a pull request comment" docs, so matching
+    // by suffix is reliable
+    let suffix = format!("#discussion_r{comment_id}");
+    threads.into_iter().find_map(|mut t| {
+        if let Some(idx) = t
+            .comments
+            .nodes
+            .iter()
+            .position(|c| c.url.ends_with(&suffix))
+        {
+            let remaining = t.comments.nodes.split_off(idx);
+            t.comments.nodes = remaining;
+            Some(t)
+        } else {
+            None
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests;
