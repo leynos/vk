@@ -197,6 +197,84 @@ pub async fn fetch_review_threads(
     Ok(threads)
 }
 
+/// Fetch review threads from a pull request.
+///
+/// When `include_resolved` is true, returns both resolved and unresolved
+/// threads. When false, returns only unresolved threads (same as
+/// [`fetch_review_threads`]).
+///
+/// This function follows the same pagination and validation logic as
+/// [`fetch_review_threads`] but bypasses the unresolved filtering when
+/// requested.
+///
+/// # Examples
+/// ```no_run
+/// use vk::{api::GraphQLClient, ref_parser::RepoInfo};
+/// # async fn run() -> Result<(), vk::VkError> {
+/// let client = GraphQLClient::new("token", None).expect("client");
+/// let repo = RepoInfo { owner: "o".into(), name: "r".into() };
+/// let threads = vk::review_threads::fetch_review_threads_with_resolution(
+///     &client,
+///     &repo,
+///     1,
+///     true,
+/// ).await?;
+/// assert!(!threads.is_empty());
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// Returns [`VkError::InvalidNumber`] if `number` exceeds `i32::MAX`, or a
+/// general [`VkError`] if any API request fails or the response is malformed.
+pub async fn fetch_review_threads_with_resolution(
+    client: &GraphQLClient,
+    repo: &RepoInfo,
+    number: u64,
+    include_resolved: bool,
+) -> Result<Vec<ReviewThread>, VkError> {
+    debug_assert!(
+        i32::try_from(number).is_ok(),
+        "pull-request number {number} exceeds GraphQL Int (i32) range",
+    );
+    let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
+
+    let mut vars = Map::new();
+    vars.insert("owner".into(), json!(repo.owner.clone()));
+    vars.insert("name".into(), json!(repo.name.clone()));
+    vars.insert("number".into(), json!(number_i32));
+
+    let threads = client
+        .paginate_all(THREADS_QUERY, vars, None, |data: ThreadData| {
+            let conn = data.repository.pull_request.review_threads;
+            Ok((conn.nodes, conn.page_info))
+        })
+        .await?;
+
+    // Apply unresolved filtering only when include_resolved is false
+    let mut threads = if include_resolved {
+        threads
+    } else {
+        filter_unresolved_threads(threads)
+    };
+
+    // Rest of the function remains identical to fetch_review_threads
+    for thread in &mut threads {
+        let initial = std::mem::take(&mut thread.comments);
+        thread.comments = fetch_all_comments(client, &thread.id, initial).await?;
+        for (idx, comment) in thread.comments.nodes.iter().enumerate() {
+            if comment.path.trim().is_empty() {
+                return Err(VkError::EmptyCommentPath {
+                    thread_id: thread.id.clone().into_boxed_str(),
+                    index: idx,
+                });
+            }
+        }
+    }
+    Ok(threads)
+}
+
 /// Fetch all comments for a thread, following pagination when required.
 ///
 /// # Errors

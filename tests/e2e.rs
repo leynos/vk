@@ -126,13 +126,13 @@ async fn e2e_missing_nodes_reports_path() {
 }
 
 #[tokio::test]
-async fn pr_discussion_reference_fetches_single_thread() {
+async fn pr_discussion_reference_fetches_resolved_thread() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let threads_body = serde_json::json!({
         "data": {"repository": {"pullRequest": {"reviewThreads": {
             "nodes": [{
                 "id": "t1",
-                "isResolved": false,
+                "isResolved": true,
                 "comments": {
                     "nodes": [
                         { "body": "first", "diffHunk": "@@ -1 +1 @@\n-old\n+new\n", "originalPosition": null, "position": null, "path": "file.rs", "url": "https://github.com/o/r/pull/1#discussion_r1", "author": null },

@@ -40,7 +40,7 @@ pub use issues::{Issue, fetch_issue};
 use review_threads::thread_for_comment;
 pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
-    filter_threads_by_files,
+    fetch_review_threads_with_resolution, filter_threads_by_files,
 };
 use summary::{
     print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
@@ -73,8 +73,9 @@ enum Commands {
     /// Show unresolved pull request comments
     ///
     /// Passing a `#discussion_r<ID>` fragment prints only that discussion
-    /// thread starting from the referenced comment. Resolved threads are
-    /// still ignored.
+    /// thread starting from the referenced comment. When a fragment is
+    /// provided, both resolved and unresolved threads are searched.
+    /// Without a fragment, only unresolved threads are shown.
     Pr(PrArgs),
     /// Read a GitHub issue (todo)
     Issue(IssueArgs),
@@ -317,10 +318,13 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     };
 
     let threads = {
-        // fetch_review_threads returns only unresolved threads
-        // When a discussion fragment is given we ignore file filters and
-        // slice the thread so printing starts at the referenced comment.
-        let all = fetch_review_threads(&client, &repo, number).await?;
+        // When a discussion fragment is given, fetch ALL threads (resolved + unresolved)
+        // and filter to the specific thread. Otherwise, fetch only unresolved threads
+        // and apply file filters.
+        let include_resolved = comment.is_some();
+        let all =
+            fetch_review_threads_with_resolution(&client, &repo, number, include_resolved).await?;
+
         if let Some(comment_id) = comment {
             thread_for_comment(all, comment_id).into_iter().collect()
         } else {

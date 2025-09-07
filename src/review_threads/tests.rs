@@ -440,3 +440,41 @@ async fn accepts_max_i32_number(repo: RepoInfo) {
     join.abort();
     let _ = join.await;
 }
+
+#[rstest]
+#[tokio::test]
+async fn fetch_review_threads_with_resolution_can_include_resolved(repo: RepoInfo) {
+    let body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [
+                {
+                    "id": "t1",
+                    "isResolved": true,
+                    "comments": {"nodes": [comment("c1")], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+                },
+                {
+                    "id": "t2",
+                    "isResolved": false,
+                    "comments": {"nodes": [comment("c2")], "pageInfo": {"hasNextPage": false, "endCursor": null}}
+                }
+            ],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    }).to_string();
+    let TestClient { client, join, .. } = start_server(vec![body.clone()]);
+    let all = fetch_review_threads_with_resolution(&client, &repo, 1, true)
+        .await
+        .expect("fetch threads");
+    assert_eq!(all.len(), 2);
+    join.abort();
+    let _ = join.await;
+
+    let TestClient { client, join, .. } = start_server(vec![body]);
+    let unresolved_only = fetch_review_threads_with_resolution(&client, &repo, 1, false)
+        .await
+        .expect("fetch threads");
+    assert_eq!(unresolved_only.len(), 1);
+    assert!(unresolved_only.first().is_some_and(|t| !t.is_resolved));
+    join.abort();
+    let _ = join.await;
+}
