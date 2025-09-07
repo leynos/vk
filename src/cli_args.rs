@@ -40,9 +40,9 @@ impl GlobalArgs {
 #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
 #[ortho_config(prefix = "VK")]
 pub struct PrArgs {
-    /// Pull request URL or number. Passing a `#discussion_r<ID>` fragment
-    /// shows only that discussion thread. The unresolved filter remains active
-    /// and file filters are ignored.
+    /// Pull request URL or number.
+    /// Passing a `#discussion_r<ID>` fragment shows only that discussion thread; file
+    /// filters are ignored and unresolved filtering still applies.
     #[arg(required = true)]
     // Clap marks the argument as required so parsing yields `Some(value)`. The
     // `Option` allows `PrArgs::default()` and config merging to leave it unset.
