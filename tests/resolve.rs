@@ -17,7 +17,10 @@ async fn resolve_flows(#[case] msg: Option<&'static str>, #[case] expected: &[&s
     let calls = Arc::new(Mutex::new(Vec::new()));
     let clone = Arc::clone(&calls);
     *handler.lock().expect("lock handler") = Box::new(move |req| {
-        clone.lock().expect("lock").push(format!("{} {}", req.method(), req.uri().path()));
+        clone
+            .lock()
+            .expect("lock")
+            .push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
         } else {
@@ -41,4 +44,3 @@ async fn resolve_flows(#[case] msg: Option<&'static str>, #[case] expected: &[&s
     shutdown.shutdown().await;
     assert_eq!(calls.lock().expect("lock").as_slice(), expected);
 }
-
