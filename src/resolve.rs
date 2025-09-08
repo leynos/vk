@@ -68,7 +68,10 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
 /// Returns [`VkError::RequestContext`] if an HTTP request fails.
 #[cfg_attr(
     not(feature = "unstable-rest-resolve"),
-    allow(unused_variables, reason = "REST reply disabled")
+    expect(
+        unused_variables,
+        reason = "reply posting disabled without unstable-rest-resolve"
+    )
 )]
 pub async fn resolve_comment(
     token: &str,
@@ -122,6 +125,7 @@ mod tests {
     use super::*;
     use httpmock::{Method::POST, MockServer};
 
+    #[serial_test::serial]
     #[tokio::test]
     async fn resolve_comment_sends_requests() {
         let server = MockServer::start();
@@ -157,5 +161,43 @@ mod tests {
         reply.assert();
         resolve.assert();
         crate::test_utils::remove_var("GITHUB_API_URL");
+        crate::test_utils::remove_var("GITHUB_GRAPHQL_URL");
+    }
+
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn resolve_comment_skips_reply_when_no_message() {
+        let server = MockServer::start();
+        let reply = server.mock(|when, then| {
+            when.method(POST)
+                .path("/repos/o/r/pulls/2/comments/1/replies");
+            then.status(200);
+        });
+        let resolve = server.mock(|when, then| {
+            when.method(POST).path("/graphql");
+            then.status(200)
+                .json_body(json!({"data": {"resolveReviewThread": {"clientMutationId": null}}}));
+        });
+        crate::test_utils::set_var("GITHUB_API_URL", server.url(""));
+        crate::test_utils::set_var("GITHUB_GRAPHQL_URL", server.url("/graphql"));
+        let repo = RepoInfo {
+            owner: "o".into(),
+            name: "r".into(),
+        };
+        resolve_comment(
+            "t",
+            CommentRef {
+                repo: &repo,
+                pull_number: 2,
+                comment_id: 1,
+            },
+            None,
+        )
+        .await
+        .expect("resolve comment");
+        reply.assert_hits(0);
+        resolve.assert();
+        crate::test_utils::remove_var("GITHUB_API_URL");
+        crate::test_utils::remove_var("GITHUB_GRAPHQL_URL");
     }
 }
