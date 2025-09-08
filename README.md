@@ -27,7 +27,7 @@ vk --version
 configuration. A global `--repo` option or the `VK_REPO` environment variable
 sets the default repository when passing only a pull request number.
 
-The CLI provides two subcommands:
+The CLI provides three subcommands:
 
 - `pr` — show unresolved pull request comments. It begins with a
   `code review` banner (`========== code review ==========`), summarises files
@@ -37,6 +37,13 @@ The CLI provides two subcommands:
   (`========== end of code review ==========`). Pass file paths after the pull
   request to restrict output to those paths.
 - `issue` — read a GitHub issue (**to do**)
+- `resolve` — mark a pull request comment as resolved. Accepts a comment
+  reference (`<number>#discussion_r<id>` or full URL). When built with the
+  `unstable-rest-resolve` feature, an optional reply is posted before
+  resolution.
+
+Enabling the `unstable-rest-resolve` feature posts the reply via the REST API
+before resolving. Without it, any provided message is ignored.
 
 `vk` loads default values for subcommands from configuration files and
 environment variables. When these defaults omit the required `reference` field,

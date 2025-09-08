@@ -366,13 +366,14 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
 }
 
 async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let (repo, _, comment) = parse_pr_thread_reference(&args.reference, global.repo.as_deref())?;
+    let (repo, number, comment) =
+        parse_pr_thread_reference(&args.reference, global.repo.as_deref())?;
     let comment_id = comment.ok_or(VkError::InvalidRef)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         warn!("GITHUB_TOKEN not set, using anonymous API access");
     }
-    resolve::resolve_comment(&token, &repo, comment_id, args.message).await
+    resolve::resolve_comment(&token, &repo, number, comment_id, args.message).await
 }
 
 #[tokio::main]

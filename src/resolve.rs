@@ -7,9 +7,10 @@
 use crate::ref_parser::RepoInfo;
 use crate::{VkError, api::GraphQLClient};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
+use reqwest::StatusCode;
+use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use serde_json::{Value, json};
-use std::{env, future::Future, pin::Pin};
+use std::env;
 
 const RESOLVE_THREAD_MUTATION: &str = r"
     mutation($id: ID!) {
@@ -35,6 +36,10 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
             .parse()
             .expect("accept header"),
     );
+    headers.insert(
+        HeaderName::from_static("x-github-api-version"),
+        HeaderValue::from_static("2022-11-28"),
+    );
     reqwest::Client::builder()
         .default_headers(headers)
         .build()
@@ -42,32 +47,6 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
             context: "build client".into(),
             source: Box::new(e),
         })
-}
-
-trait SendReq {
-    fn send_req(
-        self,
-        ctx: &'static str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), VkError>> + Send>>;
-}
-
-impl SendReq for reqwest::RequestBuilder {
-    fn send_req(
-        self,
-        ctx: &'static str,
-    ) -> Pin<Box<dyn Future<Output = Result<(), VkError>> + Send>> {
-        Box::pin(async move {
-            self.send()
-                .await
-                .map_err(|e| VkError::RequestContext {
-                    context: ctx.into(),
-                    source: Box::new(e),
-                })?
-                .error_for_status()
-                .map_err(|e| VkError::Request(Box::new(e)))?;
-            Ok(())
-        })
-    }
 }
 
 /// Resolve a pull request review comment and optionally post a reply.
@@ -78,22 +57,36 @@ impl SendReq for reqwest::RequestBuilder {
 pub async fn resolve_comment(
     token: &str,
     repo: &RepoInfo,
+    pull_number: u64,
     comment_id: u64,
     message: Option<String>,
 ) -> Result<(), VkError> {
-    let api = env::var("GITHUB_API_URL").unwrap_or_else(|_| "https://api.github.com".into());
+    let api = env::var("GITHUB_API_URL")
+        .unwrap_or_else(|_| "https://api.github.com".into())
+        .trim_end_matches('/')
+        .to_owned();
     let client = github_client(token)?;
+    #[cfg(feature = "unstable-rest-resolve")]
     if let Some(body) = message {
-        client
+        let resp = client
             .post(format!(
-                "{api}/repos/{owner}/{repo}/pulls/comments/{comment_id}/replies",
+                "{api}/repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies",
                 owner = repo.owner,
                 repo = repo.name,
             ))
             .json(&json!({ "body": body }))
-            .send_req("post reply")
-            .await?;
+            .send()
+            .await
+            .map_err(|e| VkError::RequestContext {
+                context: "post reply".into(),
+                source: Box::new(e),
+            })?;
+        if resp.status() != StatusCode::NOT_FOUND {
+            resp.error_for_status()
+                .map_err(|e| VkError::Request(Box::new(e)))?;
+        }
     }
+
     let gql = GraphQLClient::new(token, None)?;
     let thread_id = STANDARD.encode(format!("PullRequestReviewThread:{comment_id}"));
     let vars = json!({ "id": thread_id });
@@ -112,7 +105,9 @@ mod tests {
         let server = MockServer::start();
         let reply = server.mock(|when, then| {
             when.method(POST)
-                .path("/repos/o/r/pulls/comments/1/replies");
+                .path("/repos/o/r/pulls/2/comments/1/replies")
+                .header("accept", "application/vnd.github+json")
+                .header("x-github-api-version", "2022-11-28");
             then.status(200);
         });
         let resolve = server.mock(|when, then| {
@@ -126,12 +121,11 @@ mod tests {
             owner: "o".into(),
             name: "r".into(),
         };
-        resolve_comment("t", &repo, 1, Some("done".into()))
+        resolve_comment("t", &repo, 2, 1, Some("done".into()))
             .await
             .expect("resolve comment");
         reply.assert();
         resolve.assert();
         crate::test_utils::remove_var("GITHUB_API_URL");
-        crate::test_utils::remove_var("GITHUB_GRAPHQL_URL");
     }
 }

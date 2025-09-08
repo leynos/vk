@@ -36,9 +36,11 @@ even when multiple comments reference the same code.
   banner (`========== review comments ==========`) separates reviewer summaries
   from the printed threads.
 
-- **Resolve threads**: `vk resolve <comment-ref>` posts an optional reply then
-  resolves the thread via the `resolveReviewThread` GraphQL mutation. The
-  thread ID is derived by base64-encoding `PullRequestReviewThread:<id>`.
+- **Resolve threads**: `vk resolve <comment-ref>` resolves the thread via the
+  `resolveReviewThread` GraphQL mutation. When compiled with the
+  `unstable-rest-resolve` feature, it posts a reply via the REST API before
+  resolving. The thread ID is derived by base64-encoding
+  `PullRequestReviewThread:<id>`.
 
 ## Architecture
 

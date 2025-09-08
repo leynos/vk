@@ -31,6 +31,7 @@ default = ["toml"]
 toml = ["ortho_config/toml"]
 json5 = ["ortho_config/json5"]
 yaml = ["ortho_config/yaml"]
+unstable-rest-resolve = []
 
 [dev-dependencies]
 tempfile = "3.20.0"
