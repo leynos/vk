@@ -45,6 +45,7 @@ hyper-util = { version = "0.1.16", features = ["server", "http1", "tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 futures = "0.3"
+httpmock = "0.7"
 insta = { version = "1.34", features = ["redactions"] }
 
 [target.'cfg(unix)'.dev-dependencies]

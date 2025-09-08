@@ -77,13 +77,26 @@ impl Default for IssueArgs {
 }
 
 /// Parameters accepted by the `resolve` sub-command.
-#[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
+#[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
 #[ortho_config(prefix = "VK")]
 pub struct ResolveArgs {
     /// Pull request comment URL or number with discussion fragment.
     #[arg(required = true)]
-    pub reference: Option<String>,
+    pub reference: String,
     /// Reply to post before resolving
     #[arg(short = 'm', long = "message", value_name = "MESSAGE")]
     pub message: Option<String>,
+}
+
+#[expect(
+    clippy::derivable_impls,
+    reason = "manual impl clarifies default empty reference"
+)]
+impl Default for ResolveArgs {
+    fn default() -> Self {
+        Self {
+            reference: String::new(),
+            message: None,
+        }
+    }
 }

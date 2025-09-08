@@ -6,9 +6,62 @@
 
 use crate::VkError;
 use crate::ref_parser::RepoInfo;
-use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
+use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde_json::json;
-use std::env;
+use std::{env, future::Future, pin::Pin};
+
+/// Build an authenticated client with GitHub headers.
+///
+/// # Errors
+///
+/// Returns [`VkError::RequestContext`] when the client cannot be built.
+fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, "vk".parse().expect("static header"));
+    headers.insert(
+        AUTHORIZATION,
+        format!("Bearer {token}").parse().expect("auth header"),
+    );
+    headers.insert(
+        ACCEPT,
+        "application/vnd.github+json"
+            .parse()
+            .expect("accept header"),
+    );
+    reqwest::Client::builder()
+        .default_headers(headers)
+        .build()
+        .map_err(|e| VkError::RequestContext {
+            context: "build client".into(),
+            source: Box::new(e),
+        })
+}
+
+trait SendReq {
+    fn send_req(
+        self,
+        ctx: &'static str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), VkError>> + Send>>;
+}
+
+impl SendReq for reqwest::RequestBuilder {
+    fn send_req(
+        self,
+        ctx: &'static str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), VkError>> + Send>> {
+        Box::pin(async move {
+            self.send()
+                .await
+                .map_err(|e| VkError::RequestContext {
+                    context: ctx.into(),
+                    source: Box::new(e),
+                })?
+                .error_for_status()
+                .map_err(|e| VkError::Request(Box::new(e)))?;
+            Ok(())
+        })
+    }
+}
 
 /// Resolve a pull request review comment and optionally post a reply.
 ///
@@ -22,89 +75,48 @@ pub async fn resolve_comment(
     message: Option<String>,
 ) -> Result<(), VkError> {
     let api = env::var("GITHUB_API_URL").unwrap_or_else(|_| "https://api.github.com".into());
-    let client = reqwest::Client::new();
+    let client = github_client(token)?;
     let base = format!(
         "{api}/repos/{owner}/{repo}/pulls/comments/{comment}",
         owner = repo.owner,
         repo = repo.name,
         comment = comment_id
     );
-    let auth = format!("Bearer {token}");
+
     if let Some(body) = message {
         client
             .post(format!("{base}/replies"))
-            .header(USER_AGENT, "vk")
-            .header(AUTHORIZATION, &auth)
-            .header(ACCEPT, "application/vnd.github+json")
-            .json(&json!({"body": body}))
-            .send()
-            .await
-            .map_err(|e| VkError::RequestContext {
-                context: "post reply".into(),
-                source: Box::new(e),
-            })?
-            .error_for_status()
-            .map_err(|e| VkError::Request(Box::new(e)))?;
+            .json(&json!({ "body": body }))
+            .send_req("post reply")
+            .await?;
     }
+
     client
         .put(format!("{base}/resolve"))
-        .header(USER_AGENT, "vk")
-        .header(AUTHORIZATION, auth)
-        .header(ACCEPT, "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| VkError::RequestContext {
-            context: "resolve comment".into(),
-            source: Box::new(e),
-        })?
-        .error_for_status()
-        .map_err(|e| VkError::Request(Box::new(e)))?;
+        .send_req("resolve comment")
+        .await?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::Bytes;
-    use http_body_util::Full;
-    use hyper::{Request, Response, StatusCode, body::Incoming};
-    use hyper_util::rt::TokioIo;
-    use hyper::server::conn::http1;
-    use std::sync::{Arc, Mutex};
-    use tokio::net::TcpListener;
+    use httpmock::{Method::POST, Method::PUT, MockServer};
 
     #[tokio::test]
     async fn resolve_comment_sends_requests() {
-        let calls = Arc::new(Mutex::new(Vec::new()));
-        let calls_clone = Arc::clone(&calls);
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
-        let addr = listener.local_addr().expect("addr");
-        tokio::spawn(async move {
-            loop {
-                let Ok((stream, _)) = listener.accept().await else {
-                    break;
-                };
-                let calls = Arc::clone(&calls_clone);
-                tokio::spawn(async move {
-                    let io = TokioIo::new(stream);
-                    let service = hyper::service::service_fn(move |req: Request<Incoming>| {
-                        let calls = Arc::clone(&calls);
-                        async move {
-                            calls.lock().expect("lock").push(req.uri().path().to_string());
-                            Ok::<_, std::convert::Infallible>(
-                                Response::builder()
-                                    .status(StatusCode::OK)
-                                    .body(Full::new(Bytes::from_static(b"{}")))
-                                    .expect("response"),
-                            )
-                        }
-                    });
-                    let _ = http1::Builder::new().serve_connection(io, service).await;
-                });
-            }
+        let server = MockServer::start();
+        let reply = server.mock(|when, then| {
+            when.method(POST)
+                .path("/repos/o/r/pulls/comments/1/replies");
+            then.status(200);
+        });
+        let resolve = server.mock(|when, then| {
+            when.method(PUT).path("/repos/o/r/pulls/comments/1/resolve");
+            then.status(200);
         });
 
-        crate::test_utils::set_var("GITHUB_API_URL", format!("http://{addr}"));
+        crate::test_utils::set_var("GITHUB_API_URL", server.url(""));
         let repo = RepoInfo {
             owner: "o".into(),
             name: "r".into(),
@@ -112,13 +124,8 @@ mod tests {
         resolve_comment("t", &repo, 1, Some("done".into()))
             .await
             .expect("resolve comment");
-        let paths = calls.lock().expect("lock").clone();
-        assert_eq!(
-            paths,
-            vec![
-                "/repos/o/r/pulls/comments/1/replies",
-                "/repos/o/r/pulls/comments/1/resolve",
-            ]
-        );
+        reply.assert();
+        resolve.assert();
+        crate::test_utils::remove_var("GITHUB_API_URL");
     }
 }

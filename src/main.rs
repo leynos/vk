@@ -366,8 +366,7 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
 }
 
 async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
-    let (repo, _, comment) = parse_pr_thread_reference(reference, global.repo.as_deref())?;
+    let (repo, _, comment) = parse_pr_thread_reference(&args.reference, global.repo.as_deref())?;
     let comment_id = comment.ok_or(VkError::InvalidRef)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
@@ -514,7 +513,7 @@ mod tests {
         let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1"]).expect("parse cli");
         match cli.command {
             Commands::Resolve(args) => {
-                assert_eq!(args.reference.as_deref(), Some("83#discussion_r1"));
+                assert_eq!(args.reference, "83#discussion_r1");
                 assert!(args.message.is_none());
             }
             _ => panic!("wrong variant"),
@@ -526,7 +525,10 @@ mod tests {
         let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1", "-m", "done"])
             .expect("parse cli");
         match cli.command {
-            Commands::Resolve(args) => assert_eq!(args.message.as_deref(), Some("done")),
+            Commands::Resolve(args) => {
+                assert_eq!(args.reference, "83#discussion_r1");
+                assert_eq!(args.message.as_deref(), Some("done"));
+            }
             _ => panic!("wrong variant"),
         }
     }
