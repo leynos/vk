@@ -7,6 +7,7 @@
 use crate::ref_parser::RepoInfo;
 use crate::{VkError, api::GraphQLClient};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+#[cfg(feature = "unstable-rest-resolve")]
 use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use serde_json::{Value, json};
@@ -55,6 +56,7 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
 /// # Errors
 ///
 /// Returns [`VkError::RequestContext`] if an HTTP request fails.
+#[cfg_attr(not(feature = "unstable-rest-resolve"), allow(unused_variables))]
 pub async fn resolve_comment(
     token: &str,
     repo: &RepoInfo,
@@ -62,29 +64,32 @@ pub async fn resolve_comment(
     comment_id: u64,
     message: Option<String>,
 ) -> Result<(), VkError> {
-    let api = env::var("GITHUB_API_URL")
-        .unwrap_or_else(|_| "https://api.github.com".into())
-        .trim_end_matches('/')
-        .to_owned();
-    let client = github_client(token)?;
     #[cfg(feature = "unstable-rest-resolve")]
-    if let Some(body) = message {
-        let resp = client
-            .post(format!(
-                "{api}/repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies",
-                owner = repo.owner,
-                repo = repo.name,
-            ))
-            .json(&json!({ "body": body }))
-            .send()
-            .await
-            .map_err(|e| VkError::RequestContext {
-                context: "post reply".into(),
-                source: Box::new(e),
-            })?;
-        if resp.status() != StatusCode::NOT_FOUND {
-            resp.error_for_status()
-                .map_err(|e| VkError::Request(Box::new(e)))?;
+    {
+        let api = env::var("GITHUB_API_URL")
+            .unwrap_or_else(|_| "https://api.github.com".into())
+            .trim_end_matches('/')
+            .to_owned();
+        let client = github_client(token)?;
+        if let Some(body) = message {
+            let resp = client
+                .post(format!(
+                    "{api}/repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies",
+                    owner = repo.owner,
+                    repo = repo.name,
+                    pull_number = pull_number,
+                ))
+                .json(&json!({ "body": body }))
+                .send()
+                .await
+                .map_err(|e| VkError::RequestContext {
+                    context: "post reply".into(),
+                    source: Box::new(e),
+                })?;
+            if resp.status() != StatusCode::NOT_FOUND {
+                resp.error_for_status()
+                    .map_err(|e| VkError::Request(Box::new(e)))?;
+            }
         }
     }
 
