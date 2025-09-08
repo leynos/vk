@@ -377,7 +377,16 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
     if token.is_empty() {
         return Err(VkError::MissingAuth);
     }
-    resolve::resolve_comment(&token, &repo, number, comment_id, args.message).await
+    resolve::resolve_comment(
+        &token,
+        resolve::CommentRef {
+            repo: &repo,
+            pull_number: number,
+            comment_id,
+        },
+        args.message,
+    )
+    .await
 }
 
 #[tokio::main]

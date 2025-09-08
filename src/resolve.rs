@@ -9,9 +9,11 @@ use crate::{VkError, api::GraphQLClient};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(feature = "unstable-rest-resolve")]
 use reqwest::StatusCode;
+#[cfg(feature = "unstable-rest-resolve")]
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use serde_json::{Value, json};
-use std::{env, time::Duration};
+#[cfg(feature = "unstable-rest-resolve")]
+use std::time::Duration;
 
 const RESOLVE_THREAD_MUTATION: &str = r"
     mutation($id: ID!) {
@@ -19,11 +21,19 @@ const RESOLVE_THREAD_MUTATION: &str = r"
     }
 ";
 
+/// Comment location within a pull request review thread.
+#[derive(Copy, Clone)]
+pub struct CommentRef<'a> {
+    pub repo: &'a RepoInfo,
+    pub pull_number: u64,
+    pub comment_id: u64,
+}
 /// Build an authenticated client with GitHub headers.
 ///
 /// # Errors
 ///
 /// Returns [`VkError::RequestContext`] when the client cannot be built.
+#[cfg(feature = "unstable-rest-resolve")]
 fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().expect("static header"));
@@ -56,17 +66,23 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
 /// # Errors
 ///
 /// Returns [`VkError::RequestContext`] if an HTTP request fails.
-#[cfg_attr(not(feature = "unstable-rest-resolve"), allow(unused_variables))]
+#[cfg_attr(
+    not(feature = "unstable-rest-resolve"),
+    allow(unused_variables, reason = "REST reply disabled")
+)]
 pub async fn resolve_comment(
     token: &str,
-    repo: &RepoInfo,
-    pull_number: u64,
-    comment_id: u64,
+    reference: CommentRef<'_>,
     message: Option<String>,
 ) -> Result<(), VkError> {
+    let CommentRef {
+        repo,
+        pull_number,
+        comment_id,
+    } = reference;
     #[cfg(feature = "unstable-rest-resolve")]
     {
-        let api = env::var("GITHUB_API_URL")
+        let api = std::env::var("GITHUB_API_URL")
             .unwrap_or_else(|_| "https://api.github.com".into())
             .trim_end_matches('/')
             .to_owned();
@@ -101,7 +117,7 @@ pub async fn resolve_comment(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "unstable-rest-resolve"))]
 mod tests {
     use super::*;
     use httpmock::{Method::POST, MockServer};
@@ -127,9 +143,17 @@ mod tests {
             owner: "o".into(),
             name: "r".into(),
         };
-        resolve_comment("t", &repo, 2, 1, Some("done".into()))
-            .await
-            .expect("resolve comment");
+        resolve_comment(
+            "t",
+            CommentRef {
+                repo: &repo,
+                pull_number: 2,
+                comment_id: 1,
+            },
+            Some("done".into()),
+        )
+        .await
+        .expect("resolve comment");
         reply.assert();
         resolve.assert();
         crate::test_utils::remove_var("GITHUB_API_URL");
