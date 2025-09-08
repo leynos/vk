@@ -80,7 +80,9 @@ enum Commands {
     Pr(PrArgs),
     /// Read a GitHub issue (todo)
     Issue(IssueArgs),
-    /// Resolve a pull request comment
+    /// Resolve a pull request comment.
+    ///
+    /// The reference must include a fragment of the form `#discussion_r<ID>`
     Resolve(ResolveArgs),
 }
 
@@ -120,6 +122,8 @@ pub enum VkError {
     },
     #[error("invalid reference")]
     InvalidRef,
+    #[error("GITHUB_TOKEN not set")]
+    MissingAuth,
     #[error("pull request number out of range")]
     InvalidNumber,
     #[error("expected URL path segment in {expected:?}, found '{found}'")]
@@ -371,7 +375,7 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
     let comment_id = comment.ok_or(VkError::InvalidRef)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
-        warn!("GITHUB_TOKEN not set, using anonymous API access");
+        return Err(VkError::MissingAuth);
     }
     resolve::resolve_comment(&token, &repo, number, comment_id, args.message).await
 }

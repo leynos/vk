@@ -1,4 +1,4 @@
-//! Resolve pull request review comments via the GitHub REST API.
+//! Resolve pull request review comments via the GitHub API (GraphQL for resolving, REST for replies).
 //!
 //! This module posts an optional reply then marks the comment's thread as
 //! resolved. The API base URL can be overridden with the `GITHUB_API_URL`
@@ -10,7 +10,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use serde_json::{Value, json};
-use std::env;
+use std::{env, time::Duration};
 
 const RESOLVE_THREAD_MUTATION: &str = r"
     mutation($id: ID!) {
@@ -42,6 +42,7 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
     );
     reqwest::Client::builder()
         .default_headers(headers)
+        .timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| VkError::RequestContext {
             context: "build client".into(),

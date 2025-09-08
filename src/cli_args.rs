@@ -83,8 +83,13 @@ pub struct ResolveArgs {
     /// Pull request comment URL or number with discussion fragment.
     #[arg(required = true)]
     pub reference: String,
-    /// Reply to post before resolving
-    #[arg(short = 'm', long = "message", value_name = "MESSAGE")]
+    /// Reply text to post before resolving the comment
+    #[arg(
+        short = 'm',
+        long = "message",
+        value_name = "MESSAGE",
+        help = "Reply text to post before resolving the comment"
+    )]
     pub message: Option<String>,
 }
 
