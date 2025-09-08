@@ -109,7 +109,7 @@ pub async fn start_mitm() -> Result<(SocketAddr, Handler, ShutdownHandle), std::
 #[allow(dead_code, reason = "invoked by other test modules")]
 pub fn vk_cmd(addr: SocketAddr) -> Command {
     let mut cmd = Command::cargo_bin("vk").expect("binary");
-    cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
+    cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}/graphql"))
         .env("GITHUB_API_URL", format!("http://{addr}"))
         .env("GITHUB_TOKEN", "dummy")
         .env("NO_COLOR", "1")

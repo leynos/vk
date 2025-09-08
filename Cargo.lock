@@ -3714,6 +3714,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "backon",
+ "base64 0.22.1",
  "bytes 1.10.1",
  "chrono",
  "clap",

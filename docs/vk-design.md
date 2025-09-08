@@ -37,7 +37,8 @@ even when multiple comments reference the same code.
   from the printed threads.
 
 - **Resolve threads**: `vk resolve <comment-ref>` posts an optional reply then
-  marks the thread resolved.
+  resolves the thread via the `resolveReviewThread` GraphQL mutation. The
+  thread ID is derived by base64-encoding `PullRequestReviewThread:<id>`.
 
 ## Architecture
 

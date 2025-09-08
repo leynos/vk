@@ -4,11 +4,18 @@
 //! resolved. The API base URL can be overridden with the `GITHUB_API_URL`
 //! environment variable for testing.
 
-use crate::VkError;
 use crate::ref_parser::RepoInfo;
+use crate::{VkError, api::GraphQLClient};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::{env, future::Future, pin::Pin};
+
+const RESOLVE_THREAD_MUTATION: &str = r"
+    mutation($id: ID!) {
+      resolveReviewThread(input: {threadId: $id}) { clientMutationId }
+    }
+";
 
 /// Build an authenticated client with GitHub headers.
 ///
@@ -76,24 +83,21 @@ pub async fn resolve_comment(
 ) -> Result<(), VkError> {
     let api = env::var("GITHUB_API_URL").unwrap_or_else(|_| "https://api.github.com".into());
     let client = github_client(token)?;
-    let base = format!(
-        "{api}/repos/{owner}/{repo}/pulls/comments/{comment}",
-        owner = repo.owner,
-        repo = repo.name,
-        comment = comment_id
-    );
-
     if let Some(body) = message {
         client
-            .post(format!("{base}/replies"))
+            .post(format!(
+                "{api}/repos/{owner}/{repo}/pulls/comments/{comment_id}/replies",
+                owner = repo.owner,
+                repo = repo.name,
+            ))
             .json(&json!({ "body": body }))
             .send_req("post reply")
             .await?;
     }
-
-    client
-        .put(format!("{base}/resolve"))
-        .send_req("resolve comment")
+    let gql = GraphQLClient::new(token, None)?;
+    let thread_id = STANDARD.encode(format!("PullRequestReviewThread:{comment_id}"));
+    let vars = json!({ "id": thread_id });
+    gql.run_query::<_, Value>(RESOLVE_THREAD_MUTATION, vars)
         .await?;
     Ok(())
 }
@@ -101,7 +105,7 @@ pub async fn resolve_comment(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use httpmock::{Method::POST, Method::PUT, MockServer};
+    use httpmock::{Method::POST, MockServer};
 
     #[tokio::test]
     async fn resolve_comment_sends_requests() {
@@ -112,11 +116,12 @@ mod tests {
             then.status(200);
         });
         let resolve = server.mock(|when, then| {
-            when.method(PUT).path("/repos/o/r/pulls/comments/1/resolve");
-            then.status(200);
+            when.method(POST).path("/graphql");
+            then.status(200)
+                .json_body(json!({"data": {"resolveReviewThread": {"clientMutationId": null}}}));
         });
-
         crate::test_utils::set_var("GITHUB_API_URL", server.url(""));
+        crate::test_utils::set_var("GITHUB_GRAPHQL_URL", server.url("/graphql"));
         let repo = RepoInfo {
             owner: "o".into(),
             name: "r".into(),
@@ -127,5 +132,6 @@ mod tests {
         reply.assert();
         resolve.assert();
         crate::test_utils::remove_var("GITHUB_API_URL");
+        crate::test_utils::remove_var("GITHUB_GRAPHQL_URL");
     }
 }
