@@ -29,6 +29,7 @@ mod html;
 mod issues;
 mod printer;
 mod ref_parser;
+mod resolve;
 mod review_threads;
 mod reviews;
 mod summary;
@@ -46,7 +47,7 @@ use summary::{
     print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
 };
 
-use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
+use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs, ResolveArgs};
 use crate::printer::{print_reviews, write_thread};
 use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_thread_reference};
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
@@ -79,6 +80,8 @@ enum Commands {
     Pr(PrArgs),
     /// Read a GitHub issue (todo)
     Issue(IssueArgs),
+    /// Resolve a pull request comment
+    Resolve(ResolveArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -362,6 +365,17 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
     Ok(())
 }
 
+async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkError> {
+    let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
+    let (repo, _, comment) = parse_pr_thread_reference(reference, global.repo.as_deref())?;
+    let comment_id = comment.ok_or(VkError::InvalidRef)?;
+    let token = env::var("GITHUB_TOKEN").unwrap_or_default();
+    if token.is_empty() {
+        warn!("GITHUB_TOKEN not set, using anonymous API access");
+    }
+    resolve::resolve_comment(&token, &repo, comment_id, args.message).await
+}
+
 #[tokio::main]
 async fn main() -> Result<(), VkError> {
     env_logger::init();
@@ -376,6 +390,10 @@ async fn main() -> Result<(), VkError> {
         Commands::Issue(issue_cli) => {
             let args = load_and_merge_subcommand_for(&issue_cli)?;
             run_issue(args, &global).await
+        }
+        Commands::Resolve(resolve_cli) => {
+            let args = load_and_merge_subcommand_for(&resolve_cli)?;
+            run_resolve(args, &global).await
         }
     }
 }
@@ -465,7 +483,7 @@ mod tests {
                 assert_eq!(args.reference.as_deref(), Some("123"));
                 assert!(args.files.is_empty());
             }
-            Commands::Issue(_) => panic!("wrong variant"),
+            _ => panic!("wrong variant"),
         }
     }
 
@@ -478,7 +496,7 @@ mod tests {
                 assert_eq!(args.reference.as_deref(), Some("123"));
                 assert_eq!(args.files, ["src/lib.rs", "README.md"]);
             }
-            Commands::Issue(_) => panic!("wrong variant"),
+            _ => panic!("wrong variant"),
         }
     }
 
@@ -487,7 +505,29 @@ mod tests {
         let cli = Cli::try_parse_from(["vk", "issue", "123"]).expect("parse cli");
         match cli.command {
             Commands::Issue(args) => assert_eq!(args.reference.as_deref(), Some("123")),
-            Commands::Pr(_) => panic!("wrong variant"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn resolve_subcommand_parses() {
+        let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1"]).expect("parse cli");
+        match cli.command {
+            Commands::Resolve(args) => {
+                assert_eq!(args.reference.as_deref(), Some("83#discussion_r1"));
+                assert!(args.message.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn resolve_subcommand_parses_message() {
+        let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1", "-m", "done"])
+            .expect("parse cli");
+        match cli.command {
+            Commands::Resolve(args) => assert_eq!(args.message.as_deref(), Some("done")),
+            _ => panic!("wrong variant"),
         }
     }
 

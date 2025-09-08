@@ -36,6 +36,9 @@ even when multiple comments reference the same code.
   banner (`========== review comments ==========`) separates reviewer summaries
   from the printed threads.
 
+- **Resolve threads**: `vk resolve <comment-ref>` posts an optional reply then
+  marks the thread resolved.
+
 ## Architecture
 
 The code centres on three printing helpers:
@@ -194,4 +197,6 @@ sequenceDiagram
 `vk` reads configuration files using `ortho_config`, which layers values from
 files, environment variables and CLI arguments. JSON5 and YAML formats are
 enabled through the `json5` and `yaml` features on `ortho_config`, which pull
-in the required parsers as transitive dependencies.
+in the required parsers as transitive dependencies. The REST API base URL
+defaults to `https://api.github.com` but can be overridden with
+`GITHUB_API_URL` for testing.

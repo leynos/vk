@@ -75,3 +75,15 @@ impl Default for IssueArgs {
         Self { reference: None }
     }
 }
+
+/// Parameters accepted by the `resolve` sub-command.
+#[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
+#[ortho_config(prefix = "VK")]
+pub struct ResolveArgs {
+    /// Pull request comment URL or number with discussion fragment.
+    #[arg(required = true)]
+    pub reference: Option<String>,
+    /// Reply to post before resolving
+    #[arg(short = 'm', long = "message", value_name = "MESSAGE")]
+    pub message: Option<String>,
+}

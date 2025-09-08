@@ -99,7 +99,7 @@ pub async fn start_mitm() -> Result<(SocketAddr, Handler, ShutdownHandle), std::
 
 /// Create a `vk` command configured for testing.
 ///
-/// The command points at the MITM server and disables colour output to make
+/// The command points at the MITM server for both GraphQL and REST requests and disables colour output to make
 /// assertions deterministic.
 #[allow(
     clippy::missing_panics_doc,
@@ -110,6 +110,7 @@ pub async fn start_mitm() -> Result<(SocketAddr, Handler, ShutdownHandle), std::
 pub fn vk_cmd(addr: SocketAddr) -> Command {
     let mut cmd = Command::cargo_bin("vk").expect("binary");
     cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}"))
+        .env("GITHUB_API_URL", format!("http://{addr}"))
         .env("GITHUB_TOKEN", "dummy")
         .env("NO_COLOR", "1")
         .env("CLICOLOR_FORCE", "0");
