@@ -24,12 +24,14 @@ backon = "1.5.2"
 html5ever = "0.35.0"
 markup5ever_rcdom = "0.35.0+unofficial"
 ortho_config = "0.5.0-beta1"
+base64 = "0.22.1"
 
 [features]
 default = ["toml"]
 toml = ["ortho_config/toml"]
 json5 = ["ortho_config/json5"]
 yaml = ["ortho_config/yaml"]
+unstable-rest-resolve = []
 
 [dev-dependencies]
 tempfile = "3.20.0"

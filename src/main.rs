@@ -29,6 +29,7 @@ mod html;
 mod issues;
 mod printer;
 mod ref_parser;
+mod resolve;
 mod review_threads;
 mod reviews;
 mod summary;
@@ -46,7 +47,7 @@ use summary::{
     print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
 };
 
-use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs};
+use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs, ResolveArgs};
 use crate::printer::{print_reviews, write_thread};
 use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_thread_reference};
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
@@ -79,6 +80,10 @@ enum Commands {
     Pr(PrArgs),
     /// Read a GitHub issue (todo)
     Issue(IssueArgs),
+    /// Resolve a pull request comment.
+    ///
+    /// The reference must include a fragment of the form `#discussion_r<ID>`
+    Resolve(ResolveArgs),
 }
 
 #[derive(Debug, Parser)]
@@ -117,6 +122,8 @@ pub enum VkError {
     },
     #[error("invalid reference")]
     InvalidRef,
+    #[error("GITHUB_TOKEN not set")]
+    MissingAuth,
     #[error("pull request number out of range")]
     InvalidNumber,
     #[error("expected URL path segment in {expected:?}, found '{found}'")]
@@ -362,6 +369,42 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
     Ok(())
 }
 
+async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkError> {
+    let (repo, number, comment) =
+        parse_pr_thread_reference(&args.reference, global.repo.as_deref())?;
+    let comment_id = comment.ok_or(VkError::InvalidRef)?;
+    let token = env::var("GITHUB_TOKEN").unwrap_or_default();
+    if token.is_empty() {
+        return Err(VkError::MissingAuth);
+    }
+    #[cfg(feature = "unstable-rest-resolve")]
+    {
+        resolve::resolve_comment(
+            &token,
+            resolve::CommentRef {
+                repo: &repo,
+                pull_number: number,
+                comment_id,
+            },
+            args.message,
+        )
+        .await
+    }
+    #[cfg(not(feature = "unstable-rest-resolve"))]
+    {
+        let _ = args.message;
+        resolve::resolve_comment(
+            &token,
+            resolve::CommentRef {
+                repo: &repo,
+                pull_number: number,
+                comment_id,
+            },
+        )
+        .await
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), VkError> {
     env_logger::init();
@@ -376,6 +419,10 @@ async fn main() -> Result<(), VkError> {
         Commands::Issue(issue_cli) => {
             let args = load_and_merge_subcommand_for(&issue_cli)?;
             run_issue(args, &global).await
+        }
+        Commands::Resolve(resolve_cli) => {
+            let args = load_and_merge_subcommand_for(&resolve_cli)?;
+            run_resolve(args, &global).await
         }
     }
 }
@@ -465,7 +512,7 @@ mod tests {
                 assert_eq!(args.reference.as_deref(), Some("123"));
                 assert!(args.files.is_empty());
             }
-            Commands::Issue(_) => panic!("wrong variant"),
+            _ => panic!("wrong variant"),
         }
     }
 
@@ -478,7 +525,7 @@ mod tests {
                 assert_eq!(args.reference.as_deref(), Some("123"));
                 assert_eq!(args.files, ["src/lib.rs", "README.md"]);
             }
-            Commands::Issue(_) => panic!("wrong variant"),
+            _ => panic!("wrong variant"),
         }
     }
 
@@ -487,7 +534,32 @@ mod tests {
         let cli = Cli::try_parse_from(["vk", "issue", "123"]).expect("parse cli");
         match cli.command {
             Commands::Issue(args) => assert_eq!(args.reference.as_deref(), Some("123")),
-            Commands::Pr(_) => panic!("wrong variant"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn resolve_subcommand_parses() {
+        let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1"]).expect("parse cli");
+        match cli.command {
+            Commands::Resolve(args) => {
+                assert_eq!(args.reference, "83#discussion_r1");
+                assert!(args.message.is_none());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn resolve_subcommand_parses_message() {
+        let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1", "-m", "done"])
+            .expect("parse cli");
+        match cli.command {
+            Commands::Resolve(args) => {
+                assert_eq!(args.reference, "83#discussion_r1");
+                assert_eq!(args.message.as_deref(), Some("done"));
+            }
+            _ => panic!("wrong variant"),
         }
     }
 
