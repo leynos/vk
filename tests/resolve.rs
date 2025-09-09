@@ -13,15 +13,18 @@ use utils::{start_mitm, vk_cmd};
 #[tokio::test]
 async fn resolve_flows(#[case] msg: Option<&'static str>) {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
-    let calls = Arc::new(Mutex::new(Vec::new()));
+    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
     *handler.lock().expect("lock handler") = Box::new(move |req| {
-        clone
-            .lock()
-            .expect("lock")
-            .push(format!("{} {}", req.method(), req.uri().path()));
+        let mut vec = clone.lock().expect("lock");
+        let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
+        vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
-            r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
+            if gql_calls == 0 {
+                r#"{"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}"#
+            } else {
+                r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
+            }
         } else {
             "{}"
         };
@@ -41,22 +44,28 @@ async fn resolve_flows(#[case] msg: Option<&'static str>) {
     .await
     .expect("spawn blocking");
     shutdown.shutdown().await;
-    assert_eq!(calls.lock().expect("lock").as_slice(), ["POST /graphql"]);
+    assert_eq!(
+        calls.lock().expect("lock").as_slice(),
+        ["POST /graphql", "POST /graphql"],
+    );
 }
 
 #[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
 async fn resolve_flows_reply() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
-    let calls = Arc::new(Mutex::new(Vec::new()));
+    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
     *handler.lock().expect("lock handler") = Box::new(move |req| {
-        clone
-            .lock()
-            .expect("lock")
-            .push(format!("{} {}", req.method(), req.uri().path()));
+        let mut vec = clone.lock().expect("lock");
+        let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
+        vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
-            r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
+            if gql_calls == 0 {
+                r#"{"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}"#
+            } else {
+                r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
+            }
         } else {
             "{}"
         };
@@ -85,6 +94,7 @@ async fn resolve_flows_reply() {
         [
             "POST /repos/o/r/pulls/83/comments/1/replies",
             "POST /graphql",
-        ]
+            "POST /graphql",
+        ],
     );
 }

@@ -21,8 +21,19 @@ const RESOLVE_THREAD_MUTATION: &str = r"
     }
 ";
 
+const THREAD_ID_QUERY: &str = r"
+    query($id: ID!) {
+      node(id: $id) {
+        ... on PullRequestReviewComment {
+          pullRequestReviewThread { id }
+        }
+      }
+    }
+";
+
 /// Comment location within a pull request review thread.
 #[derive(Copy, Clone)]
+#[cfg_attr(not(feature = "unstable-rest-resolve"), allow(dead_code, reason = "unused without unstable-rest-resolve"))]
 pub struct CommentRef<'a> {
     pub repo: &'a RepoInfo,
     pub pull_number: u64,
@@ -66,54 +77,53 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
 /// # Errors
 ///
 /// Returns [`VkError::RequestContext`] if an HTTP request fails.
-#[cfg_attr(
-    not(feature = "unstable-rest-resolve"),
-    expect(
-        unused_variables,
-        reason = "reply posting disabled without unstable-rest-resolve"
-    )
-)]
 pub async fn resolve_comment(
     token: &str,
     reference: CommentRef<'_>,
-    message: Option<String>,
+    #[cfg(feature = "unstable-rest-resolve")] message: Option<String>,
 ) -> Result<(), VkError> {
-    let CommentRef {
-        repo,
-        pull_number,
-        comment_id,
-    } = reference;
+    let comment_id = reference.comment_id;
     #[cfg(feature = "unstable-rest-resolve")]
-    {
+    let (repo, pull_number) = (reference.repo, reference.pull_number);
+
+    #[cfg(feature = "unstable-rest-resolve")]
+    if let Some(body) = message {
         let api = std::env::var("GITHUB_API_URL")
             .unwrap_or_else(|_| "https://api.github.com".into())
             .trim_end_matches('/')
             .to_owned();
         let client = github_client(token)?;
-        if let Some(body) = message {
-            let resp = client
-                .post(format!(
-                    "{api}/repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies",
-                    owner = repo.owner,
-                    repo = repo.name,
-                    pull_number = pull_number,
-                ))
-                .json(&json!({ "body": body }))
-                .send()
-                .await
-                .map_err(|e| VkError::RequestContext {
-                    context: "post reply".into(),
-                    source: Box::new(e),
-                })?;
-            if resp.status() != StatusCode::NOT_FOUND {
-                resp.error_for_status()
-                    .map_err(|e| VkError::Request(Box::new(e)))?;
-            }
+        let resp = client
+            .post(format!(
+                "{api}/repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies",
+                owner = repo.owner,
+                repo = repo.name,
+                pull_number = pull_number,
+            ))
+            .json(&json!({ "body": body }))
+            .send()
+            .await
+            .map_err(|e| VkError::RequestContext {
+                context: "post reply".into(),
+                source: Box::new(e),
+            })?;
+        if resp.status() != StatusCode::NOT_FOUND {
+            resp.error_for_status()
+                .map_err(|e| VkError::Request(Box::new(e)))?;
         }
     }
 
     let gql = GraphQLClient::new(token, None)?;
-    let thread_id = STANDARD.encode(format!("PullRequestReviewThread:{comment_id}"));
+    let comment_node = STANDARD.encode(format!("PullRequestReviewComment:{comment_id}"));
+    let lookup = gql
+        .run_query::<_, Value>(THREAD_ID_QUERY, json!({ "id": comment_node }))
+        .await?;
+    let thread_id = lookup
+        .get("node")
+        .and_then(|n| n.get("pullRequestReviewThread"))
+        .and_then(|t| t.get("id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| VkError::BadResponse("missing thread id".into()))?;
     let vars = json!({ "id": thread_id });
     gql.run_query::<_, Value>(RESOLVE_THREAD_MUTATION, vars)
         .await?;
@@ -136,10 +146,19 @@ mod tests {
                 .header("x-github-api-version", "2022-11-28");
             then.status(200);
         });
-        let resolve = server.mock(|when, then| {
-            when.method(POST).path("/graphql");
+        let lookup = server.mock(|when, then| {
+            when.method(POST)
+                .path("/graphql")
+                .body_contains("pullRequestReviewThread");
             then.status(200)
-                .json_body(json!({"data": {"resolveReviewThread": {"clientMutationId": null}}}));
+                .json_body(json!({"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}));
+        });
+        let resolve = server.mock(|when, then| {
+            when.method(POST)
+                .path("/graphql")
+                .body_contains("resolveReviewThread");
+            then.status(200)
+                .json_body(json!({"data":{"resolveReviewThread":{"clientMutationId":null}}}));
         });
         crate::test_utils::set_var("GITHUB_API_URL", server.url(""));
         crate::test_utils::set_var("GITHUB_GRAPHQL_URL", server.url("/graphql"));
@@ -159,6 +178,7 @@ mod tests {
         .await
         .expect("resolve comment");
         reply.assert();
+        lookup.assert();
         resolve.assert();
         crate::test_utils::remove_var("GITHUB_API_URL");
         crate::test_utils::remove_var("GITHUB_GRAPHQL_URL");
@@ -173,10 +193,19 @@ mod tests {
                 .path("/repos/o/r/pulls/2/comments/1/replies");
             then.status(200);
         });
-        let resolve = server.mock(|when, then| {
-            when.method(POST).path("/graphql");
+        let lookup = server.mock(|when, then| {
+            when.method(POST)
+                .path("/graphql")
+                .body_contains("pullRequestReviewThread");
             then.status(200)
-                .json_body(json!({"data": {"resolveReviewThread": {"clientMutationId": null}}}));
+                .json_body(json!({"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}));
+        });
+        let resolve = server.mock(|when, then| {
+            when.method(POST)
+                .path("/graphql")
+                .body_contains("resolveReviewThread");
+            then.status(200)
+                .json_body(json!({"data":{"resolveReviewThread":{"clientMutationId":null}}}));
         });
         crate::test_utils::set_var("GITHUB_API_URL", server.url(""));
         crate::test_utils::set_var("GITHUB_GRAPHQL_URL", server.url("/graphql"));
@@ -196,6 +225,7 @@ mod tests {
         .await
         .expect("resolve comment");
         reply.assert_hits(0);
+        lookup.assert();
         resolve.assert();
         crate::test_utils::remove_var("GITHUB_API_URL");
         crate::test_utils::remove_var("GITHUB_GRAPHQL_URL");
@@ -211,10 +241,19 @@ mod tests {
                 .header("x-github-api-version", "2022-11-28");
             then.status(404);
         });
-        let resolve = server.mock(|when, then| {
-            when.method(POST).path("/graphql");
+        let lookup = server.mock(|when, then| {
+            when.method(POST)
+                .path("/graphql")
+                .body_contains("pullRequestReviewThread");
             then.status(200)
-                .json_body(json!({"data": {"resolveReviewThread": {"clientMutationId": null}}}));
+                .json_body(json!({"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}));
+        });
+        let resolve = server.mock(|when, then| {
+            when.method(POST)
+                .path("/graphql")
+                .body_contains("resolveReviewThread");
+            then.status(200)
+                .json_body(json!({"data":{"resolveReviewThread":{"clientMutationId":null}}}));
         });
         crate::test_utils::set_var("GITHUB_API_URL", server.url(""));
         crate::test_utils::set_var("GITHUB_GRAPHQL_URL", server.url("/graphql"));
@@ -234,6 +273,7 @@ mod tests {
         .await
         .expect("resolve comment");
         reply.assert();
+        lookup.assert();
         resolve.assert();
         crate::test_utils::remove_var("GITHUB_API_URL");
         crate::test_utils::remove_var("GITHUB_GRAPHQL_URL");
