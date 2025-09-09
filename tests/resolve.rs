@@ -147,3 +147,107 @@ async fn resolve_falls_back_to_rest() {
         ],
     );
 }
+
+#[cfg(feature = "unstable-rest-resolve")]
+#[tokio::test]
+async fn resolve_flows_reply_rest_not_found() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+    let clone = Arc::clone(&calls);
+    *handler.lock().expect("lock handler") = Box::new(move |req| {
+        let mut vec = clone.lock().expect("lock");
+        let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
+        vec.push(format!("{} {}", req.method(), req.uri().path()));
+        let status = if req.uri().path().ends_with("/replies") {
+            StatusCode::NOT_FOUND
+        } else {
+            StatusCode::OK
+        };
+        let body = if req.uri().path() == "/graphql" {
+            if gql_calls == 0 {
+                r#"{"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}"#
+            } else {
+                r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
+            }
+        } else {
+            "{}"
+        };
+        Response::builder()
+            .status(status)
+            .header("Content-Type", "application/json")
+            .body(Full::from(body))
+            .expect("response")
+    });
+    tokio::task::spawn_blocking(move || {
+        vk_cmd(addr)
+            .args([
+                "resolve",
+                "https://github.com/o/r/pull/83#discussion_r1",
+                "-m",
+                "done",
+            ])
+            .assert()
+            .success();
+    })
+    .await
+    .expect("spawn blocking");
+    shutdown.shutdown().await;
+    assert_eq!(
+        calls.lock().expect("lock").as_slice(),
+        [
+            "POST /repos/o/r/pulls/83/comments/1/replies",
+            "POST /graphql",
+            "POST /graphql",
+        ],
+    );
+}
+
+#[cfg(feature = "unstable-rest-resolve")]
+#[tokio::test]
+async fn resolve_flows_reply_rest_error() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+    let clone = Arc::clone(&calls);
+    *handler.lock().expect("lock handler") = Box::new(move |req| {
+        let mut vec = clone.lock().expect("lock");
+        let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
+        vec.push(format!("{} {}", req.method(), req.uri().path()));
+        let status = if req.uri().path().ends_with("/replies") {
+            StatusCode::INTERNAL_SERVER_ERROR
+        } else {
+            StatusCode::OK
+        };
+        let body = if req.uri().path() == "/graphql" {
+            if gql_calls == 0 {
+                r#"{"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}"#
+            } else {
+                r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
+            }
+        } else {
+            "{}"
+        };
+        Response::builder()
+            .status(status)
+            .header("Content-Type", "application/json")
+            .body(Full::from(body))
+            .expect("response")
+    });
+    tokio::task::spawn_blocking(move || {
+        vk_cmd(addr)
+            .args([
+                "resolve",
+                "https://github.com/o/r/pull/83#discussion_r1",
+                "-m",
+                "done",
+            ])
+            .assert()
+            .failure();
+    })
+    .await
+    .expect("spawn blocking");
+    shutdown.shutdown().await;
+    assert_eq!(
+        calls.lock().expect("lock").as_slice(),
+        ["POST /repos/o/r/pulls/83/comments/1/replies"],
+    );
+}
