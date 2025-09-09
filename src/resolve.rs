@@ -47,6 +47,14 @@ pub struct CommentRef<'a> {
 /// # Errors
 ///
 /// Returns [`VkError::RequestContext`] when the client cannot be built.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use crate::resolve::github_client;
+/// let client = github_client("token")?;
+/// # Ok::<(), VkError>(())
+/// ```
 #[cfg(feature = "unstable-rest-resolve")]
 fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
     let mut headers = HeaderMap::new();
@@ -74,61 +82,137 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
             source: Box::new(e),
         })
 }
+/// Post a reply to a review comment using the REST API.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use crate::{ref_parser::RepoInfo, resolve::post_reply, VkError};
+/// # async fn run() -> Result<(), VkError> {
+/// let repo = RepoInfo { owner: "octocat", name: "hello" };
+/// post_reply("token", &repo, 1, 2, "Thanks").await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "unstable-rest-resolve")]
+async fn post_reply(
+    token: &str,
+    repo: &RepoInfo,
+    pull: u64,
+    comment_id: u64,
+    body: &str,
+) -> Result<(), VkError> {
+    let api = std::env::var("GITHUB_API_URL")
+        .unwrap_or_else(|_| "https://api.github.com".into())
+        .trim_end_matches('/')
+        .to_owned();
 
+    let client = github_client(token)?;
+    let url = format!(
+        "{api}/repos/{owner}/{repo}/pulls/{pull}/comments/{cid}/replies",
+        owner = repo.owner,
+        repo = repo.name,
+        pull = pull,
+        cid = comment_id,
+    );
+
+    let resp = client
+        .post(url)
+        .json(&json!({ "body": body }))
+        .send()
+        .await
+        .map_err(|e| VkError::RequestContext {
+            context: "post reply".into(),
+            source: Box::new(e),
+        })?;
+
+    if resp.status() != StatusCode::NOT_FOUND {
+        resp.error_for_status()
+            .map_err(|e| VkError::Request(Box::new(e)))?;
+    }
+    Ok(())
+}
+
+/// Look up the GraphQL thread ID for a review comment.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use crate::{api::GraphQLClient, resolve::get_thread_id, VkError};
+/// # async fn run(client: GraphQLClient) -> Result<(), VkError> {
+/// let id = get_thread_id(&client, 42).await?;
+/// assert!(!id.is_empty());
+/// # Ok(())
+/// # }
+/// ```
+async fn get_thread_id(gql: &GraphQLClient, comment_id: u64) -> Result<String, VkError> {
+    let node = STANDARD.encode(format!("PullRequestReviewComment:{comment_id}"));
+    let data: Value = gql
+        .run_query(THREAD_ID_QUERY, json!({ "id": node }))
+        .await?;
+    data.get("node")
+        .and_then(|n| n.get("pullRequestReviewThread"))
+        .and_then(|t| t.get("id"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| VkError::BadResponse("missing thread id".into()))
+}
+
+/// Resolve a review thread by ID.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use crate::{api::GraphQLClient, resolve::resolve_thread, VkError};
+/// # async fn run(client: GraphQLClient) -> Result<(), VkError> {
+/// resolve_thread(&client, "thread").await?;
+/// # Ok(())
+/// # }
+/// ```
+async fn resolve_thread(gql: &GraphQLClient, thread_id: &str) -> Result<(), VkError> {
+    gql.run_query::<_, Value>(RESOLVE_THREAD_MUTATION, json!({ "id": thread_id }))
+        .await?;
+    Ok(())
+}
 /// Resolve a pull request review comment and optionally post a reply.
 ///
 /// # Errors
 ///
 /// Returns [`VkError::RequestContext`] if an HTTP request fails.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use crate::{ref_parser::RepoInfo, resolve::{resolve_comment, CommentRef}, VkError};
+/// # async fn run() -> Result<(), VkError> {
+/// let repo = RepoInfo { owner: "octocat", name: "hello" };
+/// resolve_comment(
+///     "token",
+///     CommentRef { repo: &repo, pull_number: 1, comment_id: 2 },
+///     None,
+/// ).await?;
+/// # Ok(())
+/// # }
+/// ```
 pub async fn resolve_comment(
     token: &str,
     reference: CommentRef<'_>,
     #[cfg(feature = "unstable-rest-resolve")] message: Option<String>,
 ) -> Result<(), VkError> {
-    let comment_id = reference.comment_id;
-    #[cfg(feature = "unstable-rest-resolve")]
-    let (repo, pull_number) = (reference.repo, reference.pull_number);
-
     #[cfg(feature = "unstable-rest-resolve")]
     if let Some(body) = message {
-        let api = std::env::var("GITHUB_API_URL")
-            .unwrap_or_else(|_| "https://api.github.com".into())
-            .trim_end_matches('/')
-            .to_owned();
-        let client = github_client(token)?;
-        let resp = client
-            .post(format!(
-                "{api}/repos/{owner}/{repo}/pulls/{pull_number}/comments/{comment_id}/replies",
-                owner = repo.owner,
-                repo = repo.name,
-                pull_number = pull_number,
-            ))
-            .json(&json!({ "body": body }))
-            .send()
-            .await
-            .map_err(|e| VkError::RequestContext {
-                context: "post reply".into(),
-                source: Box::new(e),
-            })?;
-        if resp.status() != StatusCode::NOT_FOUND {
-            resp.error_for_status()
-                .map_err(|e| VkError::Request(Box::new(e)))?;
-        }
+        post_reply(
+            token,
+            reference.repo,
+            reference.pull_number,
+            reference.comment_id,
+            &body,
+        )
+        .await?;
     }
 
     let gql = GraphQLClient::new(token, None)?;
-    let comment_node = STANDARD.encode(format!("PullRequestReviewComment:{comment_id}"));
-    let lookup = gql
-        .run_query::<_, Value>(THREAD_ID_QUERY, json!({ "id": comment_node }))
-        .await?;
-    let thread_id = lookup
-        .get("node")
-        .and_then(|n| n.get("pullRequestReviewThread"))
-        .and_then(|t| t.get("id"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| VkError::BadResponse("missing thread id".into()))?;
-    let vars = json!({ "id": thread_id });
-    gql.run_query::<_, Value>(RESOLVE_THREAD_MUTATION, vars)
-        .await?;
+    let thread_id = get_thread_id(&gql, reference.comment_id).await?;
+    resolve_thread(&gql, &thread_id).await?;
     Ok(())
 }
