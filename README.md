@@ -42,8 +42,8 @@ The CLI provides three subcommands:
   post a reply before resolving (only when built with the
   `unstable-rest-resolve` feature).
 
-Enabling the `unstable-rest-resolve` feature posts the reply via the REST API
-before resolving. Without it, any provided message is ignored.
+When the feature is disabled, the message flag is ignored and only the GraphQL
+resolution is performed.
 
 `vk` loads default values for subcommands from configuration files and
 environment variables. When these defaults omit the required `reference` field,
