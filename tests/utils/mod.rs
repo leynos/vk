@@ -106,7 +106,6 @@ pub async fn start_mitm() -> Result<(SocketAddr, Handler, ShutdownHandle), std::
     clippy::must_use_candidate,
     reason = "helper for integration tests"
 )]
-#[allow(dead_code, reason = "invoked by other test modules")]
 pub fn vk_cmd(addr: SocketAddr) -> Command {
     let mut cmd = Command::cargo_bin("vk").expect("binary");
     cmd.env("GITHUB_GRAPHQL_URL", format!("http://{addr}/graphql"))
@@ -116,3 +115,5 @@ pub fn vk_cmd(addr: SocketAddr) -> Command {
         .env("CLICOLOR_FORCE", "0");
     cmd
 }
+
+const _: fn(SocketAddr) -> Command = vk_cmd;

@@ -200,4 +200,42 @@ mod tests {
         crate::test_utils::remove_var("GITHUB_API_URL");
         crate::test_utils::remove_var("GITHUB_GRAPHQL_URL");
     }
+    #[serial_test::serial]
+    #[tokio::test]
+    async fn resolve_comment_ignores_404_reply() {
+        let server = MockServer::start();
+        let reply = server.mock(|when, then| {
+            when.method(POST)
+                .path("/repos/o/r/pulls/2/comments/1/replies")
+                .header("accept", "application/vnd.github+json")
+                .header("x-github-api-version", "2022-11-28");
+            then.status(404);
+        });
+        let resolve = server.mock(|when, then| {
+            when.method(POST).path("/graphql");
+            then.status(200)
+                .json_body(json!({"data": {"resolveReviewThread": {"clientMutationId": null}}}));
+        });
+        crate::test_utils::set_var("GITHUB_API_URL", server.url(""));
+        crate::test_utils::set_var("GITHUB_GRAPHQL_URL", server.url("/graphql"));
+        let repo = RepoInfo {
+            owner: "o".into(),
+            name: "r".into(),
+        };
+        resolve_comment(
+            "t",
+            CommentRef {
+                repo: &repo,
+                pull_number: 2,
+                comment_id: 1,
+            },
+            Some("done".into()),
+        )
+        .await
+        .expect("resolve comment");
+        reply.assert();
+        resolve.assert();
+        crate::test_utils::remove_var("GITHUB_API_URL");
+        crate::test_utils::remove_var("GITHUB_GRAPHQL_URL");
+    }
 }
