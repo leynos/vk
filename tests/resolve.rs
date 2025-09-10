@@ -100,6 +100,7 @@ async fn resolve_flows_reply() {
 }
 
 #[cfg(feature = "unstable-rest-resolve")]
+<<<<<<< HEAD
 #[tokio::test]
 async fn resolve_falls_back_to_rest() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
@@ -151,6 +152,12 @@ async fn resolve_falls_back_to_rest() {
 #[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
 async fn resolve_flows_reply_rest_not_found() {
+||||||| parent of d759f78 (Deduplicate REST reply tests with shared helper)
+#[tokio::test]
+async fn resolve_flows_reply_rest_not_found() {
+=======
+async fn run_reply_flow(rest_status: StatusCode, expect_success: bool) -> Vec<String> {
+>>>>>>> d759f78 (Deduplicate REST reply tests with shared helper)
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
@@ -159,7 +166,7 @@ async fn resolve_flows_reply_rest_not_found() {
         let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let status = if req.uri().path().ends_with("/replies") {
-            StatusCode::NOT_FOUND
+            rest_status
         } else {
             StatusCode::OK
         };
@@ -179,21 +186,32 @@ async fn resolve_flows_reply_rest_not_found() {
             .expect("response")
     });
     tokio::task::spawn_blocking(move || {
-        vk_cmd(addr)
+        let assert = vk_cmd(addr)
             .args([
                 "resolve",
                 "https://github.com/o/r/pull/83#discussion_r1",
                 "-m",
                 "done",
             ])
-            .assert()
-            .success();
+            .assert();
+        if expect_success {
+            assert.success();
+        } else {
+            assert.failure();
+        }
     })
     .await
     .expect("spawn blocking");
     shutdown.shutdown().await;
+    calls.lock().expect("lock").clone()
+}
+
+#[cfg(feature = "unstable-rest-resolve")]
+#[tokio::test]
+async fn resolve_flows_reply_rest_not_found() {
+    let calls = run_reply_flow(StatusCode::NOT_FOUND, true).await;
     assert_eq!(
-        calls.lock().expect("lock").as_slice(),
+        calls,
         [
             "POST /repos/o/r/pulls/83/comments/1/replies",
             "POST /graphql",
@@ -205,49 +223,6 @@ async fn resolve_flows_reply_rest_not_found() {
 #[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
 async fn resolve_flows_reply_rest_error() {
-    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
-    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
-    let clone = Arc::clone(&calls);
-    *handler.lock().expect("lock handler") = Box::new(move |req| {
-        let mut vec = clone.lock().expect("lock");
-        let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
-        vec.push(format!("{} {}", req.method(), req.uri().path()));
-        let status = if req.uri().path().ends_with("/replies") {
-            StatusCode::INTERNAL_SERVER_ERROR
-        } else {
-            StatusCode::OK
-        };
-        let body = if req.uri().path() == "/graphql" {
-            if gql_calls == 0 {
-                r#"{"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}"#
-            } else {
-                r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
-            }
-        } else {
-            "{}"
-        };
-        Response::builder()
-            .status(status)
-            .header("Content-Type", "application/json")
-            .body(Full::from(body))
-            .expect("response")
-    });
-    tokio::task::spawn_blocking(move || {
-        vk_cmd(addr)
-            .args([
-                "resolve",
-                "https://github.com/o/r/pull/83#discussion_r1",
-                "-m",
-                "done",
-            ])
-            .assert()
-            .failure();
-    })
-    .await
-    .expect("spawn blocking");
-    shutdown.shutdown().await;
-    assert_eq!(
-        calls.lock().expect("lock").as_slice(),
-        ["POST /repos/o/r/pulls/83/comments/1/replies"],
-    );
+    let calls = run_reply_flow(StatusCode::INTERNAL_SERVER_ERROR, false).await;
+    assert_eq!(calls, ["POST /repos/o/r/pulls/83/comments/1/replies"],);
 }
