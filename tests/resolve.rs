@@ -3,14 +3,16 @@
 use assert_cmd::prelude::*;
 use http_body_util::Full;
 use hyper::{Response, StatusCode};
+use predicates::prelude::*;
 use std::sync::{Arc, Mutex};
 
 mod utils;
 use utils::{start_mitm, vk_cmd};
 
+#[cfg(feature = "unstable-rest-resolve")]
+#[tokio::test]
 #[rstest::rstest]
 #[case(None)]
-#[tokio::test]
 async fn resolve_flows(#[case] msg: Option<&'static str>) {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -188,7 +190,8 @@ async fn run_reply_flow(
                 "-m",
                 "done",
             ])
-            .output().expect("run command");
+            .output()
+            .expect("run command");
         if expect_success {
             assert!(output.status.success());
         } else {
@@ -204,29 +207,42 @@ async fn run_reply_flow(
 
 #[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
-async fn resolve_flows_reply_rest_not_found() {
-    let (calls, stdout, stderr) = run_reply_flow(StatusCode::NOT_FOUND, true).await;
+#[rstest::rstest]
+#[case(
+    StatusCode::NOT_FOUND,
+    true,
+    &[
+        "POST /repos/o/r/pulls/83/comments/1/replies",
+        "POST /graphql",
+        "POST /graphql",
+    ],
+)]
+#[case(
+    StatusCode::INTERNAL_SERVER_ERROR,
+    false,
+    &["POST /repos/o/r/pulls/83/comments/1/replies"],
+)]
+async fn resolve_flows_reply_rest(
+    #[case] rest_status: StatusCode,
+    #[case] should_succeed: bool,
+    #[case] expected: &'static [&'static str],
+) {
+    let (calls, stdout, stderr) = run_reply_flow(rest_status, should_succeed).await;
     let stdout = String::from_utf8_lossy(&stdout);
     let stderr = String::from_utf8_lossy(&stderr);
     assert!(stdout.trim().is_empty(), "unexpected stdout: {stdout}");
-    assert!(stderr.trim().is_empty(), "unexpected stderr: {stderr}");
-    assert_eq!(
-        calls,
-        [
-            "POST /repos/o/r/pulls/83/comments/1/replies",
-            "POST /graphql",
-            "POST /graphql",
-        ],
-    );
-}
-
-#[cfg(feature = "unstable-rest-resolve")]
-#[tokio::test]
-async fn resolve_flows_reply_rest_error() {
-    let (calls, stdout, stderr) = run_reply_flow(StatusCode::INTERNAL_SERVER_ERROR, false).await;
-    let stdout = String::from_utf8_lossy(&stdout);
-    let stderr = String::from_utf8_lossy(&stderr);
-    assert!(stdout.trim().is_empty(), "unexpected stdout: {stdout}");
-    assert!(stderr.contains("Status(500"), "stderr: {stderr}");
-    assert_eq!(calls, ["POST /repos/o/r/pulls/83/comments/1/replies"],);
+    if should_succeed {
+        assert!(
+            predicate::str::is_empty().eval(&stderr),
+            "unexpected stderr: {stderr}"
+        );
+    } else {
+        assert!(
+            predicate::str::contains("replies")
+                .and(predicate::str::contains("500"))
+                .eval(&stderr),
+            "stderr: {stderr}"
+        );
+    }
+    assert_eq!(calls, expected);
 }
