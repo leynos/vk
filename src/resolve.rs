@@ -9,10 +9,8 @@ use crate::{VkError, api::GraphQLClient};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(feature = "unstable-rest-resolve")]
 use reqwest::StatusCode;
-#[cfg(feature = "unstable-rest-resolve")]
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use serde_json::{Value, json};
-#[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
 
 const RESOLVE_THREAD_MUTATION: &str = r"
@@ -31,6 +29,23 @@ const THREAD_ID_QUERY: &str = r"
     }
 ";
 
+/// Extract the thread identifier from a GraphQL lookup.
+///
+/// # Examples
+///
+/// ```
+/// use serde_json::json;
+/// let data = json!({"node": {"pullRequestReviewThread": {"id": "T"}}});
+/// assert_eq!(thread_id_from_lookup(&data), Some("T"));
+/// ```
+fn thread_id_from_lookup(lookup: &Value) -> Option<&str> {
+    lookup
+        .get("node")
+        .and_then(|n| n.get("pullRequestReviewThread"))
+        .and_then(|t| t.get("id"))
+        .and_then(Value::as_str)
+}
+
 /// Comment location within a pull request review thread.
 #[derive(Copy, Clone)]
 #[cfg_attr(
@@ -47,7 +62,6 @@ pub struct CommentRef<'a> {
 /// # Errors
 ///
 /// Returns [`VkError::RequestContext`] when the client cannot be built.
-#[cfg(feature = "unstable-rest-resolve")]
 fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().expect("static header"));
@@ -73,6 +87,61 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
             context: "build client".into(),
             source: Box::new(e),
         })
+}
+
+/// Fetch the global node identifier for a review comment via the REST API.
+///
+/// This is used as a fallback if the GraphQL node encoding changes.
+///
+/// # Errors
+///
+/// Returns [`VkError::RequestContext`] when the request fails or
+/// [`VkError::BadResponse`] if the `node_id` field is absent.
+///
+/// # Examples
+///
+/// ```no_run
+/// use crate::ref_parser::RepoInfo;
+/// async fn example(token: &str, repo: &RepoInfo) -> Result<(), crate::VkError> {
+///     let _ = fetch_comment_node_id(token, repo, 1).await?;
+///     Ok(())
+/// }
+/// ```
+async fn fetch_comment_node_id(
+    token: &str,
+    repo: &RepoInfo,
+    comment_id: u64,
+) -> Result<String, VkError> {
+    let api = std::env::var("GITHUB_API_URL")
+        .unwrap_or_else(|_| "https://api.github.com".into())
+        .trim_end_matches('/')
+        .to_owned();
+    let client = github_client(token)?;
+    let url = format!(
+        "{api}/repos/{owner}/{repo}/pulls/comments/{comment_id}",
+        owner = repo.owner,
+        repo = repo.name,
+        comment_id = comment_id,
+    );
+    let comment = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| VkError::RequestContext {
+            context: "fetch comment".into(),
+            source: Box::new(e),
+        })?
+        .json::<Value>()
+        .await
+        .map_err(|e| VkError::RequestContext {
+            context: "parse comment".into(),
+            source: Box::new(e),
+        })?;
+    comment
+        .get("node_id")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| VkError::BadResponse("missing comment node id".into()))
 }
 
 /// Resolve a pull request review comment and optionally post a reply.
@@ -117,16 +186,25 @@ pub async fn resolve_comment(
     }
 
     let gql = GraphQLClient::new(token, None)?;
+    // GitHub encodes node identifiers as base64 "<Type>:<id>" values.
+    // If this format changes, the lookup below may fail and we fall back to REST.
     let comment_node = STANDARD.encode(format!("PullRequestReviewComment:{comment_id}"));
     let lookup = gql
-        .run_query::<_, Value>(THREAD_ID_QUERY, json!({ "id": comment_node }))
-        .await?;
-    let thread_id = lookup
-        .get("node")
-        .and_then(|n| n.get("pullRequestReviewThread"))
-        .and_then(|t| t.get("id"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| VkError::BadResponse("missing thread id".into()))?;
+        .run_query::<_, Value>(THREAD_ID_QUERY, json!({ "id": &comment_node }))
+        .await;
+    #[expect(clippy::single_match_else, reason = "fallback to REST on lookup failure")]
+    let thread_id = match lookup.ok().and_then(|data| thread_id_from_lookup(&data).map(ToOwned::to_owned)) {
+        Some(id) => id,
+        None => {
+            let node_id = fetch_comment_node_id(token, reference.repo, comment_id).await?;
+            let lookup = gql
+                .run_query::<_, Value>(THREAD_ID_QUERY, json!({ "id": node_id }))
+                .await?;
+            thread_id_from_lookup(&lookup)
+                .ok_or_else(|| VkError::BadResponse("missing thread id".into()))?
+                .to_owned()
+        }
+    };
     let vars = json!({ "id": thread_id });
     gql.run_query::<_, Value>(RESOLVE_THREAD_MUTATION, vars)
         .await?;
