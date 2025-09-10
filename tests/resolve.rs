@@ -100,7 +100,6 @@ async fn resolve_flows_reply() {
 }
 
 #[cfg(feature = "unstable-rest-resolve")]
-<<<<<<< HEAD
 #[tokio::test]
 async fn resolve_falls_back_to_rest() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
@@ -150,14 +149,10 @@ async fn resolve_falls_back_to_rest() {
 }
 
 #[cfg(feature = "unstable-rest-resolve")]
-#[tokio::test]
-async fn resolve_flows_reply_rest_not_found() {
-||||||| parent of d759f78 (Deduplicate REST reply tests with shared helper)
-#[tokio::test]
-async fn resolve_flows_reply_rest_not_found() {
-=======
-async fn run_reply_flow(rest_status: StatusCode, expect_success: bool) -> Vec<String> {
->>>>>>> d759f78 (Deduplicate REST reply tests with shared helper)
+async fn run_reply_flow(
+    rest_status: StatusCode,
+    expect_success: bool,
+) -> (Vec<String>, Vec<u8>, Vec<u8>) {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
@@ -185,31 +180,36 @@ async fn run_reply_flow(rest_status: StatusCode, expect_success: bool) -> Vec<St
             .body(Full::from(body))
             .expect("response")
     });
-    tokio::task::spawn_blocking(move || {
-        let assert = vk_cmd(addr)
+    let (stdout, stderr) = tokio::task::spawn_blocking(move || {
+        let output = vk_cmd(addr)
             .args([
                 "resolve",
                 "https://github.com/o/r/pull/83#discussion_r1",
                 "-m",
                 "done",
             ])
-            .assert();
+            .output().expect("run command");
         if expect_success {
-            assert.success();
+            assert!(output.status.success());
         } else {
-            assert.failure();
+            assert!(!output.status.success());
         }
+        (output.stdout, output.stderr)
     })
     .await
     .expect("spawn blocking");
     shutdown.shutdown().await;
-    calls.lock().expect("lock").clone()
+    (calls.lock().expect("lock").clone(), stdout, stderr)
 }
 
 #[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
 async fn resolve_flows_reply_rest_not_found() {
-    let calls = run_reply_flow(StatusCode::NOT_FOUND, true).await;
+    let (calls, stdout, stderr) = run_reply_flow(StatusCode::NOT_FOUND, true).await;
+    let stdout = String::from_utf8_lossy(&stdout);
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert!(stdout.trim().is_empty(), "unexpected stdout: {stdout}");
+    assert!(stderr.trim().is_empty(), "unexpected stderr: {stderr}");
     assert_eq!(
         calls,
         [
@@ -223,6 +223,10 @@ async fn resolve_flows_reply_rest_not_found() {
 #[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
 async fn resolve_flows_reply_rest_error() {
-    let calls = run_reply_flow(StatusCode::INTERNAL_SERVER_ERROR, false).await;
+    let (calls, stdout, stderr) = run_reply_flow(StatusCode::INTERNAL_SERVER_ERROR, false).await;
+    let stdout = String::from_utf8_lossy(&stdout);
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert!(stdout.trim().is_empty(), "unexpected stdout: {stdout}");
+    assert!(stderr.contains("Status(500"), "stderr: {stderr}");
     assert_eq!(calls, ["POST /repos/o/r/pulls/83/comments/1/replies"],);
 }
