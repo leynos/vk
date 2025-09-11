@@ -11,7 +11,6 @@ use std::sync::{Arc, Mutex};
 mod utils;
 use utils::{start_mitm, vk_cmd};
 
-#[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
 #[rstest::rstest]
 #[case(None)]
@@ -54,7 +53,6 @@ async fn resolve_flows(#[case] msg: Option<&'static str>) {
     );
 }
 
-#[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
 async fn resolve_flows_reply() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
@@ -103,7 +101,6 @@ async fn resolve_flows_reply() {
     );
 }
 
-#[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
 async fn resolve_falls_back_to_rest() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
@@ -151,12 +148,9 @@ async fn resolve_falls_back_to_rest() {
         ],
     );
 }
-
-#[cfg(feature = "unstable-rest-resolve")]
 async fn run_reply_flow(
     rest_status: StatusCode,
-    expect_success: bool,
-) -> (Vec<String>, Vec<u8>, Vec<u8>) {
+) -> (Vec<String>, Vec<u8>, Vec<u8>, std::process::ExitStatus) {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
@@ -184,7 +178,7 @@ async fn run_reply_flow(
             .body(Full::from(body))
             .expect("response")
     });
-    let (stdout, stderr) = tokio::task::spawn_blocking(move || {
+    let (stdout, stderr, status) = tokio::task::spawn_blocking(move || {
         let output = vk_cmd(addr)
             .args([
                 "resolve",
@@ -194,20 +188,14 @@ async fn run_reply_flow(
             ])
             .output()
             .expect("run command");
-        if expect_success {
-            assert!(output.status.success());
-        } else {
-            assert!(!output.status.success());
-        }
-        (output.stdout, output.stderr)
+        (output.stdout, output.stderr, output.status)
     })
     .await
     .expect("spawn blocking");
     shutdown.shutdown().await;
-    (calls.lock().expect("lock").clone(), stdout, stderr)
+    (calls.lock().expect("lock").clone(), stdout, stderr, status)
 }
 
-#[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
 #[rstest::rstest]
 #[case(
@@ -229,16 +217,18 @@ async fn resolve_flows_reply_rest(
     #[case] should_succeed: bool,
     #[case] expected: &'static [&'static str],
 ) {
-    let (calls, stdout, stderr) = run_reply_flow(rest_status, should_succeed).await;
+    let (calls, stdout, stderr, status) = run_reply_flow(rest_status).await;
     let stdout = String::from_utf8_lossy(&stdout);
     let stderr = String::from_utf8_lossy(&stderr);
     assert!(stdout.trim().is_empty(), "unexpected stdout: {stdout}");
     if should_succeed {
+        assert!(status.success());
         assert!(
             predicate::str::is_empty().eval(&stderr),
             "unexpected stderr: {stderr}"
         );
     } else {
+        assert!(!status.success());
         assert!(
             predicate::str::contains("replies")
                 .and(predicate::str::contains("500"))
