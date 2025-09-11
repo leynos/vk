@@ -133,6 +133,7 @@ async fn pr_discussion_reference_fetches_resolved_thread() {
             "nodes": [{
                 "id": "t1",
                 "isResolved": true,
+                "isOutdated": false,
                 "comments": {
                     "nodes": [
                         { "body": "first", "diffHunk": "@@ -1 +1 @@\n-old\n+new\n", "originalPosition": null, "position": null, "path": "file.rs", "url": "https://github.com/o/r/pull/1#discussion_r1", "author": null },

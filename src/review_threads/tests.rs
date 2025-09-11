@@ -58,6 +58,7 @@ async fn pagination_client() -> TestClient {
             "nodes": [{
                 "id": "t",
                 "isResolved": false,
+                "isOutdated": false,
                 "comments": {"nodes": first, "pageInfo": {"hasNextPage": true, "endCursor": "c99"}}
             }],
             "pageInfo": {"hasNextPage": false, "endCursor": null}
@@ -88,6 +89,7 @@ async fn path_variant_client(
             "nodes": [{
                 "id": "t",
                 "isResolved": false,
+                "isOutdated": false,
                 "comments": {"nodes": [{
                     "body": "c",
                     "diffHunk": "",
@@ -356,6 +358,23 @@ async fn threads_with_many_comments_do_not_duplicate_first_page(
     let _ = join.await;
 }
 
+#[test]
+fn filter_outdated_threads_excludes_outdated() {
+    let threads = vec![
+        ReviewThread {
+            is_outdated: true,
+            ..Default::default()
+        },
+        ReviewThread {
+            is_outdated: false,
+            ..Default::default()
+        },
+    ];
+    let filtered = super::filter_outdated_threads(threads);
+    assert_eq!(filtered.len(), 1);
+    assert!(filtered.first().is_some_and(|t| !t.is_outdated));
+}
+
 #[fixture]
 async fn retry_client() -> TestClient {
     let page1 = serde_json::json!({
@@ -363,6 +382,7 @@ async fn retry_client() -> TestClient {
             "nodes": [{
                 "id": "t1",
                 "isResolved": false,
+                "isOutdated": false,
                 "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
             }],
             "pageInfo": {"hasNextPage": true, "endCursor": "c1"},
@@ -375,6 +395,7 @@ async fn retry_client() -> TestClient {
             "nodes": [{
                 "id": "t2",
                 "isResolved": false,
+                "isOutdated": false,
                 "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
             }],
             "pageInfo": {"hasNextPage": false, "endCursor": null},
@@ -450,11 +471,13 @@ async fn fetch_review_threads_with_resolution_can_include_resolved(repo: RepoInf
                 {
                     "id": "t1",
                     "isResolved": true,
+                    "isOutdated": false,
                     "comments": {"nodes": [comment("c1")], "pageInfo": {"hasNextPage": false, "endCursor": null}}
                 },
                 {
                     "id": "t2",
                     "isResolved": false,
+                "isOutdated": false,
                     "comments": {"nodes": [comment("c2")], "pageInfo": {"hasNextPage": false, "endCursor": null}}
                 }
             ],

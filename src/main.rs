@@ -41,7 +41,7 @@ pub use issues::{Issue, fetch_issue};
 use review_threads::thread_for_comment;
 pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
-    fetch_review_threads_with_resolution, filter_threads_by_files,
+    fetch_review_threads_with_resolution, filter_outdated_threads, filter_threads_by_files,
 };
 use summary::{
     print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
@@ -335,7 +335,12 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         if let Some(comment_id) = comment {
             thread_for_comment(all, comment_id).into_iter().collect()
         } else {
-            filter_threads_by_files(all, &args.files)
+            let visible = if args.show_outdated {
+                all
+            } else {
+                filter_outdated_threads(all)
+            };
+            filter_threads_by_files(visible, &args.files)
         }
     };
 

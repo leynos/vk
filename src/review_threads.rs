@@ -57,6 +57,8 @@ pub struct ReviewThread {
     pub id: String,
     #[serde(rename = "isResolved")]
     pub is_resolved: bool,
+    #[serde(rename = "isOutdated")]
+    pub is_outdated: bool,
     pub comments: CommentConnection,
 }
 
@@ -307,6 +309,25 @@ async fn fetch_all_comments(
 /// ```
 fn filter_unresolved_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
     threads.into_iter().filter(|t| !t.is_resolved).collect()
+}
+
+/// Retain only non-outdated review threads.
+///
+/// # Examples
+///
+/// ```ignore
+/// use vk::review_threads::{filter_outdated_threads, ReviewThread};
+/// let threads = vec![
+///     ReviewThread { is_outdated: true, ..Default::default() },
+///     ReviewThread { is_outdated: false, ..Default::default() },
+/// ];
+/// let filtered = filter_outdated_threads(threads);
+/// assert_eq!(filtered.len(), 1);
+/// assert!(!filtered[0].is_outdated);
+/// ```
+#[must_use]
+pub fn filter_outdated_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
+    threads.into_iter().filter(|t| !t.is_outdated).collect()
 }
 
 /// Filter review threads to those whose first comment matches one of `files`.

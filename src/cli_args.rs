@@ -51,6 +51,10 @@ pub struct PrArgs {
     #[arg(value_name = "FILE", num_args = 0..)]
     #[serde(default)]
     pub files: Vec<String>,
+    /// Include outdated review threads
+    #[arg(short = 'o', long = "show-outdated")]
+    #[serde(default)]
+    pub show_outdated: bool,
 }
 
 /// Parameters accepted by the `issue` sub-command.
