@@ -3,7 +3,6 @@
 use assert_cmd::prelude::*;
 use http_body_util::Full;
 use hyper::{Response, StatusCode};
-use predicates::str::contains;
 use std::sync::{Arc, Mutex};
 
 mod utils;
@@ -103,6 +102,7 @@ async fn resolve_flows_reply() {
 #[cfg(feature = "unstable-rest-resolve")]
 #[tokio::test]
 async fn resolve_reply_not_found() {
+    use predicates::str::contains;
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
