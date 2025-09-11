@@ -1,5 +1,7 @@
 //! End-to-end tests for the `vk resolve` sub-command.
 
+#![cfg(feature = "unstable-rest-resolve")]
+
 use assert_cmd::prelude::*;
 use http_body_util::Full;
 use hyper::{Response, StatusCode};
