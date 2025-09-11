@@ -316,17 +316,17 @@ fn filter_unresolved_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
 /// # Examples
 ///
 /// ```ignore
-/// use vk::review_threads::{filter_outdated_threads, ReviewThread};
+/// use vk::review_threads::{exclude_outdated_threads, ReviewThread};
 /// let threads = vec![
 ///     ReviewThread { is_outdated: true, ..Default::default() },
 ///     ReviewThread { is_outdated: false, ..Default::default() },
 /// ];
-/// let filtered = filter_outdated_threads(threads);
+/// let filtered = exclude_outdated_threads(threads);
 /// assert_eq!(filtered.len(), 1);
 /// assert!(!filtered[0].is_outdated);
 /// ```
 #[must_use]
-pub fn filter_outdated_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
+pub fn exclude_outdated_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
     threads.into_iter().filter(|t| !t.is_outdated).collect()
 }
 

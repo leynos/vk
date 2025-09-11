@@ -358,21 +358,36 @@ async fn threads_with_many_comments_do_not_duplicate_first_page(
     let _ = join.await;
 }
 
-#[test]
-fn filter_outdated_threads_excludes_outdated() {
-    let threads = vec![
-        ReviewThread {
-            is_outdated: true,
-            ..Default::default()
-        },
-        ReviewThread {
-            is_outdated: false,
-            ..Default::default()
-        },
-    ];
-    let filtered = super::filter_outdated_threads(threads);
-    assert_eq!(filtered.len(), 1);
-    assert!(filtered.first().is_some_and(|t| !t.is_outdated));
+#[rstest]
+#[case::mixed(
+    vec![
+        ReviewThread { is_outdated: true, ..Default::default() },
+        ReviewThread { is_outdated: false, ..Default::default() },
+    ],
+    1,
+)]
+#[case::empty(vec![], 0)]
+#[case::all_outdated(
+    vec![
+        ReviewThread { is_outdated: true, ..Default::default() },
+        ReviewThread { is_outdated: true, ..Default::default() },
+    ],
+    0,
+)]
+#[case::none_outdated(
+    vec![
+        ReviewThread { is_outdated: false, ..Default::default() },
+        ReviewThread { is_outdated: false, ..Default::default() },
+    ],
+    2,
+)]
+fn exclude_outdated_threads_filters(
+    #[case] threads: Vec<ReviewThread>,
+    #[case] expected_len: usize,
+) {
+    let filtered = super::exclude_outdated_threads(threads);
+    assert_eq!(filtered.len(), expected_len);
+    assert!(filtered.iter().all(|t| !t.is_outdated));
 }
 
 #[fixture]

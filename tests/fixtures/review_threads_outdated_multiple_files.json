@@ -1,0 +1,51 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "t1",
+              "isResolved": false,
+              "isOutdated": true,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "obsolete",
+                    "diffHunk": "@@ -1 +1 @@\n-old\n+new\n",
+                    "originalPosition": null,
+                    "position": null,
+                    "path": "file.rs",
+                    "url": "http://example.com/1",
+                    "author": null
+                  }
+                ],
+                "pageInfo": { "hasNextPage": false, "endCursor": null }
+              }
+            },
+            {
+              "id": "t2",
+              "isResolved": false,
+              "isOutdated": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "current",
+                    "diffHunk": "@@ -1 +1 @@\n-old\n+new\n",
+                    "originalPosition": null,
+                    "position": null,
+                    "path": "src/lib.rs",
+                    "url": "http://example.com/2",
+                    "author": null
+                  }
+                ],
+                "pageInfo": { "hasNextPage": false, "endCursor": null }
+              }
+            }
+          ],
+          "pageInfo": { "hasNextPage": false, "endCursor": null }
+        }
+      }
+    }
+  }
+}
