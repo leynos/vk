@@ -82,18 +82,7 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
             source: Box::new(e),
         })
 }
-/// Post a reply to a review comment using the REST API.
-///
-/// # Examples
-///
-/// ```ignore
-/// # use crate::{ref_parser::RepoInfo, resolve::post_reply, VkError};
-/// # async fn run() -> Result<(), VkError> {
-/// let repo = RepoInfo { owner: "octocat", name: "hello" };
-/// post_reply("token", &repo, 1, 2, "Thanks").await?;
-/// # Ok(())
-/// # }
-/// ```
+/// GitHub REST client configuration.
 #[cfg(feature = "unstable-rest-resolve")]
 struct RestClient {
     api: String,
@@ -121,25 +110,23 @@ impl RestClient {
 /// # async fn run() -> Result<(), VkError> {
 /// let repo = RepoInfo { owner: "octocat", name: "hello" };
 /// let client = RestClient::new("token")?;
-/// post_reply(&client, &repo, 1, 2, "Thanks").await?;
+/// post_reply(&client, CommentRef { repo: &repo, pull_number: 1, comment_id: 2 }, "Thanks").await?;
 /// # Ok(())
 /// # }
 /// ```
 #[cfg(feature = "unstable-rest-resolve")]
 async fn post_reply(
     rest: &RestClient,
-    repo: &RepoInfo,
-    pull: u64,
-    comment_id: u64,
+    reference: CommentRef<'_>,
     body: &str,
 ) -> Result<(), VkError> {
     let url = format!(
         "{api}/repos/{owner}/{repo}/pulls/{pull}/comments/{cid}/replies",
         api = rest.api,
-        owner = repo.owner,
-        repo = repo.name,
-        pull = pull,
-        cid = comment_id,
+        owner = reference.repo.owner,
+        repo = reference.repo.name,
+        pull = reference.pull_number,
+        cid = reference.comment_id,
     );
 
     let response = rest
@@ -154,10 +141,13 @@ async fn post_reply(
         })?;
 
     if response.status() == StatusCode::NOT_FOUND {
-        return Err(VkError::CommentNotFound { comment_id });
+        return Err(VkError::CommentNotFound {
+            comment_id: reference.comment_id,
+        });
     }
 
-    response.error_for_status()
+    response
+        .error_for_status()
         .map_err(|e| VkError::Request(Box::new(e)))?;
     Ok(())
 }
@@ -232,14 +222,7 @@ pub async fn resolve_comment(
     #[cfg(feature = "unstable-rest-resolve")]
     if let Some(body) = message {
         let rest = RestClient::new(token)?;
-        post_reply(
-            &rest,
-            reference.repo,
-            reference.pull_number,
-            reference.comment_id,
-            &body,
-        )
-        .await?;
+        post_reply(&rest, reference, &body).await?;
     }
 
     let gql = GraphQLClient::new(token, None)?;
