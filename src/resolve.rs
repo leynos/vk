@@ -95,28 +95,55 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
 /// # }
 /// ```
 #[cfg(feature = "unstable-rest-resolve")]
+struct RestClient {
+    api: String,
+    client: reqwest::Client,
+}
+
+#[cfg(feature = "unstable-rest-resolve")]
+impl RestClient {
+    fn new(token: &str) -> Result<Self, VkError> {
+        let api = std::env::var("GITHUB_API_URL")
+            .unwrap_or_else(|_| "https://api.github.com".into())
+            .trim_end_matches('/')
+            .to_owned();
+        let client = github_client(token)?;
+        Ok(Self { api, client })
+    }
+}
+
+/// Post a reply to a review comment using the REST API.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use crate::{ref_parser::RepoInfo, resolve::{post_reply, RestClient}, VkError};
+/// # async fn run() -> Result<(), VkError> {
+/// let repo = RepoInfo { owner: "octocat", name: "hello" };
+/// let client = RestClient::new("token")?;
+/// post_reply(&client, &repo, 1, 2, "Thanks").await?;
+/// # Ok(())
+/// # }
+/// ```
+#[cfg(feature = "unstable-rest-resolve")]
 async fn post_reply(
-    token: &str,
+    rest: &RestClient,
     repo: &RepoInfo,
     pull: u64,
     comment_id: u64,
     body: &str,
 ) -> Result<(), VkError> {
-    let api = std::env::var("GITHUB_API_URL")
-        .unwrap_or_else(|_| "https://api.github.com".into())
-        .trim_end_matches('/')
-        .to_owned();
-
-    let client = github_client(token)?;
     let url = format!(
         "{api}/repos/{owner}/{repo}/pulls/{pull}/comments/{cid}/replies",
+        api = rest.api,
         owner = repo.owner,
         repo = repo.name,
         pull = pull,
         cid = comment_id,
     );
 
-    let resp = client
+    let response = rest
+        .client
         .post(url)
         .json(&json!({ "body": body }))
         .send()
@@ -126,10 +153,12 @@ async fn post_reply(
             source: Box::new(e),
         })?;
 
-    if resp.status() != StatusCode::NOT_FOUND {
-        resp.error_for_status()
-            .map_err(|e| VkError::Request(Box::new(e)))?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err(VkError::CommentNotFound { comment_id });
     }
+
+    response.error_for_status()
+        .map_err(|e| VkError::Request(Box::new(e)))?;
     Ok(())
 }
 
@@ -179,6 +208,7 @@ async fn resolve_thread(gql: &GraphQLClient, thread_id: &str) -> Result<(), VkEr
 /// # Errors
 ///
 /// Returns [`VkError::RequestContext`] if an HTTP request fails.
+/// Returns [`VkError::CommentNotFound`] if the comment cannot be located.
 ///
 /// # Examples
 ///
@@ -201,8 +231,9 @@ pub async fn resolve_comment(
 ) -> Result<(), VkError> {
     #[cfg(feature = "unstable-rest-resolve")]
     if let Some(body) = message {
+        let rest = RestClient::new(token)?;
         post_reply(
-            token,
+            &rest,
             reference.repo,
             reference.pull_number,
             reference.comment_id,

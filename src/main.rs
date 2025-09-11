@@ -133,6 +133,8 @@ pub enum VkError {
     },
     #[error("missing comment path at index {index} in thread {thread_id}")]
     EmptyCommentPath { thread_id: Box<str>, index: usize },
+    #[error("comment {comment_id} not found")]
+    CommentNotFound { comment_id: u64 },
     #[error("bad response: {0}")]
     BadResponse(Box<str>),
     #[error("empty GraphQL response (status {status}) for {operation}: {snippet}")]
