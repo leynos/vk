@@ -6,12 +6,12 @@
 //! environment variable for testing.
 
 use crate::ref_parser::RepoInfo;
-use crate::{api::GraphQLClient, VkError};
-#[cfg(feature = "unstable-rest-resolve")]
-use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
+use crate::{VkError, api::GraphQLClient};
 #[cfg(feature = "unstable-rest-resolve")]
 use reqwest::StatusCode;
-use serde_json::{json, Value};
+#[cfg(feature = "unstable-rest-resolve")]
+use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
+use serde_json::{Value, json};
 #[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
 
@@ -121,7 +121,11 @@ async fn post_reply(
 
     let url = format!(
         "{}/repos/{}/{}/pulls/{}/comments/{}/replies",
-        rest.api, reference.repo.owner, reference.repo.name, reference.pull_number, reference.comment_id
+        rest.api,
+        reference.repo.owner,
+        reference.repo.name,
+        reference.pull_number,
+        reference.comment_id
     );
     let res = rest
         .client
@@ -133,20 +137,13 @@ async fn post_reply(
             context: "post reply".into(),
             source: Box::new(e),
         })?;
-    match res.status() {
-        StatusCode::CREATED | StatusCode::OK => Ok(()),
-        StatusCode::NOT_FOUND => Err(VkError::CommentNotFound {
-            comment_id: reference.comment_id,
-        }),
-        code => Err(VkError::RequestContext {
-            context: format!("post reply status {code}").into(),
-            source: Box::new(
-                res.error_for_status()
-                    .err()
-                    .unwrap_or_else(|| reqwest::Error::new(reqwest::ErrorKind::Status, "status")),
-            ),
-        }),
+    if res.status() == StatusCode::NOT_FOUND {
+        // Treat missing original comment as non-fatal: continue to resolve.
+        return Ok(());
     }
+    res.error_for_status()
+        .map(|_| ())
+        .map_err(|e| VkError::Request(Box::new(e)))
 }
 
 fn find_comment_in_page(nodes: &[Value], comment_id: u64) -> Option<String> {
@@ -197,8 +194,7 @@ fn get_page_info(comments: &Value) -> Result<(bool, Option<String>), VkError> {
         .ok_or_else(|| VkError::BadResponse("missing hasNextPage".into()))?;
     let cursor = if has_next {
         Some(
-            page
-                .get("endCursor")
+            page.get("endCursor")
                 .and_then(Value::as_str)
                 .map(str::to_owned)
                 .ok_or_else(|| VkError::BadResponse("missing endCursor".into()))?,
@@ -239,8 +235,7 @@ async fn get_thread_id(gql: &GraphQLClient, reference: CommentRef<'_>) -> Result
 }
 
 async fn resolve_thread(gql: &GraphQLClient, thread_id: &str) -> Result<(), VkError> {
-    gql
-        .run_query::<_, Value>(RESOLVE_THREAD_MUTATION, json!({ "id": thread_id }))
+    gql.run_query::<_, Value>(RESOLVE_THREAD_MUTATION, json!({ "id": thread_id }))
         .await?;
     Ok(())
 }
@@ -285,4 +280,3 @@ pub async fn resolve_comment(
     resolve_thread(&gql, &thread_id).await?;
     Ok(())
 }
-

@@ -200,41 +200,4 @@ async fn resolve_skips_empty_reply() {
     );
 }
 
-#[cfg(feature = "unstable-rest-resolve")]
-#[tokio::test]
-async fn resolve_reply_not_found() {
-    use predicates::str::contains;
-    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
-    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
-    let clone = Arc::clone(&calls);
-    *handler.lock().expect("lock handler") = Box::new(move |req| {
-        clone
-            .lock()
-            .expect("lock")
-            .push(format!("{} {}", req.method(), req.uri().path()));
-        Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .header("Content-Type", "application/json")
-            .body(Full::from("{}"))
-            .expect("response")
-    });
-    tokio::task::spawn_blocking(move || {
-        vk_cmd(addr)
-            .args([
-                "resolve",
-                "https://github.com/o/r/pull/83#discussion_r1",
-                "-m",
-                "done",
-            ])
-            .assert()
-            .failure()
-            .stderr(contains("not found"));
-    })
-    .await
-    .expect("spawn blocking");
-    shutdown.shutdown().await;
-    assert_eq!(
-        calls.lock().expect("lock").as_slice(),
-        ["POST /repos/o/r/pulls/comments/1/replies"],
-    );
-}
+// NOTE: 404 on reply is treated as non-fatal; covered in parameterised tests above.
