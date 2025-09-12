@@ -42,7 +42,12 @@ async fn resolve_flows(#[case] msg: Option<&'static str>) {
         args.extend(["-m", m]);
     }
     tokio::task::spawn_blocking(move || {
-        vk_cmd(addr).args(args).assert().success();
+        vk_cmd(addr)
+            .args(args)
+            .assert()
+            .success()
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::is_empty());
     })
     .await
     .expect("spawn blocking");
@@ -102,7 +107,8 @@ async fn resolve_falls_back_to_rest() {
 }
 async fn run_reply_flow(
     rest_status: StatusCode,
-) -> (Vec<String>, Vec<u8>, Vec<u8>, std::process::ExitStatus) {
+    should_succeed: bool,
+) -> (Vec<String>, Vec<u8>, Vec<u8>) {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
@@ -144,8 +150,13 @@ async fn run_reply_flow(
     })
     .await
     .expect("spawn blocking");
+    if should_succeed {
+        assert!(status.success());
+    } else {
+        assert!(!status.success());
+    }
     shutdown.shutdown().await;
-    (calls.lock().expect("lock").clone(), stdout, stderr, status)
+    (calls.lock().expect("lock").clone(), stdout, stderr)
 }
 
 #[tokio::test]
@@ -178,18 +189,13 @@ async fn resolve_flows_reply(
     #[case] should_succeed: bool,
     #[case] expected: &'static [&'static str],
 ) {
-    let (calls, stdout, stderr, status) = run_reply_flow(rest_status).await;
+    let (calls, stdout, stderr) = run_reply_flow(rest_status, should_succeed).await;
     let stdout = String::from_utf8_lossy(&stdout);
     let stderr = String::from_utf8_lossy(&stderr);
     assert!(stdout.trim().is_empty(), "unexpected stdout: {stdout}");
     if should_succeed {
-        assert!(status.success());
-        assert!(
-            predicate::str::is_empty().eval(&stderr),
-            "unexpected stderr: {stderr}"
-        );
+        assert!(stderr.trim().is_empty(), "unexpected stderr: {stderr}");
     } else {
-        assert!(!status.success());
         assert!(
             predicate::str::contains("replies")
                 .and(predicate::str::contains("500"))
@@ -197,5 +203,5 @@ async fn resolve_flows_reply(
             "stderr: {stderr}"
         );
     }
-    assert_eq!(calls, expected);
+    assert_eq!(calls.as_slice(), expected);
 }
