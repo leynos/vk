@@ -70,7 +70,11 @@ async fn resolve_flows_reply() {
             "{}"
         };
         Response::builder()
-            .status(StatusCode::OK)
+            .status(if req.uri().path() == "/graphql" {
+                StatusCode::OK
+            } else {
+                StatusCode::CREATED
+            })
             .header("Content-Type", "application/json")
             .body(Full::from(body))
             .expect("response")
