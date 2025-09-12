@@ -28,7 +28,7 @@ even when multiple comments reference the same code.
   [GitHub's guide to linking to pull request comments](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/commenting-on-a-pull-request#linking-to-a-pull-request-comment).
 - **Concise output**: Each thread shows the diff once followed by all comments,
   reducing clutter when multiple remarks target the same line.
-- **Outdated threads**: Hidden by default; pass `--show-outdated` (`-o`) to
+- **Outdated threads**: hidden by default; pass `-o` (`--show-outdated`) to
   include them when needed.
 - **Error visibility**: Failures encountered while printing a thread are logged
   to stderr instead of being silently discarded.
