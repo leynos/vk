@@ -203,42 +203,36 @@ fn extract_review_comments(data: &Value) -> Result<&Value, VkError> {
 /// # Examples
 ///
 /// ```ignore
-/// # use crate::{api::GraphQLClient, ref_parser::RepoInfo, resolve::get_thread_id, VkError};
+/// # use crate::{api::GraphQLClient, ref_parser::RepoInfo, resolve::{get_thread_id, CommentRef}, VkError};
 /// # async fn run(client: GraphQLClient) -> Result<(), VkError> {
 /// let repo = RepoInfo { owner: "o", name: "r" };
-/// let id = get_thread_id(&client, &repo.owner, &repo.name, 1, 42).await?;
+/// let id = get_thread_id(&client, CommentRef { repo: &repo, pull_number: 1, comment_id: 42 }).await?;
 /// assert!(!id.is_empty());
 /// # Ok(())
 /// # }
 /// ```
-async fn get_thread_id(
-    gql: &GraphQLClient,
-    owner: &str,
-    name: &str,
-    pull: u64,
-    comment_id: u64,
-) -> Result<String, VkError> {
+async fn get_thread_id(gql: &GraphQLClient, reference: CommentRef<'_>) -> Result<String, VkError> {
     let mut cursor = None;
     loop {
         let data: Value = gql
             .run_query(
                 REVIEW_COMMENTS_PAGE,
                 json!({
-                    "owner": owner,
-                    "name": name,
-                    "pull": pull,
+                    "owner": reference.repo.owner,
+                    "name": reference.repo.name,
+                    "pull": reference.pull_number,
                     "after": cursor,
                 }),
             )
             .await?;
         let comments = extract_review_comments(&data)?;
         if let Some(nodes) = comments.get("nodes").and_then(Value::as_array) {
-            if let Some(thread_id) = find_comment_in_page(nodes, comment_id) {
+            if let Some(thread_id) = find_comment_in_page(nodes, reference.comment_id) {
                 return Ok(thread_id);
             }
             if nodes
                 .iter()
-                .any(|n| n.get("databaseId").and_then(Value::as_u64) == Some(comment_id))
+                .any(|n| n.get("databaseId").and_then(Value::as_u64) == Some(reference.comment_id))
             {
                 return Err(VkError::BadResponse("missing thread id".into()));
             }
@@ -260,7 +254,9 @@ async fn get_thread_id(
                 .ok_or_else(|| VkError::BadResponse("missing endCursor".into()))?,
         );
     }
-    Err(VkError::CommentNotFound { comment_id })
+    Err(VkError::CommentNotFound {
+        comment_id: reference.comment_id,
+    })
 }
 
 /// Resolve a review thread by ID.
@@ -312,14 +308,7 @@ pub async fn resolve_comment(
     }
 
     let gql = GraphQLClient::new(token, None)?;
-    let thread_id = get_thread_id(
-        &gql,
-        &reference.repo.owner,
-        &reference.repo.name,
-        reference.pull_number,
-        reference.comment_id,
-    )
-    .await?;
+    let thread_id = get_thread_id(&gql, reference).await?;
     resolve_thread(&gql, &thread_id).await?;
     Ok(())
 }
