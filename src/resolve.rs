@@ -33,10 +33,6 @@ const THREAD_ID_QUERY: &str = r"
 
 /// Comment location within a pull request review thread.
 #[derive(Copy, Clone)]
-#[cfg_attr(
-    not(feature = "unstable-rest-resolve"),
-    expect(dead_code, reason = "unused without unstable-rest-resolve")
-)]
 pub struct CommentRef<'a> {
     pub repo: &'a RepoInfo,
     pub comment_id: u64,
