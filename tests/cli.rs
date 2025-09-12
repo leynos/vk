@@ -84,6 +84,7 @@ async fn pr_outputs_banner_when_threads_present() {
             "nodes": [{
                 "id": "t1",
                 "isResolved": false,
+                "isOutdated": false,
                 "comments": {
                     "nodes": [{
                         "body": "Looks good",

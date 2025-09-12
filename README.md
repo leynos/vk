@@ -15,7 +15,8 @@ or Claude Code (without implying association with any of these companies).
 vk pr <pull-request-url-or-number> [FILE ...]
 ```
 
-Specify file paths to show only comments for those files.
+Specify file paths to show only comments for those files. Outdated threads are
+hidden by default; pass `--show-outdated` (or `-o`) to include them.
 
 Print the current version and exit with:
 
@@ -35,7 +36,8 @@ The CLI provides three subcommands:
   (`========== review comments ==========`) before individual threads, then
   prints an `end of code review` banner
   (`========== end of code review ==========`). Pass file paths after the pull
-  request to restrict output to those paths.
+  request to restrict output to those paths. Use `--show-outdated` to include
+  outdated threads.
 - `issue` — read a GitHub issue (**to do**)
 - `resolve` — resolve a pull request review thread. Accepts a comment
   reference (`#discussion_r<ID>` or full URL). Use `-m, --message <MESSAGE>` to

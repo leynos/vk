@@ -7,6 +7,7 @@
             {
               "id": "t1",
               "isResolved": false,
+              "isOutdated": false,
               "comments": {
                 "nodes": [
                   {
@@ -34,6 +35,7 @@
             {
               "id": "t2",
               "isResolved": false,
+              "isOutdated": false,
               "comments": {
                 "nodes": [
                   {
