@@ -12,9 +12,7 @@ mod utils;
 use utils::{start_mitm, vk_cmd};
 
 #[tokio::test]
-#[rstest::rstest]
-#[case(None)]
-async fn resolve_flows(#[case] msg: Option<&'static str>) {
+async fn resolve_flows() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
@@ -37,13 +35,9 @@ async fn resolve_flows(#[case] msg: Option<&'static str>) {
             .body(Full::from(body))
             .expect("response")
     });
-    let mut args = vec!["resolve", "https://github.com/o/r/pull/83#discussion_r1"];
-    if let Some(m) = msg {
-        args.extend(["-m", m]);
-    }
     tokio::task::spawn_blocking(move || {
         vk_cmd(addr)
-            .args(args)
+            .args(["resolve", "https://github.com/o/r/pull/83#discussion_r1"])
             .assert()
             .success()
             .stdout(predicate::str::is_empty())
