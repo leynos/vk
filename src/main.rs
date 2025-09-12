@@ -429,7 +429,12 @@ async fn main() -> Result<(), VkError> {
     };
     if let Err(e) = result {
         eprintln!("Error: {e}");
-        std::process::exit(1);
+        let code = match &e {
+            VkError::MissingAuth => 2,
+            VkError::CommentNotFound { .. } => 3,
+            _ => 1,
+        };
+        std::process::exit(code);
     }
     Ok(())
 }
