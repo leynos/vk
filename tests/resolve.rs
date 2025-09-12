@@ -101,7 +101,6 @@ async fn resolve_falls_back_to_rest() {
 }
 async fn run_reply_flow(
     rest_status: StatusCode,
-    _should_succeed: bool,
 ) -> (Vec<String>, Vec<u8>, Vec<u8>, std::process::ExitStatus) {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -183,7 +182,7 @@ async fn resolve_flows_reply(
     #[case] should_succeed: bool,
     #[case] expected: &'static [&'static str],
 ) {
-    let (calls, stdout, stderr, status) = run_reply_flow(rest_status, should_succeed).await;
+    let (calls, stdout, stderr, status) = run_reply_flow(rest_status).await;
     let stdout = String::from_utf8_lossy(&stdout);
     let stderr = String::from_utf8_lossy(&stderr);
     let code = rest_status.as_u16().to_string();
