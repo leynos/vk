@@ -372,7 +372,7 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
 }
 
 async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let (repo, number, comment) =
+    let (repo, _pull, comment) =
         parse_pr_thread_reference(&args.reference, global.repo.as_deref())?;
     let comment_id = comment.ok_or(VkError::InvalidRef)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
@@ -385,7 +385,6 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
             &token,
             resolve::CommentRef {
                 repo: &repo,
-                pull_number: number,
                 comment_id,
             },
             args.message,
@@ -399,7 +398,6 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
             &token,
             resolve::CommentRef {
                 repo: &repo,
-                pull_number: number,
                 comment_id,
             },
         )

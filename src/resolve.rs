@@ -39,7 +39,6 @@ const THREAD_ID_QUERY: &str = r"
 )]
 pub struct CommentRef<'a> {
     pub repo: &'a RepoInfo,
-    pub pull_number: u64,
     pub comment_id: u64,
 }
 /// Build an authenticated client with GitHub headers.
@@ -110,7 +109,7 @@ impl RestClient {
 /// # async fn run() -> Result<(), VkError> {
 /// let repo = RepoInfo { owner: "octocat", name: "hello" };
 /// let client = RestClient::new("token")?;
-/// post_reply(&client, CommentRef { repo: &repo, pull_number: 1, comment_id: 2 }, "Thanks").await?;
+/// post_reply(&client, CommentRef { repo: &repo, comment_id: 2 }, "Thanks").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -121,11 +120,10 @@ async fn post_reply(
     body: &str,
 ) -> Result<(), VkError> {
     let url = format!(
-        "{api}/repos/{owner}/{repo}/pulls/{pull}/comments/{cid}/replies",
+        "{api}/repos/{owner}/{repo}/pulls/comments/{cid}/replies",
         api = rest.api,
         owner = reference.repo.owner,
         repo = reference.repo.name,
-        pull = reference.pull_number,
         cid = reference.comment_id,
     );
 
@@ -208,7 +206,7 @@ async fn resolve_thread(gql: &GraphQLClient, thread_id: &str) -> Result<(), VkEr
 /// let repo = RepoInfo { owner: "octocat", name: "hello" };
 /// resolve_comment(
 ///     "token",
-///     CommentRef { repo: &repo, pull_number: 1, comment_id: 2 },
+///     CommentRef { repo: &repo, comment_id: 2 },
 ///     None,
 /// ).await?;
 /// # Ok(())

@@ -92,7 +92,7 @@ async fn resolve_flows_reply() {
     assert_eq!(
         calls.lock().expect("lock").as_slice(),
         [
-            "POST /repos/o/r/pulls/83/comments/1/replies",
+            "POST /repos/o/r/pulls/comments/1/replies",
             "POST /graphql",
             "POST /graphql",
         ],
@@ -134,6 +134,6 @@ async fn resolve_reply_not_found() {
     shutdown.shutdown().await;
     assert_eq!(
         calls.lock().expect("lock").as_slice(),
-        ["POST /repos/o/r/pulls/83/comments/1/replies"],
+        ["POST /repos/o/r/pulls/comments/1/replies"],
     );
 }
