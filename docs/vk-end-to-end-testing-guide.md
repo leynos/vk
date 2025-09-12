@@ -95,7 +95,7 @@ provide a holistic solution.
   requests to reach the internet, `third-wheel` captures them and returns
   controlled, predefined responses from local fixture files. This makes the
   tests completely independent of the network and ensures that the API's
-  behavior is deterministic for every test run.
+  behaviour is deterministic for every test run.
 
 - `insta`: This crate is the output verifier, specialized for snapshot testing.
   Given that `vk` produces complex, styled terminal output via `termimad`,
@@ -252,7 +252,7 @@ this test provides high confidence that:
 With this foundation in place, the next step is to introduce the complexity of
 API mocking.
 
-## Deterministic API Behavior via Mocking with third-wheel
+## Deterministic API Behaviour via Mocking with third-wheel
 
 To create a truly hermetic test suite for a network-dependent application like
 `vk`, it is imperative to isolate it from the actual network. Making live calls
@@ -302,12 +302,12 @@ use third_wheel::{ThirdWheel, MitmProxy};
 use third_wheel::hyper::{Body, Request, Response, StatusCode};
 
 // This type alias simplifies the handler signature. The handler will be
-// a shared, mutable function that determines the mock server's behavior.
+// a shared, mutable function that determines the mock server's behaviour.
 type Handler = Arc<Mutex<Box<dyn Fn(&Request<Body>) -> Response<Body> + Send>>>;
 
 /// Starts a third-wheel mock server on a random available port.
 ///
-/// The server's behavior is defined by the `handler` closure. It returns the
+/// The server's behaviour is defined by the `handler` closure. It returns the
 /// server's address and a clone of the handler so the test can dynamically
 /// change the mock response.
 async fn start_mock_server() -> (SocketAddr, Handler) {
@@ -325,7 +325,7 @@ async fn start_mock_server() -> (SocketAddr, Handler) {
     // The MitmProxy requires a function that will be called for each intercepted request.
     let proxy = MitmProxy::new(Box::new(move |req, _ctx| {
         // We lock the mutex to access the current handler function and execute it.
-        // This allows the test to change the server's behavior on the fly.
+        // This allows the test to change the server's behaviour on the fly.
         let h = handler_clone.lock().unwrap();
         h(req)
     }));
@@ -406,7 +406,7 @@ setting this variable for the child process trivial using the `.env()` method.
 ### Simulating Diverse API Scenarios
 
 The true power of this embedded mocking approach is the ability to easily
-simulate a wide range of API behaviors to test `vk`'s resilience and error
+simulate a wide range of API behaviours to test `vk`'s resilience and error
 handling.
 
 Scenario 1: Successful Query
@@ -475,9 +475,10 @@ let (addr, handler) = start_mock_server().await;
 //... run vk command and assert that it fails with a network error message...
 ```
 
-This level of programmatic control over the mock API's behavior is what enables
-the creation of a truly comprehensive and robust E2E test suite, capable of
-verifying not just the "happy path" but also a wide variety of failure modes.
+This level of programmatic control over the mock API's behaviour is what
+enables the creation of a truly comprehensive and robust E2E test suite,
+capable of verifying not just the "happy path" but also a wide variety of
+failure modes.
 
 ## Driving the Application with assert_cmd
 
@@ -547,7 +548,7 @@ cmd.env("GITHUB_GRAPHQL_URL", mock_server_url);
 
 The `.env_clear()` method can also be used to ensure the child process starts
 with a clean environment, preventing variables from the test runner's
-environment from leaking into the test and causing non-deterministic behavior.
+environment from leaking into the test and causing non-deterministic behaviour.
 
 ### Asserting on Process Outcomes
 
@@ -694,10 +695,10 @@ intuitive, revolving around the `cargo-insta` command-line tool.13
      leaving it in a pending state.
 
 4. **Non-Interactive Updates (for CI/CD):** The `INSTA_UPDATE` environment
-   variable controls `insta`'s behavior in non-interactive environments like CI
-   pipelines.13
+   variable controls `insta`'s behaviour in non-interactive environments like
+   CI pipelines.13
 
-   - `INSTA_UPDATE=no`: This is the default behavior in most CI environments.
+   - `INSTA_UPDATE=no`: This is the default behaviour in most CI environments.
      If a snapshot mismatch is found, the test fails, and no files are written.
      This is the correct setting for CI, as it should only verify, not update,
      tests.
@@ -751,7 +752,7 @@ test case that serves as a practical template for testing a common `vk` use
 case. The test follows the classic Arrange-Act-Assert pattern, a best practice
 for structuring tests to be clear and understandable.6
 
-**Scenario:** The test will verify the behavior of the `vk pr <url>` command
+**Scenario:** The test will verify the behaviour of the `vk pr <url>` command
 for a pull request that contains one unresolved comment thread. It will ensure
 the command succeeds and that the rendered terminal output is correct.
 
@@ -776,7 +777,7 @@ async fn test_pr_command_with_single_comment_renders_correctly() {
     //=========================================================================
 
     // Start the embedded third-wheel mock server. This gives us its address
-    // and a handle to control its response behavior.
+    // and a handle to control its response behaviour.
     let (mock_server_addr, handler) = start_mock_server().await;
     let mock_server_url = format!("http://{}", mock_server_addr);
 
@@ -918,7 +919,7 @@ scenarios in a completely isolated and self-cleaning manner.
 
 Thoroughly testing failure paths is just as critical as testing successful
 ones. A robust application should fail gracefully and provide clear, actionable
-feedback to the user.23 The E2E test suite should verify this behavior.
+feedback to the user.23 The E2E test suite should verify this behaviour.
 
 Here is a checklist of essential error conditions to test for `vk`:
 

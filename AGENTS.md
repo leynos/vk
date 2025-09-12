@@ -57,7 +57,7 @@
   - Where a bug is being fixed, a unittest has been provided demonstrating the
     behaviour being corrected both to validate the fix and to guard against
     regression.
-  - Passes all relevant unit and behavioral tests according to the guidelines
+  - Passes all relevant unit and behavioural tests according to the guidelines
     above.
   - Passes lint checks
   - Adheres to formatting standards tested using a formatting validator.
@@ -103,7 +103,7 @@
 - **Separate Atomic Refactors:** If refactoring is deemed necessary:
   - Perform the refactoring as a **separate, atomic commit** *after* the
     functional change commit.
-  - Ensure the refactoring adheres to the testing guidelines (behavioral tests
+  - Ensure the refactoring adheres to the testing guidelines (behavioural tests
     pass before and after, unit tests added for new units).
   - Ensure the refactoring commit itself passes all quality gates.
 
