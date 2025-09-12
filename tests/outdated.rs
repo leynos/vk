@@ -4,6 +4,10 @@ use assert_cmd::prelude::*;
 use http_body_util::Full;
 use hyper::{Response, StatusCode};
 use predicates::{prelude::*, str::contains};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
 use tokio::task;
 
 mod utils;
@@ -14,15 +18,22 @@ async fn pr_omits_outdated_threads_by_default() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let threads_body = include_str!("fixtures/review_threads_outdated.json").to_string();
     let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
-    let mut responses = vec![threads_body, reviews_body].into_iter();
-    *handler.lock().expect("lock handler") = Box::new(move |_req| {
-        let body = responses.next().expect("response");
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(Full::from(body))
-            .expect("build response")
-    });
+    let responses = Arc::new(Mutex::new(VecDeque::from([threads_body, reviews_body])));
+    {
+        let responses = Arc::clone(&responses);
+        *handler.lock().expect("lock handler") = Box::new(move |_req| {
+            let body = responses
+                .lock()
+                .expect("lock responses")
+                .pop_front()
+                .expect("response");
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .body(Full::from(body))
+                .expect("build response")
+        });
+    }
 
     task::spawn_blocking(move || {
         let mut cmd = vk_cmd(addr);
@@ -42,15 +53,22 @@ async fn pr_shows_outdated_when_flag_set() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let threads_body = include_str!("fixtures/review_threads_outdated.json").to_string();
     let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
-    let mut responses = vec![threads_body, reviews_body].into_iter();
-    *handler.lock().expect("lock handler") = Box::new(move |_req| {
-        let body = responses.next().expect("response");
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(Full::from(body))
-            .expect("build response")
-    });
+    let responses = Arc::new(Mutex::new(VecDeque::from([threads_body, reviews_body])));
+    {
+        let responses = Arc::clone(&responses);
+        *handler.lock().expect("lock handler") = Box::new(move |_req| {
+            let body = responses
+                .lock()
+                .expect("lock responses")
+                .pop_front()
+                .expect("response");
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .body(Full::from(body))
+                .expect("build response")
+        });
+    }
 
     task::spawn_blocking(move || {
         let mut cmd = vk_cmd(addr);
@@ -71,15 +89,22 @@ async fn pr_show_outdated_respects_file_filter() {
     let threads_body =
         include_str!("fixtures/review_threads_outdated_multiple_files.json").to_string();
     let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
-    let mut responses = vec![threads_body, reviews_body].into_iter();
-    *handler.lock().expect("lock handler") = Box::new(move |_req| {
-        let body = responses.next().expect("response");
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(Full::from(body))
-            .expect("build response")
-    });
+    let responses = Arc::new(Mutex::new(VecDeque::from([threads_body, reviews_body])));
+    {
+        let responses = Arc::clone(&responses);
+        *handler.lock().expect("lock handler") = Box::new(move |_req| {
+            let body = responses
+                .lock()
+                .expect("lock responses")
+                .pop_front()
+                .expect("response");
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .body(Full::from(body))
+                .expect("build response")
+        });
+    }
 
     task::spawn_blocking(move || {
         let mut cmd = vk_cmd(addr);

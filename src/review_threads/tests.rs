@@ -312,23 +312,6 @@ fn filter_threads_by_files_retains_matches() {
     assert_eq!(path, Some("README.md"));
 }
 
-#[test]
-fn retains_only_unresolved_threads() {
-    let threads = vec![
-        ReviewThread {
-            is_resolved: true,
-            ..Default::default()
-        },
-        ReviewThread {
-            is_resolved: false,
-            ..Default::default()
-        },
-    ];
-    let filtered = filter_unresolved_threads(threads);
-    assert_eq!(filtered.len(), 1);
-    assert!(filtered.first().is_some_and(|t| !t.is_resolved));
-}
-
 #[rstest]
 #[tokio::test]
 async fn threads_with_many_comments_do_not_duplicate_first_page(
@@ -385,6 +368,46 @@ fn exclude_outdated_threads_filters(
     let filtered = super::exclude_outdated_threads(threads);
     assert_eq!(filtered.len(), expected_len);
     assert!(filtered.iter().all(|t| !t.is_outdated));
+}
+
+#[rstest]
+#[case::outdated(
+    |threads| super::filter_outdated_threads(threads),
+    |thread: &mut ReviewThread, value| thread.is_outdated = value,
+    |thread: &ReviewThread| thread.is_outdated,
+    "outdated",
+)]
+#[case::unresolved(
+    |threads| filter_unresolved_threads(threads),
+    |thread: &mut ReviewThread, value| thread.is_resolved = value,
+    |thread: &ReviewThread| thread.is_resolved,
+    "resolved",
+)]
+fn filter_functions_exclude_matching_threads<F, S, G>(
+    #[case] filter_fn: F,
+    #[case] set_field: S,
+    #[case] get_field: G,
+    #[case] field_name: &str,
+) where
+    F: Fn(Vec<ReviewThread>) -> Vec<ReviewThread>,
+    S: Fn(&mut ReviewThread, bool),
+    G: Fn(&ReviewThread) -> bool,
+{
+    let mut threads = vec![ReviewThread::default(), ReviewThread::default()];
+    let [first, second] = &mut threads[..] else { unreachable!() };
+    set_field(first, true);
+    set_field(second, false);
+
+    let filtered = filter_fn(threads);
+    assert_eq!(
+        filtered.len(),
+        1,
+        "should retain exactly one thread for {field_name}"
+    );
+    assert!(
+        !get_field(filtered.first().expect("thread present")),
+        "remaining thread should have {field_name} = false"
+    );
 }
 
 #[fixture]

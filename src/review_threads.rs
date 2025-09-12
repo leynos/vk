@@ -57,7 +57,7 @@ pub struct ReviewThread {
     pub id: String,
     #[serde(rename = "isResolved")]
     pub is_resolved: bool,
-    #[serde(rename = "isOutdated")]
+    #[serde(default, rename = "isOutdated")]
     pub is_outdated: bool,
     pub comments: CommentConnection,
 }
@@ -328,6 +328,13 @@ fn filter_unresolved_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
 #[must_use]
 pub fn exclude_outdated_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
     threads.into_iter().filter(|t| !t.is_outdated).collect()
+}
+
+/// Retain only non-outdated review threads.
+/// Alias retained for documentation and CLI consistency.
+#[must_use]
+pub fn filter_outdated_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
+    exclude_outdated_threads(threads)
 }
 
 /// Filter review threads to those whose first comment matches one of `files`.
