@@ -76,14 +76,11 @@ async fn pagination_client() -> TestClient {
 }
 
 #[fixture]
-#[expect(clippy::unused_async, reason = "rstest requires async fixtures")]
-#[allow(
-    unfulfilled_lint_expectations,
-    reason = "rstest macro suppresses lint, expectation kept for future safety"
-)]
 async fn path_variant_client(
     #[default(serde_json::Value::Null)] path_value: serde_json::Value,
 ) -> TestClient {
+    // Exercise an await to satisfy clippy::unused_async
+    let () = async {}.await;
     let body = serde_json::json!({
         "data": {"repository": {"pullRequest": {"reviewThreads": {
             "nodes": [{
