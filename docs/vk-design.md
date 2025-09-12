@@ -47,6 +47,8 @@ even when multiple comments reference the same code.
   `node_id` using the REST API and retries the GraphQL query. This subcommand
   requires `GITHUB_TOKEN`; if absent, it aborts rather than performing
   anonymous calls.
+- **Configurable timeouts**: `--http-timeout` and `--connect-timeout`
+  override the default 10 s request and 5 s connection limits for REST replies.
 
 ## Architecture
 

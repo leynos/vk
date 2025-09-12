@@ -19,6 +19,12 @@ pub struct GlobalArgs {
     /// Write HTTP transcript to this file for debugging
     #[arg(long)]
     pub transcript: Option<std::path::PathBuf>,
+    /// HTTP request timeout in seconds
+    #[arg(long, value_name = "SECS")]
+    pub http_timeout: Option<u64>,
+    /// HTTP connection timeout in seconds
+    #[arg(long, value_name = "SECS")]
+    pub connect_timeout: Option<u64>,
 }
 
 impl GlobalArgs {
@@ -32,6 +38,12 @@ impl GlobalArgs {
         }
         if let Some(transcript) = other.transcript {
             self.transcript = Some(transcript);
+        }
+        if let Some(timeout) = other.http_timeout {
+            self.http_timeout = Some(timeout);
+        }
+        if let Some(timeout) = other.connect_timeout {
+            self.connect_timeout = Some(timeout);
         }
     }
 }
