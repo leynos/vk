@@ -171,7 +171,7 @@ crate.
 
 For the `vk` project, the following structure is recommended:
 
-```
+```text
 vk/
 ├── Cargo.toml
 ├── src/
