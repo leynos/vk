@@ -59,6 +59,8 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::io::{ErrorKind, Write};
 use std::sync::LazyLock;
+#[cfg(feature = "unstable-rest-resolve")]
+use std::time::Duration;
 use termimad::MadSkin;
 use thiserror::Error;
 
@@ -381,6 +383,8 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
     }
     #[cfg(feature = "unstable-rest-resolve")]
     {
+        let http_timeout = Duration::from_secs(global.http_timeout.unwrap_or(10));
+        let connect_timeout = Duration::from_secs(global.connect_timeout.unwrap_or(5));
         resolve::resolve_comment(
             &token,
             resolve::CommentRef {
@@ -389,6 +393,8 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
                 comment_id,
             },
             args.message,
+            http_timeout,
+            connect_timeout,
         )
         .await
     }
