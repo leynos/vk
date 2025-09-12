@@ -244,16 +244,16 @@ following steps:
       example, `APP_CONFIG_PATH`, or `CONFIG_PATH` if no prefix is set) can
       specify an explicit file.
 
-   1. A dotfile named `.config.toml` or `.<prefix>.toml` in the current working
+   2. A dotfile named `.config.toml` or `.<prefix>.toml` in the current working
       directory.
 
-   1. A dotfile of the same name in the user's home directory.
+   3. A dotfile of the same name in the user's home directory.
 
-   1. On Unix‑like systems, the standard XDG configuration directory (for
+   4. On Unix‑like systems, the standard XDG configuration directory (for
       example, `~/.config/app/config.toml`) is searched; on Windows the
       `%APPDATA%` and `%LOCALAPPDATA%` directories are examined.
 
-   1. If the `json5` or `yaml` features are enabled, files with `.json`,
+   5. If the `json5` or `yaml` features are enabled, files with `.json`,
       `.json5`, `.yaml` or `.yml` extensions are also considered in these
       locations.
 
