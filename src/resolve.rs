@@ -216,7 +216,16 @@ pub async fn resolve_comment(
     #[cfg(feature = "unstable-rest-resolve")]
     if let Some(body) = message {
         let rest = RestClient::new(token)?;
-        post_reply(&rest, reference, &body).await?;
+        let repo = reference.repo;
+        post_reply(
+            &rest,
+            CommentRef {
+                repo,
+                comment_id: reference.comment_id,
+            },
+            &body,
+        )
+        .await?;
     }
 
     let gql = GraphQLClient::new(token, None)?;
