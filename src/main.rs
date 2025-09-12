@@ -372,7 +372,7 @@ async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> 
 }
 
 async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let (repo, _pull, comment) =
+    let (repo, number, comment) =
         parse_pr_thread_reference(&args.reference, global.repo.as_deref())?;
     let comment_id = comment.ok_or(VkError::InvalidRef)?;
     let token = env::var("GITHUB_TOKEN").unwrap_or_default();
@@ -385,6 +385,7 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
             &token,
             resolve::CommentRef {
                 repo: &repo,
+                pull_number: number,
                 comment_id,
             },
             args.message,
@@ -398,6 +399,7 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
             &token,
             resolve::CommentRef {
                 repo: &repo,
+                pull_number: number,
                 comment_id,
             },
         )
@@ -411,7 +413,7 @@ async fn main() -> Result<(), VkError> {
     let cli = Cli::parse();
     let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
     global.merge(cli.global);
-    match cli.command {
+    let result = match cli.command {
         Commands::Pr(pr_cli) => {
             let args = load_and_merge_subcommand_for(&pr_cli)?;
             run_pr(args, &global).await
@@ -424,7 +426,12 @@ async fn main() -> Result<(), VkError> {
             let args = load_and_merge_subcommand_for(&resolve_cli)?;
             run_resolve(args, &global).await
         }
+    };
+    if let Err(e) = result {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
     }
+    Ok(())
 }
 
 fn locale_is_utf8() -> bool {

@@ -22,10 +22,12 @@ const RESOLVE_THREAD_MUTATION: &str = r"
 ";
 
 const THREAD_ID_QUERY: &str = r"
-    query($id: ID!) {
-      node(id: $id) {
-        ... on PullRequestReviewComment {
-          pullRequestReviewThread { id }
+    query($owner: String!, $name: String!, $pull: Int!, $id: ID!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $pull) {
+          reviewComment(id: $id) {
+            pullRequestReviewThread { id }
+          }
         }
       }
     }
@@ -35,6 +37,7 @@ const THREAD_ID_QUERY: &str = r"
 #[derive(Copy, Clone)]
 pub struct CommentRef<'a> {
     pub repo: &'a RepoInfo,
+    pub pull_number: u64,
     pub comment_id: u64,
 }
 /// Build an authenticated client with GitHub headers.
@@ -71,6 +74,7 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
     reqwest::Client::builder()
         .default_headers(headers)
         .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
         .build()
         .map_err(|e| VkError::RequestContext {
             context: "build client".into(),
@@ -105,7 +109,7 @@ impl RestClient {
 /// # async fn run() -> Result<(), VkError> {
 /// let repo = RepoInfo { owner: "octocat", name: "hello" };
 /// let client = RestClient::new("token")?;
-/// post_reply(&client, CommentRef { repo: &repo, comment_id: 2 }, "Thanks").await?;
+/// post_reply(&client, CommentRef { repo: &repo, pull_number: 1, comment_id: 2 }, "Thanks").await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -151,20 +155,36 @@ async fn post_reply(
 /// # Examples
 ///
 /// ```ignore
-/// # use crate::{api::GraphQLClient, resolve::get_thread_id, VkError};
+/// # use crate::{api::GraphQLClient, ref_parser::RepoInfo, resolve::get_thread_id, VkError};
 /// # async fn run(client: GraphQLClient) -> Result<(), VkError> {
-/// let id = get_thread_id(&client, 42).await?;
+/// let repo = RepoInfo { owner: "o", name: "r" };
+/// let id = get_thread_id(&client, &repo, 1, 42).await?;
 /// assert!(!id.is_empty());
 /// # Ok(())
 /// # }
 /// ```
-async fn get_thread_id(gql: &GraphQLClient, comment_id: u64) -> Result<String, VkError> {
+async fn get_thread_id(
+    gql: &GraphQLClient,
+    repo: &RepoInfo,
+    pull: u64,
+    comment_id: u64,
+) -> Result<String, VkError> {
     let node = STANDARD.encode(format!("PullRequestReviewComment:{comment_id}"));
     let data: Value = gql
-        .run_query(THREAD_ID_QUERY, json!({ "id": node }))
+        .run_query(
+            THREAD_ID_QUERY,
+            json!({
+                "owner": repo.owner,
+                "name": repo.name,
+                "pull": pull,
+                "id": node,
+            }),
+        )
         .await?;
-    data.get("node")
-        .and_then(|n| n.get("pullRequestReviewThread"))
+    data.get("repository")
+        .and_then(|r| r.get("pullRequest"))
+        .and_then(|p| p.get("reviewComment"))
+        .and_then(|c| c.get("pullRequestReviewThread"))
         .and_then(|t| t.get("id"))
         .and_then(Value::as_str)
         .map(str::to_owned)
@@ -202,7 +222,7 @@ async fn resolve_thread(gql: &GraphQLClient, thread_id: &str) -> Result<(), VkEr
 /// let repo = RepoInfo { owner: "octocat", name: "hello" };
 /// resolve_comment(
 ///     "token",
-///     CommentRef { repo: &repo, comment_id: 2 },
+///     CommentRef { repo: &repo, pull_number: 1, comment_id: 2 },
 ///     None,
 /// ).await?;
 /// # Ok(())
@@ -216,20 +236,17 @@ pub async fn resolve_comment(
     #[cfg(feature = "unstable-rest-resolve")]
     if let Some(body) = message {
         let rest = RestClient::new(token)?;
-        let repo = reference.repo;
-        post_reply(
-            &rest,
-            CommentRef {
-                repo,
-                comment_id: reference.comment_id,
-            },
-            &body,
-        )
-        .await?;
+        post_reply(&rest, reference, &body).await?;
     }
 
     let gql = GraphQLClient::new(token, None)?;
-    let thread_id = get_thread_id(&gql, reference.comment_id).await?;
+    let thread_id = get_thread_id(
+        &gql,
+        reference.repo,
+        reference.pull_number,
+        reference.comment_id,
+    )
+    .await?;
     resolve_thread(&gql, &thread_id).await?;
     Ok(())
 }

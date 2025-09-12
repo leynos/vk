@@ -21,7 +21,7 @@ async fn resolve_flows(#[case] msg: Option<&'static str>) {
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             if gql_calls == 0 {
-                r#"{"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}"#
+                r#"{"data":{"repository":{"pullRequest":{"reviewComment":{"pullRequestReviewThread":{"id":"t"}}}}}}"#
             } else {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
             }
@@ -62,7 +62,7 @@ async fn resolve_flows_reply() {
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             if gql_calls == 0 {
-                r#"{"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}"#
+                r#"{"data":{"repository":{"pullRequest":{"reviewComment":{"pullRequestReviewThread":{"id":"t"}}}}}}"#
             } else {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
             }
@@ -131,7 +131,7 @@ async fn resolve_reply_not_found() {
             ])
             .assert()
             .failure()
-            .stderr(contains("CommentNotFound"));
+            .stderr(contains("not found"));
     })
     .await
     .expect("spawn blocking");
