@@ -8,9 +8,13 @@ use crate::ref_parser::RepoInfo;
 use crate::{VkError, api::GraphQLClient};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(feature = "unstable-rest-resolve")]
+use log::warn;
+#[cfg(feature = "unstable-rest-resolve")]
 use reqwest::StatusCode;
+#[cfg(feature = "unstable-rest-resolve")]
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use serde_json::{Value, json};
+#[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
 
 const RESOLVE_THREAD_MUTATION: &str = r"
@@ -62,6 +66,7 @@ pub struct CommentRef<'a> {
 /// # Errors
 ///
 /// Returns [`VkError::RequestContext`] when the client cannot be built.
+#[cfg(feature = "unstable-rest-resolve")]
 fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().expect("static header"));
@@ -107,6 +112,7 @@ fn github_client(token: &str) -> Result<reqwest::Client, VkError> {
 ///     Ok(())
 /// }
 /// ```
+#[cfg(feature = "unstable-rest-resolve")]
 async fn fetch_comment_node_id(
     token: &str,
     repo: &RepoInfo,
@@ -123,14 +129,23 @@ async fn fetch_comment_node_id(
         repo = repo.name,
         comment_id = comment_id,
     );
-    let comment = client
+    let resp = client
         .get(url)
         .send()
         .await
         .map_err(|e| VkError::RequestContext {
             context: "fetch comment".into(),
             source: Box::new(e),
-        })?
+        })?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let err = resp.error_for_status_ref().expect_err("status error");
+        return Err(VkError::RequestContext {
+            context: format!("fetch comment status {status}").into(),
+            source: Box::new(err),
+        });
+    }
+    let comment = resp
         .json::<Value>()
         .await
         .map_err(|e| VkError::RequestContext {
@@ -192,10 +207,24 @@ pub async fn resolve_comment(
     let lookup = gql
         .run_query::<_, Value>(THREAD_ID_QUERY, json!({ "id": &comment_node }))
         .await;
-    #[expect(clippy::single_match_else, reason = "fallback to REST on lookup failure")]
-    let thread_id = match lookup.ok().and_then(|data| thread_id_from_lookup(&data).map(ToOwned::to_owned)) {
+
+    #[cfg(feature = "unstable-rest-resolve")]
+    #[expect(
+        clippy::single_match_else,
+        reason = "fallback to REST on lookup failure"
+    )]
+    let thread_id = match lookup
+        .as_ref()
+        .ok()
+        .and_then(|data| thread_id_from_lookup(data).map(ToOwned::to_owned))
+    {
         Some(id) => id,
         None => {
+            if let Err(e) = &lookup {
+                warn!("GraphQL thread ID lookup failed: {e}");
+            } else {
+                warn!("GraphQL thread ID lookup missing thread id");
+            }
             let node_id = fetch_comment_node_id(token, reference.repo, comment_id).await?;
             let lookup = gql
                 .run_query::<_, Value>(THREAD_ID_QUERY, json!({ "id": node_id }))
@@ -204,6 +233,14 @@ pub async fn resolve_comment(
                 .ok_or_else(|| VkError::BadResponse("missing thread id".into()))?
                 .to_owned()
         }
+    };
+
+    #[cfg(not(feature = "unstable-rest-resolve"))]
+    let thread_id = {
+        let data = lookup?;
+        thread_id_from_lookup(&data)
+            .ok_or_else(|| VkError::BadResponse("missing thread id".into()))?
+            .to_owned()
     };
     let vars = json!({ "id": thread_id });
     gql.run_query::<_, Value>(RESOLVE_THREAD_MUTATION, vars)

@@ -39,7 +39,7 @@ even when multiple comments reference the same code.
 - **Resolve threads**: `vk resolve <comment-ref>` resolves the thread via the
   `resolveReviewThread` GraphQL mutation. When compiled with the
   `unstable-rest-resolve` feature, it posts a reply via the REST API before
-  resolving. The thread identifier is obtained by synthesising the review
+  resolving. The thread identifier is obtained by synthesizing the review
   comment's node identifier as `base64("PullRequestReviewComment:<id>")` and
   querying its thread via GraphQL. If this lookup fails (for example if GitHub
   changes the encoding), vk fetches the comment's `node_id` using the REST API
