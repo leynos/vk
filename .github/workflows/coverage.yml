@@ -32,6 +32,8 @@ jobs:
           access-token: ${{ env.CS_ACCESS_TOKEN }}
           installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
 
+  # Exercise the experimental REST-based resolve path, ensuring lints and tests
+  # pass when the `unstable-rest-resolve` feature is enabled.
   unstable-rest-resolve:
     runs-on: ubuntu-latest
     steps:
