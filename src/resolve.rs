@@ -150,6 +150,54 @@ async fn post_reply(
     Ok(())
 }
 
+/// Search a page of review comment nodes for a matching comment.
+///
+/// Returns the thread ID when the comment matches.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use serde_json::json;
+/// let nodes = vec![json!({ "databaseId": 1, "pullRequestReviewThread": { "id": "t" } })];
+/// assert_eq!(find_comment_in_page(&nodes, 1), Some("t".into()));
+/// ```
+fn find_comment_in_page(nodes: &[Value], comment_id: u64) -> Option<String> {
+    for node in nodes {
+        let Some(id) = node.get("databaseId").and_then(Value::as_u64) else {
+            continue;
+        };
+        if id == comment_id {
+            return node
+                .get("pullRequestReviewThread")
+                .and_then(|t| t.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+        }
+    }
+    None
+}
+
+/// Extract the reviewComments object from a GraphQL response.
+///
+/// # Errors
+///
+/// Returns [`VkError::BadResponse`] when expected fields are missing.
+///
+/// # Examples
+///
+/// ```ignore
+/// # use serde_json::json;
+/// let data = json!({"repository": {"pullRequest": {"reviewComments": {}}}});
+/// let comments = extract_review_comments(&data)?;
+/// # Ok::<(), VkError>(())
+/// ```
+fn extract_review_comments(data: &Value) -> Result<&Value, VkError> {
+    data.get("repository")
+        .and_then(|r| r.get("pullRequest"))
+        .and_then(|p| p.get("reviewComments"))
+        .ok_or_else(|| VkError::BadResponse("missing review comments".into()))
+}
+
 /// Look up the GraphQL thread ID for a review comment.
 ///
 /// # Examples
@@ -183,29 +231,18 @@ async fn get_thread_id(
                 }),
             )
             .await?;
-
-        let comments = data
-            .get("repository")
-            .and_then(|r| r.get("pullRequest"))
-            .and_then(|p| p.get("reviewComments"))
-            .ok_or_else(|| VkError::BadResponse("missing review comments".into()))?;
-
+        let comments = extract_review_comments(&data)?;
         if let Some(nodes) = comments.get("nodes").and_then(Value::as_array) {
-            for node in nodes {
-                let Some(id) = node.get("databaseId").and_then(Value::as_u64) else {
-                    continue;
-                };
-                if id == comment_id {
-                    return node
-                        .get("pullRequestReviewThread")
-                        .and_then(|t| t.get("id"))
-                        .and_then(Value::as_str)
-                        .map(str::to_owned)
-                        .ok_or_else(|| VkError::BadResponse("missing thread id".into()));
-                }
+            if let Some(thread_id) = find_comment_in_page(nodes, comment_id) {
+                return Ok(thread_id);
+            }
+            if nodes
+                .iter()
+                .any(|n| n.get("databaseId").and_then(Value::as_u64) == Some(comment_id))
+            {
+                return Err(VkError::BadResponse("missing thread id".into()));
             }
         }
-
         let page = comments
             .get("pageInfo")
             .ok_or_else(|| VkError::BadResponse("missing page info".into()))?;
