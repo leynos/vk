@@ -180,6 +180,11 @@ async fn run_reply_flow(
     ],
 )]
 #[case(
+    StatusCode::FORBIDDEN,
+    false,
+    &["POST /repos/o/r/pulls/83/comments/1/replies"],
+)]
+#[case(
     StatusCode::INTERNAL_SERVER_ERROR,
     false,
     &["POST /repos/o/r/pulls/83/comments/1/replies"],
@@ -192,13 +197,14 @@ async fn resolve_flows_reply(
     let (calls, stdout, stderr) = run_reply_flow(rest_status, should_succeed).await;
     let stdout = String::from_utf8_lossy(&stdout);
     let stderr = String::from_utf8_lossy(&stderr);
+    let code = rest_status.as_u16().to_string();
     assert!(stdout.trim().is_empty(), "unexpected stdout: {stdout}");
     if should_succeed {
         assert!(stderr.trim().is_empty(), "unexpected stderr: {stderr}");
     } else {
         assert!(
             predicate::str::contains("replies")
-                .and(predicate::str::contains("500"))
+                .and(predicate::str::contains(code.as_str()))
                 .eval(&stderr),
             "stderr: {stderr}"
         );
