@@ -133,6 +133,8 @@ pub enum VkError {
     },
     #[error("missing comment path at index {index} in thread {thread_id}")]
     EmptyCommentPath { thread_id: Box<str>, index: usize },
+    #[error("comment {comment_id} not found")]
+    CommentNotFound { comment_id: u64 },
     #[error("bad response: {0}")]
     BadResponse(Box<str>),
     #[error("empty GraphQL response (status {status}) for {operation}: {snippet}")]
@@ -411,7 +413,7 @@ async fn main() -> Result<(), VkError> {
     let cli = Cli::parse();
     let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
     global.merge(cli.global);
-    match cli.command {
+    let result = match cli.command {
         Commands::Pr(pr_cli) => {
             let args = load_and_merge_subcommand_for(&pr_cli)?;
             run_pr(args, &global).await
@@ -424,7 +426,17 @@ async fn main() -> Result<(), VkError> {
             let args = load_and_merge_subcommand_for(&resolve_cli)?;
             run_resolve(args, &global).await
         }
+    };
+    if let Err(e) = result {
+        eprintln!("Error: {e}");
+        let code = match &e {
+            VkError::MissingAuth => 2,
+            VkError::CommentNotFound { .. } => 3,
+            _ => 1,
+        };
+        std::process::exit(code);
     }
+    Ok(())
 }
 
 fn locale_is_utf8() -> bool {

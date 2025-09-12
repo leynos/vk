@@ -139,9 +139,7 @@ self-contained ecosystem for testing.
 To set up the project, add the following `[dev-dependencies]` section to the
 `Cargo.toml` file:
 
-Ini, TOML
-
-```
+```ini,toml
 [dev-dependencies]
 assert_cmd = "2.0"
 insta = { version = "1.34", features = ["redactions"] }
@@ -1018,99 +1016,99 @@ foundation of quality and confidence for future development.
  1. People following @[vee.cool](http://vee.cool) — Bluesky, accessed on July
     20, 2025, <https://web-cdn.bsky.app/profile/vee.cool/followers>
 
- 1. Canop/termimad: A library to display rich (Markdown) snippets and texts in
+ 2. Canop/termimad: A library to display rich (Markdown) snippets and texts in
     a rust terminal application - GitHub, accessed on July 20, 2025,
     <https://github.com/Canop/termimad>
 
- 1. Termimad: use Markdown to display rich text in a terminal application -
+ 3. Termimad: use Markdown to display rich text in a terminal application -
     Rust Users Forum, accessed on July 20, 2025,
     <https://users.rust-lang.org/t/termimad-use-markdown-to-display-rich-text-in-a-terminal-application/29386>
 
- 1. termimad - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+ 4. termimad - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/termimad>
 
- 1. The Hitchhiker's Guide to E2E Testing | by Tally Barak - Medium, accessed
+ 5. The Hitchhiker's Guide to E2E Testing | by Tally Barak - Medium, accessed
     on July 20, 2025,
     <https://tally-b.medium.com/the-hitchhikers-guide-to-e2e-testing-b2a9eebeeb27>
 
- 1. How to Write Tests - The Rust Programming Language - Rust Documentation,
+ 6. How to Write Tests - The Rust Programming Language - Rust Documentation,
     accessed on July 20, 2025,
     <https://doc.rust-lang.org/book/ch11-01-writing-tests.html>
 
- 1. termimad - [crates.io](http://crates.io): Rust Package Registry, accessed
+ 7. termimad - [crates.io](http://crates.io): Rust Package Registry, accessed
     on July 20, 2025, <https://crates.io/crates/termimad/0.9.7>
 
- 1. assert_cmd - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+ 8. assert_cmd - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/assert_cmd>
 
- 1. assert_cmd - [crates.io](http://crates.io): Rust Package Registry, accessed
+ 9. assert_cmd - [crates.io](http://crates.io): Rust Package Registry, accessed
     on July 20, 2025, <https://crates.io/crates/assert_cmd>
 
- 1. assert-rs/assert_cmd - Command - GitHub, accessed on July 20, 2025,
+ 10. assert-rs/assert_cmd - Command - GitHub, accessed on July 20, 2025,
     <https://github.com/assert-rs/assert_cmd>
 
- 1. campbellC/third-wheel: A rust implementation of a man-in … - GitHub,
+ 11. campbellC/third-wheel: A rust implementation of a man-in … - GitHub,
     accessed on July 20, 2025, <https://github.com/campbellC/third-wheel>
 
- 1. Overview | Insta Snapshots, accessed on July 20, 2025,
+ 12. Overview | Insta Snapshots, accessed on July 20, 2025,
     <https://insta.rs/docs/>
 
- 1. insta - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+ 13. insta - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/insta>
 
- 1. Insta Snapshots, accessed on July 20, 2025, <https://insta.rs/>
+ 14. Insta Snapshots, accessed on July 20, 2025, <https://insta.rs/>
 
- 1. Testing - Command Line Applications in Rust, accessed on July 20, 2025,
+ 15. Testing - Command Line Applications in Rust, accessed on July 20, 2025,
     <https://rust-cli.github.io/book/tutorial/testing.html>
 
- 1. Test Organization - The Rust Programming Language, accessed on July 20,
+ 16. Test Organization - The Rust Programming Language, accessed on July 20,
     2025, <https://doc.rust-lang.org/book/ch11-03-test-organization.html>
 
- 1. insta - [crates.io](http://crates.io): Rust Package Registry, accessed on
+ 17. insta - [crates.io](http://crates.io): Rust Package Registry, accessed on
     July 20, 2025, <https://crates.io/crates/insta>
 
- 1. third-wheel - [crates.io](http://crates.io): Rust Package Registry,
+ 18. third-wheel - [crates.io](http://crates.io): Rust Package Registry,
     accessed on July 20, 2025, <https://crates.io/crates/third-wheel>
 
- 1. tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+ 19. tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/tempfile>
 
- 1. Should unit tests really be put in the same file as the source? - Rust
+ 20. Should unit tests really be put in the same file as the source? - Rust
     Users Forum, accessed on July 20, 2025,
     <https://users.rust-lang.org/t/should-unit-tests-really-be-put-in-the-same-file-as-the-source/62153>
 
- 1. Skeleton And Principles For A Maintainable Test Suite | Luca Palmieri,
+ 21. Skeleton And Principles For A Maintainable Test Suite | Luca Palmieri,
     accessed on July 20, 2025,
     <https://lpalmieri.com/posts/skeleton-and-principles-for-a-maintainable-test-suite/>
 
- 1. Command in assert_cmd::cmd - Rust - [Docs.rs](http://Docs.rs), accessed on
+ 22. Command in assert_cmd::cmd - Rust - [Docs.rs](http://Docs.rs), accessed on
     July 20, 2025,
     <https://docs.rs/assert_cmd/latest/assert_cmd/cmd/struct.Command.html>
 
- 1. How I test Rust command-line apps with assert_cmd - alexwlchan, accessed on
+ 23. How I test Rust command-line apps with assert_cmd - alexwlchan, accessed on
     July 20, 2025,
     <https://alexwlchan.net/2025/testing-rust-cli-apps-with-assert-cmd/>
 
- 1. assert_cmd for n00bs : r/rust - Reddit, accessed on July 20, 2025,
+ 24. assert_cmd for n00bs : r/rust - Reddit, accessed on July 20, 2025,
     <https://www.reddit.com/r/rust/comments/e2kfsr/assert_cmd_for_n00bs/>
 
- 1. Snapshot Testing - Rust Project Primer, accessed on July 20, 2025,
+ 25. Snapshot Testing - Rust Project Primer, accessed on July 20, 2025,
     <https://www.rustprojectprimer.com/testing/snapshot.html>
 
- 1. Snapshot testing - Advanced Rust testing - Rust Exercises, accessed on July
+ 26. Snapshot testing - Advanced Rust testing - Rust Exercises, accessed on July
     20, 2025,
     <https://rust-exercises.com/advanced-testing/02_snapshots/00_intro.html>
 
- 1. insta - Rust, accessed on July 20, 2025,
+ 27. insta - Rust, accessed on July 20, 2025,
     <https://prisma.github.io/prisma-engines/doc/insta/index.html>
 
- 1. tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+ 28. tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/tempfile/latest/tempfile/>
 
- 2. Complete Guide To Testing Code In Rust | Zero To Mastery, accessed on July
+ 29. Complete Guide To Testing Code In Rust | Zero To Mastery, accessed on July
     20, 2025,
     <https://zerotomastery.io/blog/complete-guide-to-testing-code-in-rust/>
 
- 3. Ultimate Guide to Testing and Debugging Rust Code | 2024 - Rapid
+ 30. Ultimate Guide to Testing and Debugging Rust Code | 2024 - Rapid
     Innovation, accessed on July 20, 2025,
     <https://www.rapidinnovation.io/post/testing-and-debugging-rust-code>
