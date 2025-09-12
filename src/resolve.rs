@@ -50,6 +50,25 @@ fn thread_id_from_lookup(lookup: &Value) -> Option<&str> {
         .and_then(Value::as_str)
 }
 
+#[cfg(test)]
+mod tests {
+    //! Tests for `thread_id_from_lookup`.
+    use super::thread_id_from_lookup;
+    use serde_json::json;
+
+    #[test]
+    fn returns_none_when_node_missing() {
+        let data = json!({});
+        assert!(thread_id_from_lookup(&data).is_none());
+    }
+
+    #[test]
+    fn returns_none_when_id_not_string() {
+        let data = json!({"node": {"pullRequestReviewThread": {"id": 1}}});
+        assert!(thread_id_from_lookup(&data).is_none());
+    }
+}
+
 /// Comment location within a pull request review thread.
 #[derive(Copy, Clone)]
 #[cfg_attr(
@@ -137,11 +156,13 @@ async fn fetch_comment_node_id(
             context: "fetch comment".into(),
             source: Box::new(e),
         })?;
-    if !resp.status().is_success() {
-        let status = resp.status();
+    let status = resp.status();
+    if !status.is_success() {
         let err = resp.error_for_status_ref().expect_err("status error");
+        let text = resp.text().await.unwrap_or_default();
+        let snippet: String = text.chars().take(512).collect();
         return Err(VkError::RequestContext {
-            context: format!("fetch comment status {status}").into(),
+            context: format!("fetch comment status {status} body {snippet}").into(),
             source: Box::new(err),
         });
     }

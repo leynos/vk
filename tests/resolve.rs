@@ -107,11 +107,11 @@ async fn resolve_falls_back_to_rest() {
     let clone = Arc::clone(&calls);
     *handler.lock().expect("lock handler") = Box::new(move |req| {
         let mut vec = clone.lock().expect("lock");
-        vec.push(format!("{} {}", req.method(), req.uri().path()));
         let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
+        vec.push(format!("{} {}", req.method(), req.uri().path()));
         let (status, body) = match req.uri().path() {
-            "/graphql" if gql_calls == 1 => (StatusCode::OK, r#"{"data":{}}"#),
-            "/graphql" if gql_calls == 2 => (
+            "/graphql" if gql_calls == 0 => (StatusCode::OK, r#"{"data":{}}"#),
+            "/graphql" if gql_calls == 1 => (
                 StatusCode::OK,
                 r#"{"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}"#,
             ),
