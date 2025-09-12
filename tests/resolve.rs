@@ -54,54 +54,6 @@ async fn resolve_flows(#[case] msg: Option<&'static str>) {
 }
 
 #[tokio::test]
-async fn resolve_flows_reply() {
-    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
-    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
-    let clone = Arc::clone(&calls);
-    *handler.lock().expect("lock handler") = Box::new(move |req| {
-        let mut vec = clone.lock().expect("lock");
-        let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
-        vec.push(format!("{} {}", req.method(), req.uri().path()));
-        let body = if req.uri().path() == "/graphql" {
-            if gql_calls == 0 {
-                r#"{"data":{"node":{"pullRequestReviewThread":{"id":"t"}}}}"#
-            } else {
-                r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
-            }
-        } else {
-            "{}"
-        };
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(Full::from(body))
-            .expect("response")
-    });
-    tokio::task::spawn_blocking(move || {
-        vk_cmd(addr)
-            .args([
-                "resolve",
-                "https://github.com/o/r/pull/83#discussion_r1",
-                "-m",
-                "done",
-            ])
-            .assert()
-            .success();
-    })
-    .await
-    .expect("spawn blocking");
-    shutdown.shutdown().await;
-    assert_eq!(
-        calls.lock().expect("lock").as_slice(),
-        [
-            "POST /repos/o/r/pulls/83/comments/1/replies",
-            "POST /graphql",
-            "POST /graphql",
-        ],
-    );
-}
-
-#[tokio::test]
 async fn resolve_falls_back_to_rest() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -199,6 +151,15 @@ async fn run_reply_flow(
 #[tokio::test]
 #[rstest::rstest]
 #[case(
+    StatusCode::OK,
+    true,
+    &[
+        "POST /repos/o/r/pulls/83/comments/1/replies",
+        "POST /graphql",
+        "POST /graphql",
+    ],
+)]
+#[case(
     StatusCode::NOT_FOUND,
     true,
     &[
@@ -212,7 +173,7 @@ async fn run_reply_flow(
     false,
     &["POST /repos/o/r/pulls/83/comments/1/replies"],
 )]
-async fn resolve_flows_reply_rest(
+async fn resolve_flows_reply(
     #[case] rest_status: StatusCode,
     #[case] should_succeed: bool,
     #[case] expected: &'static [&'static str],
