@@ -21,7 +21,7 @@ async fn resolve_flows(#[case] msg: Option<&'static str>) {
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             if gql_calls == 0 {
-                r#"{"data":{"repository":{"pullRequest":{"reviewComment":{"pullRequestReviewThread":{"id":"t"}}}}}}"#
+                r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
             } else {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
             }
@@ -62,7 +62,7 @@ async fn resolve_flows_reply() {
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             if gql_calls == 0 {
-                r#"{"data":{"repository":{"pullRequest":{"reviewComment":{"pullRequestReviewThread":{"id":"t"}}}}}}"#
+                r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
             } else {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
             }

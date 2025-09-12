@@ -6,7 +6,6 @@
 
 use crate::ref_parser::RepoInfo;
 use crate::{VkError, api::GraphQLClient};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(feature = "unstable-rest-resolve")]
 use reqwest::StatusCode;
 #[cfg(feature = "unstable-rest-resolve")]
@@ -21,12 +20,13 @@ const RESOLVE_THREAD_MUTATION: &str = r"
     }
 ";
 
-const THREAD_ID_QUERY: &str = r"
-    query($owner: String!, $name: String!, $pull: Int!, $id: ID!) {
+const REVIEW_COMMENTS_PAGE: &str = r"
+    query($owner: String!, $name: String!, $pull: Int!, $after: String) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $pull) {
-          reviewComment(id: $id) {
-            pullRequestReviewThread { id }
+          reviewComments(first: 50, after: $after) {
+            pageInfo { endCursor hasNextPage }
+            nodes { databaseId pullRequestReviewThread { id } }
           }
         }
       }
@@ -158,37 +158,72 @@ async fn post_reply(
 /// # use crate::{api::GraphQLClient, ref_parser::RepoInfo, resolve::get_thread_id, VkError};
 /// # async fn run(client: GraphQLClient) -> Result<(), VkError> {
 /// let repo = RepoInfo { owner: "o", name: "r" };
-/// let id = get_thread_id(&client, &repo, 1, 42).await?;
+/// let id = get_thread_id(&client, &repo.owner, &repo.name, 1, 42).await?;
 /// assert!(!id.is_empty());
 /// # Ok(())
 /// # }
 /// ```
 async fn get_thread_id(
     gql: &GraphQLClient,
-    repo: &RepoInfo,
+    owner: &str,
+    name: &str,
     pull: u64,
     comment_id: u64,
 ) -> Result<String, VkError> {
-    let node = STANDARD.encode(format!("PullRequestReviewComment:{comment_id}"));
-    let data: Value = gql
-        .run_query(
-            THREAD_ID_QUERY,
-            json!({
-                "owner": repo.owner,
-                "name": repo.name,
-                "pull": pull,
-                "id": node,
-            }),
-        )
-        .await?;
-    data.get("repository")
-        .and_then(|r| r.get("pullRequest"))
-        .and_then(|p| p.get("reviewComment"))
-        .and_then(|c| c.get("pullRequestReviewThread"))
-        .and_then(|t| t.get("id"))
-        .and_then(Value::as_str)
-        .map(str::to_owned)
-        .ok_or_else(|| VkError::BadResponse("missing thread id".into()))
+    let mut cursor = None;
+    loop {
+        let data: Value = gql
+            .run_query(
+                REVIEW_COMMENTS_PAGE,
+                json!({
+                    "owner": owner,
+                    "name": name,
+                    "pull": pull,
+                    "after": cursor,
+                }),
+            )
+            .await?;
+
+        let comments = data
+            .get("repository")
+            .and_then(|r| r.get("pullRequest"))
+            .and_then(|p| p.get("reviewComments"))
+            .ok_or_else(|| VkError::BadResponse("missing review comments".into()))?;
+
+        if let Some(nodes) = comments.get("nodes").and_then(Value::as_array) {
+            for node in nodes {
+                let Some(id) = node.get("databaseId").and_then(Value::as_u64) else {
+                    continue;
+                };
+                if id == comment_id {
+                    return node
+                        .get("pullRequestReviewThread")
+                        .and_then(|t| t.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .ok_or_else(|| VkError::BadResponse("missing thread id".into()));
+                }
+            }
+        }
+
+        let page = comments
+            .get("pageInfo")
+            .ok_or_else(|| VkError::BadResponse("missing page info".into()))?;
+        let has_next = page
+            .get("hasNextPage")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| VkError::BadResponse("missing hasNextPage".into()))?;
+        if !has_next {
+            break;
+        }
+        cursor = Some(
+            page.get("endCursor")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .ok_or_else(|| VkError::BadResponse("missing endCursor".into()))?,
+        );
+    }
+    Err(VkError::CommentNotFound { comment_id })
 }
 
 /// Resolve a review thread by ID.
@@ -242,7 +277,8 @@ pub async fn resolve_comment(
     let gql = GraphQLClient::new(token, None)?;
     let thread_id = get_thread_id(
         &gql,
-        reference.repo,
+        &reference.repo.owner,
+        &reference.repo.name,
         reference.pull_number,
         reference.comment_id,
     )
