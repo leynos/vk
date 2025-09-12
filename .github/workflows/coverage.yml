@@ -38,7 +38,9 @@ jobs:
       - uses: actions/checkout@v5
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@ebbaaa0d7a776ec3187f3940667e5c7c9379cdf5
+      - name: Install OpenSSL
+        run: sudo apt-get update && sudo apt-get install -y openssl ca-certificates
       - name: Lint (feature-gated)
-        run: make lint CLIPPY_FLAGS="--all-targets --features unstable-rest-resolve -- -D warnings"
+        run: CARGO="cargo --locked" make lint CLIPPY_FLAGS="--all-targets --features unstable-rest-resolve -- -D warnings"
       - name: Test unstable REST resolve (feature-gated)
-        run: RUSTFLAGS="-D warnings" cargo test --workspace --features unstable-rest-resolve
+        run: RUSTFLAGS="-D warnings" CARGO="cargo --locked" make test
