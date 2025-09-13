@@ -332,10 +332,7 @@ pub fn exclude_outdated_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread>
 
 /// Retain only non-outdated review threads.
 /// Alias retained for documentation and CLI consistency.
-#[must_use]
-pub fn filter_outdated_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
-    exclude_outdated_threads(threads)
-}
+pub use exclude_outdated_threads as filter_outdated_threads;
 
 /// Filter review threads to those whose first comment matches one of `files`.
 ///
