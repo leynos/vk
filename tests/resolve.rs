@@ -52,6 +52,51 @@ async fn resolve_flows() {
     );
 }
 
+#[tokio::test]
+async fn resolve_flows_paginates() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+    let clone = Arc::clone(&calls);
+    *handler.lock().expect("lock handler") = Box::new(move |req| {
+        let mut vec = clone.lock().expect("lock");
+        let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
+        vec.push(format!("{} {}", req.method(), req.uri().path()));
+        let body = if req.uri().path() == "/graphql" {
+            match gql_calls {
+                0 => {
+                    r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":"c1","hasNextPage":true},"nodes":[{"databaseId":2,"pullRequestReviewThread":{"id":"other"}}]}}}}}"#
+                }
+                1 => {
+                    r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
+                }
+                _ => r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#,
+            }
+        } else {
+            "{}"
+        };
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::from(body))
+            .expect("response")
+    });
+    tokio::task::spawn_blocking(move || {
+        vk_cmd(addr)
+            .args(["resolve", "https://github.com/o/r/pull/83#discussion_r1"])
+            .assert()
+            .success()
+            .stdout(predicate::str::is_empty())
+            .stderr(predicate::str::is_empty());
+    })
+    .await
+    .expect("spawn blocking");
+    shutdown.shutdown().await;
+    assert_eq!(
+        calls.lock().expect("lock").as_slice(),
+        ["POST /graphql", "POST /graphql", "POST /graphql"],
+    );
+}
+
 async fn run_reply_flow(
     rest_status: StatusCode,
 ) -> (Vec<String>, Vec<u8>, Vec<u8>, std::process::ExitStatus) {
