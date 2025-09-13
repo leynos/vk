@@ -34,7 +34,7 @@ yaml = ["ortho_config/yaml"]
 unstable-rest-resolve = []
 
 [dev-dependencies]
-tempfile = "3.20.0"
+tempfile = "3.22.0"
 serial_test = "3.2.0"
 rstest = "0.26.1"
 assert_cmd = "2.0"
