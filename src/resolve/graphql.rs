@@ -38,7 +38,7 @@ struct Repository {
 #[derive(Deserialize)]
 struct PullRequest {
     #[serde(rename = "reviewComments")]
-    review_comments: ReviewComments,
+    review_comments: Option<ReviewComments>,
 }
 
 #[derive(Deserialize)]
@@ -99,7 +99,7 @@ pub(crate) async fn get_thread_id(
         let comments = data
             .repository
             .and_then(|r| r.pull_request)
-            .map(|p| p.review_comments)
+            .and_then(|p| p.review_comments)
             .ok_or_else(|| VkError::BadResponse("missing review comments".into()))?;
         if let Some(node) = comments
             .nodes
@@ -111,7 +111,13 @@ pub(crate) async fn get_thread_id(
         if !comments.page_info.has_next_page {
             break;
         }
-        cursor = comments.page_info.end_cursor;
+        let next = comments.page_info.end_cursor.clone();
+        if next.is_none() {
+            return Err(VkError::BadResponse(
+                "missing endCursor with hasNextPage".into(),
+            ));
+        }
+        cursor = next;
     }
     Err(VkError::CommentNotFound {
         comment_id: reference.comment_id,

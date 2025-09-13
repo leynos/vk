@@ -14,7 +14,7 @@ mod graphql;
 mod rest;
 
 /// Comment location within a pull request review thread.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct CommentRef<'a> {
     pub repo: &'a RepoInfo,
     pub pull_number: u64,
@@ -28,7 +28,20 @@ pub struct CommentRef<'a> {
 ///
 /// # Examples
 ///
-/// ```ignore
+/// Basic usage:
+///
+/// ```no_run
+/// # use crate::{ref_parser::RepoInfo, resolve::{resolve_comment, CommentRef}, VkError};
+/// # async fn run() -> Result<(), VkError> {
+/// let repo = RepoInfo { owner: "octocat", name: "hello" };
+/// resolve_comment("token", CommentRef { repo: &repo, pull_number: 1, comment_id: 2 }).await?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Resolving and posting a reply (requires `unstable-rest-resolve`):
+///
+/// ```no_run
 /// # use crate::{ref_parser::RepoInfo, resolve::{resolve_comment, CommentRef}, VkError};
 /// use std::time::Duration;
 /// # async fn run() -> Result<(), VkError> {
@@ -36,13 +49,14 @@ pub struct CommentRef<'a> {
 /// resolve_comment(
 ///     "token",
 ///     CommentRef { repo: &repo, pull_number: 1, comment_id: 2 },
-///     None,
+///     Some(String::from("Thanks")),
 ///     Duration::from_secs(10),
 ///     Duration::from_secs(5),
 /// ).await?;
 /// # Ok(())
 /// # }
 /// ```
+#[cfg_attr(docsrs, doc(cfg(feature = "unstable-rest-resolve")))]
 pub async fn resolve_comment(
     token: &str,
     reference: CommentRef<'_>,

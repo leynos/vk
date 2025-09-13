@@ -2,6 +2,7 @@
 
 use super::CommentRef;
 use crate::VkError;
+use log::warn;
 use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use serde_json::json;
@@ -103,6 +104,10 @@ pub(crate) async fn post_reply(
             source: Box::new(e),
         })?;
     if res.status() == StatusCode::NOT_FOUND {
+        warn!(
+            "reply target not found: {}/{} comment {} in PR #{}",
+            reference.repo.owner, reference.repo.name, reference.comment_id, reference.pull_number
+        );
         // Treat missing original comment as non-fatal: continue to resolve.
         return Ok(());
     }
