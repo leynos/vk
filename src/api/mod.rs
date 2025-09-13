@@ -317,7 +317,6 @@ impl GraphQLClient {
     async fn execute_single_request(
         &self,
         payload: &serde_json::Value,
-        ctx: &str,
         operation: &str,
     ) -> Result<HttpResponse, VkError> {
         let response = self
@@ -329,14 +328,29 @@ impl GraphQLClient {
             .send()
             .await
             .map_err(|e| VkError::RequestContext {
-                context: ctx.to_owned().boxed(),
+                context: format!(
+                    "operation {operation}; {}",
+                    snippet(
+                        &serde_json::to_string(payload)
+                            .expect("serializing GraphQL request payload"),
+                        1024,
+                    ),
+                )
+                .boxed(),
                 source: e.into(),
             })?;
         let status = response.status();
         let status_u16 = status.as_u16();
         let status_err = response.error_for_status_ref().err();
         let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: format!("{ctx}; status {status_u16}").boxed(),
+            context: format!(
+                "operation {operation}; status {status_u16}; {}",
+                snippet(
+                    &serde_json::to_string(payload).expect("serializing GraphQL request payload"),
+                    1024,
+                ),
+            )
+            .boxed(),
             source: e.into(),
         })?;
         if !(200..300).contains(&status_u16) {
@@ -458,9 +472,6 @@ impl GraphQLClient {
         if let (Some(_), Some(obj)) = (op_name, payload.as_object_mut()) {
             obj.insert("operationName".into(), json!(operation.clone()));
         }
-        let payload_str =
-            serde_json::to_string(&payload).expect("serializing GraphQL request payload");
-        let ctx = format!("operation {operation}; {}", snippet(&payload_str, 1024)).boxed();
         let builder = {
             let b = ExponentialBuilder::default()
                 .with_min_delay(self.retry.base_delay)
@@ -472,9 +483,7 @@ impl GraphQLClient {
             }
         };
         (|| async {
-            let resp = self
-                .execute_single_request(&payload, &ctx, &operation)
-                .await?;
+            let resp = self.execute_single_request(&payload, &operation).await?;
             self.log_transcript(&payload, &operation, &resp);
             Self::process_graphql_response::<T>(&resp, &operation)
         })
