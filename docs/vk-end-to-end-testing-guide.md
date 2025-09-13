@@ -18,20 +18,20 @@ designed to streamline the developer code review workflow. Its primary function
 is to fetch and display unresolved code review comments from GitHub pull
 requests and issues directly within the terminal. The project's author is a
 Staff Engineer at GitHub, lending significant domain credibility to the tool's
-design and its focus on optimizing interactions within the GitHub ecosystem.1
+design and its focus on optimizing interactions within the GitHub ecosystem.[^1]
 
 A core feature of `vk` is its commitment to a rich user experience, achieved
-through the use of the `termimad` crate.2 This library enables the rendering of
-formatted text, including Markdown, with colours, tables, and other styling
-elements directly in the terminal.3 This focus on richly formatted output is a
-key consideration for testing, as simple string comparisons are inadequate to
+through the use of the `termimad` crate.[^2] This library enables the rendering
+of formatted text, including Markdown, with colours, tables, and other styling
+elements directly in the terminal.[^3] This focus on richly formatted output is
+a key consideration for testing, as simple string comparisons are inadequate to
 validate the visual correctness of the tool's output.
 
 ### The Imperative for E2E Testing in Network-Dependent CLIs
 
 End-to-end testing, in the context of a command-line application, involves
-treating the final compiled binary as a "black box".5 The test suite interacts
-with the application solely through its public interface—command-line
+treating the final compiled binary as a "black box".[^5] The test suite
+interacts with the application solely through its public interface—command-line
 arguments, environment variables, and standard input—and verifies its output,
 exit code, and standard error streams. This approach simulates how a real user
 interacts with the tool, providing the highest level of confidence in its
@@ -54,13 +54,13 @@ it is essential for several critical reasons:
 - **Regression Prevention:** As `vk` evolves with new features or bug fixes, a
   comprehensive E2E test suite acts as a critical safety net. It ensures that
   modifications in one area do not inadvertently break existing functionality
-  in another, a cornerstone of maintainable software development.6
+  in another, a cornerstone of maintainable software development.[^6]
 
 - **User Experience (UX) Validation:** The use of `termimad` signifies that the
-  visual presentation of data is a primary feature.7 The colours, layout, and
-  formatting are integral to the tool's value. E2E tests, when combined with
-  snapshot testing, provide the only effective means to validate this complex,
-  styled output and prevent visual regressions.
+  visual presentation of data is a primary feature.[^7] The colours, layout,
+  and formatting are integral to the tool's value. E2E tests, when combined
+  with snapshot testing, provide the only effective means to validate this
+  complex, styled output and prevent visual regressions.
 
 The entire testing strategy outlined in this guide is built upon the principle
 of **hermetic testing**. A hermetic test suite is one that is self-contained
@@ -84,30 +84,30 @@ provide a holistic solution.
   command-line arguments and environment variables, and performing assertions
   on the process-level results. This includes checking the process exit code
   for success or failure and inspecting the contents of the standard error
-  (`stderr`) stream for user-facing error messages.8
+  (`stderr`) stream for user-facing error messages.[^8]
 
 - `third-wheel`: This crate provides the critical network isolation layer. It
   is a Man-in-the-Middle (MITM) proxy, written in Rust, that can be embedded
-  directly within the test harness.11 Its role is to intercept all outgoing
+  directly within the test harness.[^11] Its role is to intercept all outgoing
   HTTP requests that
 
   `vk` attempts to make to the GitHub GraphQL API. Instead of allowing these
   requests to reach the internet, `third-wheel` captures them and returns
   controlled, predefined responses from local fixture files. This makes the
   tests completely independent of the network and ensures that the API's
-  behavior is deterministic for every test run.
+  behaviour is deterministic for every test run.
 
 - `insta`: This crate is the output verifier, specialized for snapshot testing.
   Given that `vk` produces complex, styled terminal output via `termimad`,
   `insta` is used to capture this raw output—including all ANSI escape codes
-  for colour and formatting—and save it to a "snapshot" file.12 On subsequent
-  test runs,
+  for colour and formatting—and save it to a "snapshot" file.[^12] On
+  subsequent test runs,
 
   `insta` compares the new output against the saved snapshot. Any deviation
   will cause the test to fail, allowing developers to either fix the regression
   or intentionally update the snapshot to reflect a desired change. This
   approach is vastly superior to manual string assertions for validating rich
-  UIs.14
+  UIs.[^14]
 
 Together, these three tools form a powerful and cohesive system. `assert_cmd`
 drives the application, `third-wheel` controls its external environment, and
@@ -125,7 +125,7 @@ organize test files, and create an initial smoke test to validate the setup.
 
 In a Rust project, dependencies required only for testing, benchmarking, or
 examples are placed in the `[dev-dependencies]` section of the `Cargo.toml`
-file.15 This ensures that testing libraries are not compiled into the final
+file.[^15] This ensures that testing libraries are not compiled into the final
 release binary, keeping it lean and free of unnecessary code.
 
 The following dependencies are required to build the complete E2E test suite
@@ -139,7 +139,7 @@ self-contained ecosystem for testing.
 To set up the project, add the following `[dev-dependencies]` section to the
 `Cargo.toml` file:
 
-```ini,toml
+```toml
 [dev-dependencies]
 assert_cmd = "2.0"
 insta = { version = "1.34", features = ["redactions"] }
@@ -147,31 +147,32 @@ third-wheel = "0.6"
 tokio = { version = "1.0", features = ["full"] }
 serde_json = "1.0"
 tempfile = "3.8"
+predicates = "3.1"
 ```
 
 The table below outlines the purpose of each dependency within the test suite.
 
-| Crate       | Recommended Version | Purpose in Test Suite                                                                                                                                |
-| ----------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| assert_cmd  | ~2.0                | The core test orchestrator for executing the vk binary and asserting on its behaviour.8                                                              |
-| insta       | ~1.34               | For snapshot testing of the styled terminal output, handling the complexity of termimad.17 The redactions feature is enabled to handle dynamic data. |
-| third-wheel | ~0.6                | An embedded MITM proxy to intercept and mock GitHub API calls, ensuring deterministic tests.18                                                       |
-| tokio       | ~1.0                | An async runtime required to run the third-wheel mock server concurrently with the test logic. The full feature flag is recommended for simplicity.  |
-| serde_json  | ~1.0                | A utility for loading and manipulating the JSON fixture files used as mock API responses.                                                            |
-| tempfile    | ~3.8                | For creating temporary configuration files and directories to test vk's configuration logic in an isolated manner.19                                 |
+| Crate       | Recommended Version | Purpose in Test Suite                                                                                                                                   |
+| ----------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| assert_cmd  | ~2.0                | The core test orchestrator for executing the vk binary and asserting on its behaviour.[^8]                                                              |
+| insta       | ~1.34               | For snapshot testing of the styled terminal output, handling the complexity of termimad.[^17] The redactions feature is enabled to handle dynamic data. |
+| third-wheel | ~0.6                | An embedded MITM proxy to intercept and mock GitHub API calls, ensuring deterministic tests.[^18]                                                       |
+| tokio       | ~1.0                | An async runtime required to run the third-wheel mock server concurrently with the test logic. The full feature flag is recommended for simplicity.     |
+| serde_json  | ~1.0                | A utility for loading and manipulating the JSON fixture files used as mock API responses.                                                               |
+| tempfile    | ~3.8                | For creating temporary configuration files and directories to test vk's configuration logic in an isolated manner.[^19]                                 |
 
 ### Test File Organization: Following Rust Conventions
 
 maintain. Rust has a well-established convention for test organization:
 integration tests are placed in a top-level `tests/` directory, which resides
-alongside the `src/` directory.16 Each Rust file (
+alongside the `src/` directory.[^16] Each Rust file (
 
 `.rs`) within the `tests/` directory is compiled and run as a separate test
 crate.
 
 For the `vk` project, the following structure is recommended:
 
-```
+```text
 vk/
 ├── Cargo.toml
 ├── src/
@@ -198,7 +199,7 @@ As the test suite grows, it can be further organized by creating submodules.
 For example, tests related to configuration could be moved to `tests/config.rs`
 and command-specific tests to `tests/pr_commands.rs`. This modular approach,
 supported natively by Cargo's test runner, is a powerful pattern for
-maintaining large test suites.20
+maintaining large test suites.[^20]
 
 ### A "Hello World" Test: The Foundational Smoke Test
 
@@ -252,7 +253,7 @@ this test provides high confidence that:
 With this foundation in place, the next step is to introduce the complexity of
 API mocking.
 
-## Deterministic API Behavior via Mocking with third-wheel
+## Deterministic API Behaviour via Mocking with third-wheel
 
 To create a truly hermetic test suite for a network-dependent application like
 `vk`, it is imperative to isolate it from the actual network. Making live calls
@@ -277,9 +278,9 @@ the local machine. This method requires zero changes to the `vk` source code,
 preserving the integrity of the black-box testing model.
 
 The `third-wheel` crate is ideal for this purpose because it is a lightweight
-MITM proxy written in Rust.11 This allows it to be embedded and controlled
+MITM proxy written in Rust.[^11] This allows it to be embedded and controlled
 programmatically from within the test code itself, eliminating the complexity
-of managing a separate, external proxy process.11
+of managing a separate, external proxy process.[^11]
 
 ### Step-by-Step: Embedding the third-wheel Mock Server
 
@@ -302,12 +303,12 @@ use third_wheel::{ThirdWheel, MitmProxy};
 use third_wheel::hyper::{Body, Request, Response, StatusCode};
 
 // This type alias simplifies the handler signature. The handler will be
-// a shared, mutable function that determines the mock server's behavior.
+// a shared, mutable function that determines the mock server's behaviour.
 type Handler = Arc<Mutex<Box<dyn Fn(&Request<Body>) -> Response<Body> + Send>>>;
 
 /// Starts a third-wheel mock server on a random available port.
 ///
-/// The server's behavior is defined by the `handler` closure. It returns the
+/// The server's behaviour is defined by the `handler` closure. It returns the
 /// server's address and a clone of the handler so the test can dynamically
 /// change the mock response.
 async fn start_mock_server() -> (SocketAddr, Handler) {
@@ -325,7 +326,7 @@ async fn start_mock_server() -> (SocketAddr, Handler) {
     // The MitmProxy requires a function that will be called for each intercepted request.
     let proxy = MitmProxy::new(Box::new(move |req, _ctx| {
         // We lock the mutex to access the current handler function and execute it.
-        // This allows the test to change the server's behavior on the fly.
+        // This allows the test to change the server's behaviour on the fly.
         let h = handler_clone.lock().unwrap();
         h(req)
     }));
@@ -398,7 +399,7 @@ fn load_fixture(name: &str) -> String {
 ### Overriding the API Endpoint
 
 With the mock server running, the final step is to instruct `vk` to send its
-API requests to our mock server instead of the real GitHub API. The `vk` tool
+API requests to the mock server instead of the real GitHub API. The `vk` tool
 is designed to be testable and respects the `GITHUB_GRAPHQL_URL` environment
 variable to override the default API endpoint. The `assert_cmd` crate makes
 setting this variable for the child process trivial using the `.env()` method.
@@ -406,7 +407,7 @@ setting this variable for the child process trivial using the `.env()` method.
 ### Simulating Diverse API Scenarios
 
 The true power of this embedded mocking approach is the ability to easily
-simulate a wide range of API behaviors to test `vk`'s resilience and error
+simulate a wide range of API behaviours to test `vk`'s resilience and error
 handling.
 
 Scenario 1: Successful Query
@@ -475,21 +476,22 @@ let (addr, handler) = start_mock_server().await;
 //... run vk command and assert that it fails with a network error message...
 ```
 
-This level of programmatic control over the mock API's behavior is what enables
-the creation of a truly comprehensive and robust E2E test suite, capable of
-verifying not just the "happy path" but also a wide variety of failure modes.
+This level of programmatic control over the mock API's behaviour is what
+enables the creation of a truly comprehensive and robust E2E test suite,
+capable of verifying not just the "happy path" but also a wide variety of
+failure modes.
 
 ## Driving the Application with assert_cmd
 
 The `assert_cmd` crate is the engine of the E2E test suite, responsible for
 executing the `vk` binary and simulating all forms of user interaction. Its
 fluent, expressive API simplifies the process of setting up command-line
-arguments, configuring the environment, and asserting on the results.9
+arguments, configuring the environment, and asserting on the results.[^9]
 
 ### Executing the vk Binary
 
 The most reliable way to instantiate a command for the crate under test is
-`Command::cargo_bin("vk")`.8 This function, provided by the
+`Command::cargo_bin("vk")`.[^8] This function, provided by the
 
 `CommandCargoExt` trait, asks Cargo for the location of the specified binary
 artifact. This approach is vastly superior to hardcoding a path like
@@ -514,7 +516,7 @@ simple methods for this.
 Command-Line Arguments:
 
 The .arg() method adds a single argument, while .args() adds a collection of
-arguments.22 This allows for testing simple commands as well as those with
+arguments.[^22] This allows for testing simple commands as well as those with
 multiple flags and values.
 
 ```rust
@@ -527,11 +529,11 @@ cmd.args(&["pr", "https://github.com/org/repo/pull/123"]);
 
 Environment Variables:
 
-The .env() method is used to set environment variables for the child process.8
-This is critical for the
+The .env() method is used to set environment variables for the child
+process.[^8] This is critical for the
 
 `vk` test suite, as it is used to provide the mock API URL and to test
-configuration options like `GITHUB_TOKEN` and `VK_REPO`.24
+configuration options like `GITHUB_TOKEN` and `VK_REPO`.[^24]
 
 ```rust
 // Provide a mock authentication token.
@@ -547,7 +549,7 @@ cmd.env("GITHUB_GRAPHQL_URL", mock_server_url);
 
 The `.env_clear()` method can also be used to ensure the child process starts
 with a clean environment, preventing variables from the test runner's
-environment from leaking into the test and causing non-deterministic behavior.
+environment from leaking into the test and causing non-deterministic behaviour.
 
 ### Asserting on Process Outcomes
 
@@ -570,7 +572,7 @@ The most common assertions relate to the success or failure of the command.
 
 - `.code(N)`: Asserts that the process exited with a specific integer code `N`.
   This is useful for testing applications that use different exit codes to
-  signify different types of errors.23
+  signify different types of errors.[^23]
 
 ```rust
 // Assert that the command completed successfully.
@@ -614,7 +616,7 @@ While `assert_cmd` is excellent for verifying process outcomes and `stderr`, it
 is not well-suited for validating the complex output `vk` prints to standard
 output (`stdout`). Because `vk` uses the `termimad` crate, its output is not
 plain text; it is a rich tapestry of content formatted with ANSI escape codes
-that control colours, bolding, table layouts, and more.2
+that control colours, bolding, table layouts, and more.[^2]
 
 ### The Case for Snapshot Testing with termimad
 
@@ -625,7 +627,7 @@ like `\u{1b} A snapshot testing library like `insta\` works by capturing the
 *entire raw output* of a command on its first run and saving it to a dedicated
 file (a "snapshot"). On all subsequent runs, the new output is compared to this
 saved snapshot. If there is any difference, the test fails, and the library
-presents a "diff" that clearly highlights the changes.13 This allows the
+presents a "diff" that clearly highlights the changes.[^13] This allows the
 developer to:
 
 1. Quickly identify an unintended change (a regression).
@@ -662,7 +664,7 @@ insta::assert_snapshot!(stdout);
 ### The Snapshot Lifecycle: Review and Update
 
 The development workflow with `insta` is designed to be interactive and
-intuitive, revolving around the `cargo-insta` command-line tool.13
+intuitive, revolving around the `cargo-insta` command-line tool.[^13]
 
 1. **First Run and Snapshot Creation:** When a test containing
    `insta::assert_snapshot!` is run for the first time, there is no existing
@@ -694,10 +696,10 @@ intuitive, revolving around the `cargo-insta` command-line tool.13
      leaving it in a pending state.
 
 4. **Non-Interactive Updates (for CI/CD):** The `INSTA_UPDATE` environment
-   variable controls `insta`'s behavior in non-interactive environments like CI
-   pipelines.13
+   variable controls `insta`'s behaviour in non-interactive environments like
+   CI pipelines.[^13]
 
-   - `INSTA_UPDATE=no`: This is the default behavior in most CI environments.
+   - `INSTA_UPDATE=no`: This is the default behaviour in most CI environments.
      If a snapshot mismatch is found, the test fails, and no files are written.
      This is the correct setting for CI, as it should only verify, not update,
      tests.
@@ -716,7 +718,7 @@ intuitive, revolving around the `cargo-insta` command-line tool.13
 Sometimes, application output contains data that changes on every run, such as
 timestamps, unique identifiers, or performance measurements. This
 non-determinism would cause snapshot tests to fail on every execution. `insta`
-provides a powerful solution for this: **redactions**.13
+provides a powerful solution for this: **redactions**.[^13]
 
 Redactions allow you to specify patterns to be replaced with a static
 placeholder before the comparison happens. This is done by providing a second
@@ -749,9 +751,9 @@ This section synthesizes all the concepts from the preceding sections into a
 single, fully-worked example. It provides a complete, heavily commented E2E
 test case that serves as a practical template for testing a common `vk` use
 case. The test follows the classic Arrange-Act-Assert pattern, a best practice
-for structuring tests to be clear and understandable.6
+for structuring tests to be clear and understandable.[^6]
 
-**Scenario:** The test will verify the behavior of the `vk pr <url>` command
+**Scenario:** The test will verify the behaviour of the `vk pr <url>` command
 for a pull request that contains one unresolved comment thread. It will ensure
 the command succeeds and that the rendered terminal output is correct.
 
@@ -776,7 +778,7 @@ async fn test_pr_command_with_single_comment_renders_correctly() {
     //=========================================================================
 
     // Start the embedded third-wheel mock server. This gives us its address
-    // and a handle to control its response behavior.
+    // and a handle to control its response behaviour.
     let (mock_server_addr, handler) = start_mock_server().await;
     let mock_server_url = format!("http://{}", mock_server_addr);
 
@@ -863,7 +865,7 @@ between test runs.
 
 The `tempfile` crate provides an elegant solution by enabling the creation of
 temporary files and directories that are automatically cleaned up when they go
-out of scope.19
+out of scope.[^19]
 
 The following example demonstrates how to test that `vk` correctly reads a
 repository setting from a temporary configuration file.
@@ -918,7 +920,7 @@ scenarios in a completely isolated and self-cleaning manner.
 
 Thoroughly testing failure paths is just as critical as testing successful
 ones. A robust application should fail gracefully and provide clear, actionable
-feedback to the user.23 The E2E test suite should verify this behavior.
+feedback to the user.[^23] The E2E test suite should verify this behaviour.
 
 Here is a checklist of essential error conditions to test for `vk`:
 
@@ -972,7 +974,7 @@ help ensure the long-term health of the test suite.
 - **Descriptive Test Naming:** Test function names should clearly describe the
   scenario being tested. A name like
   `test_pr_command_fails_gracefully_on_api_error` is far more informative than
-  `test_pr_error1`.30 This makes it easier to identify the purpose of a test
+  `test_pr_error1`.[^25] This makes it easier to identify the purpose of a test
   and to diagnose failures.
 
 - **Refactor with Helper Functions:** Repetitive setup and teardown logic
@@ -980,7 +982,7 @@ help ensure the long-term health of the test suite.
   is a prime example. This practice, often referred to as making code DRY
   (Don't Repeat Yourself), keeps the body of the test functions focused on the
   specific Arrange-Act-Assert logic for that scenario, making them shorter and
-  easier to read.21 These helpers can be placed in a shared
+  easier to read.[^21] These helpers can be placed in a shared
 
   `tests/helpers.rs` module.
 
@@ -998,13 +1000,13 @@ help ensure the long-term health of the test suite.
 
 - **The Library/Binary Crate Pattern:** For maximum testability and code reuse,
   consider structuring the project with a library crate (`src/lib.rs`) and a
-  very thin binary crate (`src/main.rs`).15 The library would contain all the
-  core application logic (API interaction, data processing, rendering logic),
-  while the binary would only be responsible for parsing command-line arguments
-  and calling the library functions. This pattern allows for the core logic to
-  be tested with traditional unit and integration tests, complementing the
-  black-box E2E suite and providing a more layered testing strategy. While a
-  full refactoring is beyond the scope of this guide, it represents a mature
+  very thin binary crate (`src/main.rs`).[^15] The library would contain all
+  the core application logic (API interaction, data processing, rendering
+  logic), while the binary would only be responsible for parsing command-line
+  arguments and calling the library functions. This pattern allows for the core
+  logic to be tested with traditional unit and integration tests, complementing
+  the black-box E2E suite and providing a more layered testing strategy. While
+  a full refactoring is beyond the scope of this guide, it represents a mature
   evolutionary path for the project's architecture.
 
 By adopting these advanced techniques and maintainability patterns, the `vk`
@@ -1013,102 +1015,83 @@ foundation of quality and confidence for future development.
 
 ## Works cited
 
- 1. People following @[vee.cool](http://vee.cool) — Bluesky, accessed on July
+[^1]: People following @[vee.cool](http://vee.cool) — Bluesky, accessed on July
     20, 2025, <https://web-cdn.bsky.app/profile/vee.cool/followers>
 
- 2. Canop/termimad: A library to display rich (Markdown) snippets and texts in
+[^2]: Canop/termimad: A library to display rich (Markdown) snippets and texts in
     a rust terminal application - GitHub, accessed on July 20, 2025,
     <https://github.com/Canop/termimad>
 
- 3. Termimad: use Markdown to display rich text in a terminal application -
+[^3]: Termimad: use Markdown to display rich text in a terminal application -
     Rust Users Forum, accessed on July 20, 2025,
     <https://users.rust-lang.org/t/termimad-use-markdown-to-display-rich-text-in-a-terminal-application/29386>
 
- 4. termimad - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/termimad>
 
- 5. The Hitchhiker's Guide to E2E Testing | by Tally Barak - Medium, accessed
+[^5]: The Hitchhiker's Guide to E2E Testing | by Tally Barak - Medium, accessed
     on July 20, 2025,
     <https://tally-b.medium.com/the-hitchhikers-guide-to-e2e-testing-b2a9eebeeb27>
 
- 6. How to Write Tests - The Rust Programming Language - Rust Documentation,
+[^6]: How to Write Tests - The Rust Programming Language - Rust Documentation,
     accessed on July 20, 2025,
     <https://doc.rust-lang.org/book/ch11-01-writing-tests.html>
 
- 7. termimad - [crates.io](http://crates.io): Rust Package Registry, accessed
+[^7]: termimad - [crates.io](http://crates.io): Rust Package Registry, accessed
     on July 20, 2025, <https://crates.io/crates/termimad/0.9.7>
 
- 8. assert_cmd - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+[^8]: assert_cmd - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/assert_cmd>
 
- 9. assert_cmd - [crates.io](http://crates.io): Rust Package Registry, accessed
-    on July 20, 2025, <https://crates.io/crates/assert_cmd>
+[^9]: assert_cmd - [crates.io](http://crates.io): Rust Package Registry,
+      accessed on July 20, 2025, <https://crates.io/crates/assert_cmd>
 
- 10. assert-rs/assert_cmd - Command - GitHub, accessed on July 20, 2025,
     <https://github.com/assert-rs/assert_cmd>
 
- 11. campbellC/third-wheel: A rust implementation of a man-in … - GitHub,
+[^11]: campbellC/third-wheel: A rust implementation of a man-in … - GitHub,
     accessed on July 20, 2025, <https://github.com/campbellC/third-wheel>
 
- 12. Overview | Insta Snapshots, accessed on July 20, 2025,
+[^12]: Overview | Insta Snapshots, accessed on July 20, 2025,
     <https://insta.rs/docs/>
 
- 13. insta - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+[^13]: insta - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/insta>
 
- 14. Insta Snapshots, accessed on July 20, 2025, <https://insta.rs/>
+[^14]: Insta Snapshots, accessed on July 20, 2025, <https://insta.rs/>
 
- 15. Testing - Command Line Applications in Rust, accessed on July 20, 2025,
+[^15]: Testing - Command Line Applications in Rust, accessed on July 20, 2025,
     <https://rust-cli.github.io/book/tutorial/testing.html>
 
- 16. Test Organization - The Rust Programming Language, accessed on July 20,
+[^16]: Test Organization - The Rust Programming Language, accessed on July 20,
     2025, <https://doc.rust-lang.org/book/ch11-03-test-organization.html>
 
- 17. insta - [crates.io](http://crates.io): Rust Package Registry, accessed on
+[^17]: insta - [crates.io](http://crates.io): Rust Package Registry, accessed on
     July 20, 2025, <https://crates.io/crates/insta>
 
- 18. third-wheel - [crates.io](http://crates.io): Rust Package Registry,
+[^18]: third-wheel - [crates.io](http://crates.io): Rust Package Registry,
     accessed on July 20, 2025, <https://crates.io/crates/third-wheel>
 
- 19. tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+[^19]: tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
     <https://docs.rs/tempfile>
 
- 20. Should unit tests really be put in the same file as the source? - Rust
+[^20]: Should unit tests really be put in the same file as the source? - Rust
     Users Forum, accessed on July 20, 2025,
     <https://users.rust-lang.org/t/should-unit-tests-really-be-put-in-the-same-file-as-the-source/62153>
 
- 21. Skeleton And Principles For A Maintainable Test Suite | Luca Palmieri,
+[^21]: Skeleton And Principles For A Maintainable Test Suite | Luca Palmieri,
     accessed on July 20, 2025,
     <https://lpalmieri.com/posts/skeleton-and-principles-for-a-maintainable-test-suite/>
 
- 22. Command in assert_cmd::cmd - Rust - [Docs.rs](http://Docs.rs), accessed on
-    July 20, 2025,
-    <https://docs.rs/assert_cmd/latest/assert_cmd/cmd/struct.Command.html>
+[^22]: Command in assert_cmd::cmd - Rust - [Docs.rs](http://Docs.rs), accessed
+       on July 20, 2025,
+       <https://docs.rs/assert_cmd/latest/assert_cmd/cmd/struct.Command.html>
 
- 23. How I test Rust command-line apps with assert_cmd - alexwlchan, accessed on
-    July 20, 2025,
-    <https://alexwlchan.net/2025/testing-rust-cli-apps-with-assert-cmd/>
+[^23]: How I test Rust command-line apps with assert_cmd - alexwlchan, accessed
+       on July 20, 2025,
+       <https://alexwlchan.net/2025/testing-rust-cli-apps-with-assert-cmd/>
 
- 24. assert_cmd for n00bs : r/rust - Reddit, accessed on July 20, 2025,
+[^24]: assert_cmd for n00bs : r/rust - Reddit, accessed on July 20, 2025,
     <https://www.reddit.com/r/rust/comments/e2kfsr/assert_cmd_for_n00bs/>
 
- 25. Snapshot Testing - Rust Project Primer, accessed on July 20, 2025,
-    <https://www.rustprojectprimer.com/testing/snapshot.html>
-
- 26. Snapshot testing - Advanced Rust testing - Rust Exercises, accessed on July
-    20, 2025,
-    <https://rust-exercises.com/advanced-testing/02_snapshots/00_intro.html>
-
- 27. insta - Rust, accessed on July 20, 2025,
-    <https://prisma.github.io/prisma-engines/doc/insta/index.html>
-
- 28. tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
-    <https://docs.rs/tempfile/latest/tempfile/>
-
- 29. Complete Guide To Testing Code In Rust | Zero To Mastery, accessed on July
-    20, 2025,
-    <https://zerotomastery.io/blog/complete-guide-to-testing-code-in-rust/>
-
- 30. Ultimate Guide to Testing and Debugging Rust Code | 2024 - Rapid
+[^25]: Ultimate Guide to Testing and Debugging Rust Code | 2024 - Rapid
     Innovation, accessed on July 20, 2025,
     <https://www.rapidinnovation.io/post/testing-and-debugging-rust-code>
