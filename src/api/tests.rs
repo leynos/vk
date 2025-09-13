@@ -526,3 +526,18 @@ fn next_cursor_errors_without_cursor() {
     let err = info.next_cursor().expect_err("missing cursor");
     assert!(matches!(err, VkError::BadResponse(_)));
 }
+
+#[test]
+fn payload_snippet_redacts_sensitive_fields() {
+    let payload = json!({
+        "query": "query { viewer { login } }",
+        "variables": {
+            "token": "secret",
+            "nested": { "password": "p" }
+        }
+    });
+    let snip = payload_snippet(&payload);
+    assert!(!snip.contains("secret"));
+    assert!(!snip.contains(":\"p\""));
+    assert!(snip.contains("<redacted>"));
+}
