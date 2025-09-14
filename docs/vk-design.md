@@ -66,7 +66,7 @@ emitted when threads will be printed; otherwise it is omitted. Other errors
 from `print_thread` and banner printing are surfaced via logging. Once all
 threads have been printed, a final banner reading `end of code review` confirms
 completion. Review threads missing the GraphQL `isOutdated` field are treated
-as current so older fixtures remain compatible.
+as current on the client side to preserve legacy fixture compatibility.
 
 ### CLI arguments
 

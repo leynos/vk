@@ -38,12 +38,11 @@ mod test_utils;
 
 pub use crate::api::{GraphQLClient, paginate};
 pub use issues::{Issue, fetch_issue};
-pub use review_threads::filter_outdated_threads;
 use review_threads::thread_for_comment;
 pub use review_threads::{
     CommentConnection, FetchOptions, PageInfo, ReviewComment, ReviewThread, User,
     exclude_outdated_threads, fetch_review_threads, fetch_review_threads_with_options,
-    fetch_review_threads_with_resolution, filter_threads_by_files,
+    fetch_review_threads_with_resolution, filter_outdated_threads, filter_threads_by_files,
 };
 
 use summary::{
