@@ -177,40 +177,6 @@ impl FetchOptions {
 /// Fetch all unresolved review threads for a pull request.
 ///
 /// Note:
-/// - GitHub GraphQL `Int` is a 32-bit signed integer (range −2^31..=2^31−1).
-///   This function accepts a non-negative `number`; values above `i32::MAX`
-///   are rejected with [`VkError::InvalidNumber`].
-/// - The token must have sufficient scopes (for example, `repo` for private
-///   repositories) or the API may return partial data that fails to
-///   deserialise.
-/// - Pagination is fully exhausted so each returned thread's comments are
-///   complete.
-///
-/// ```no_run
-/// use vk::{api::GraphQLClient, ref_parser::RepoInfo};
-///
-/// # async fn run() -> Result<(), vk::VkError> {
-/// let client = GraphQLClient::new("token", None).expect("client");
-/// let repo = RepoInfo { owner: "o".into(), name: "r".into() };
-/// let threads = vk::review_threads::fetch_review_threads(&client, &repo, 1).await?;
-/// assert!(threads.iter().all(|t| !t.comments.nodes.is_empty()));
-/// # Ok(())
-/// # }
-/// ```
-///
-/// # Errors
-///
-/// Returns [`VkError::InvalidNumber`] if `number` exceeds `i32::MAX`, or a
-/// general [`VkError`] if any API request fails or the response is malformed.
-pub async fn fetch_review_threads(
-    client: &GraphQLClient,
-    repo: &RepoInfo,
-    number: u64,
-) -> Result<Vec<ReviewThread>, VkError> {
-    fetch_review_threads_with_options(client, repo, number, FetchOptions::unresolved_current())
-        .await
-}
-
 /// Fetch review threads with optional resolution and outdated filters.
 ///
 /// Pass [`FetchOptions`] to control inclusion of resolved or outdated threads.
@@ -286,53 +252,6 @@ pub async fn fetch_review_threads_with_options(
         }
     }
     Ok(threads)
-}
-
-/// Fetch review threads from a pull request.
-///
-/// When `include_resolved` is true, returns both resolved and unresolved threads.
-/// When false, returns only unresolved threads (same as [`fetch_review_threads`]).
-///
-/// This function follows the same pagination and validation logic as [`fetch_review_threads`]
-/// but bypasses the unresolved filtering when requested.
-///
-/// # Examples
-/// ```no_run
-/// use vk::{api::GraphQLClient, ref_parser::RepoInfo};
-/// # async fn run() -> Result<(), vk::VkError> {
-/// let client = GraphQLClient::new("token", None).expect("client");
-/// let repo = RepoInfo { owner: "o".into(), name: "r".into() };
-/// let threads = vk::review_threads::fetch_review_threads_with_resolution(
-///     &client,
-///     &repo,
-///     1,
-///     true,
-/// ).await?;
-/// assert!(!threads.is_empty());
-/// # Ok(())
-/// # }
-/// ```
-///
-/// # Errors
-///
-/// Returns [`VkError::InvalidNumber`] if `number` exceeds `i32::MAX`, or a general [`VkError`]
-/// if any API request fails or the response is malformed.
-pub async fn fetch_review_threads_with_resolution(
-    client: &GraphQLClient,
-    repo: &RepoInfo,
-    number: u64,
-    include_resolved: bool,
-) -> Result<Vec<ReviewThread>, VkError> {
-    fetch_review_threads_with_options(
-        client,
-        repo,
-        number,
-        FetchOptions {
-            include_resolved,
-            include_outdated: true,
-        },
-    )
-    .await
 }
 
 /// Fetch all comments for a thread, following pagination when required.

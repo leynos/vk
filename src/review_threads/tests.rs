@@ -118,7 +118,9 @@ async fn run_query_missing_nodes_reports_path(
     #[future] missing_nodes_client: TestClient,
 ) {
     let TestClient { client, join, .. } = missing_nodes_client.await;
-    let result = fetch_review_threads(&client, &repo, 1).await;
+    let result =
+        fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
+            .await;
     let err = result.expect_err("expected error");
     let VkError::BadResponseSerde {
         status,
@@ -244,9 +246,10 @@ async fn comment_path_validation_error(
     path_variant_client: TestClient,
 ) {
     let TestClient { client, join, .. } = path_variant_client.await;
-    let err = fetch_review_threads(&client, &repo, 1)
-        .await
-        .expect_err("expected error");
+    let err =
+        fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
+            .await
+            .expect_err("expected error");
     match err {
         VkError::EmptyCommentPath { thread_id, index } => {
             assert_eq!(thread_id.as_ref(), "t");
@@ -267,9 +270,10 @@ async fn null_comment_path_is_error(
     path_variant_client: TestClient,
 ) {
     let TestClient { client, join, .. } = path_variant_client.await;
-    let err = fetch_review_threads(&client, &repo, 1)
-        .await
-        .expect_err("expected error");
+    let err =
+        fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
+            .await
+            .expect_err("expected error");
     let VkError::BadResponseSerde {
         status,
         message,
@@ -326,9 +330,10 @@ async fn threads_with_many_comments_do_not_duplicate_first_page(
     #[future] pagination_client: TestClient,
 ) {
     let TestClient { client, join, .. } = pagination_client.await;
-    let threads = fetch_review_threads(&client, &repo, 1)
-        .await
-        .expect("fetch threads");
+    let threads =
+        fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
+            .await
+            .expect("fetch threads");
     let thread = threads.first().expect("thread present");
     assert_eq!(thread.comments.nodes.len(), 101);
     let bodies: Vec<_> = thread
@@ -453,9 +458,10 @@ async fn retry_client() -> TestClient {
 #[tokio::test]
 async fn retries_bad_page_and_preserves_order(repo: RepoInfo, #[future] retry_client: TestClient) {
     let TestClient { client, join, hits } = retry_client.await;
-    let threads = fetch_review_threads(&client, &repo, 1)
-        .await
-        .expect("fetch threads");
+    let threads =
+        fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
+            .await
+            .expect("fetch threads");
     let ids: Vec<_> = threads.iter().map(|t| t.id.as_str()).collect();
     assert_eq!(ids, ["t1", "t2"]);
     assert_eq!(hits.load(Ordering::SeqCst), 3);
@@ -469,15 +475,25 @@ async fn rejects_out_of_range_number(repo: RepoInfo) {
     let client = GraphQLClient::new("token", None).expect("client");
     let number = i32::MAX as u64 + 1;
     if cfg!(debug_assertions) {
-        let result = AssertUnwindSafe(fetch_review_threads(&client, &repo, number))
-            .catch_unwind()
-            .await;
+        let result = AssertUnwindSafe(fetch_review_threads_with_options(
+            &client,
+            &repo,
+            number,
+            FetchOptions::unresolved_current(),
+        ))
+        .catch_unwind()
+        .await;
         assert!(result.is_err());
         return;
     }
-    let err = fetch_review_threads(&client, &repo, number)
-        .await
-        .expect_err("error");
+    let err = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        number,
+        FetchOptions::unresolved_current(),
+    )
+    .await
+    .expect_err("error");
     assert!(matches!(err, VkError::InvalidNumber));
 }
 
@@ -493,9 +509,14 @@ async fn accepts_max_i32_number(repo: RepoInfo) {
     })
     .to_string();
     let TestClient { client, join, hits } = start_server(vec![body]);
-    let threads = fetch_review_threads(&client, &repo, i32::MAX as u64)
-        .await
-        .expect("should accept i32::MAX");
+    let threads = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        i32::MAX as u64,
+        FetchOptions::unresolved_current(),
+    )
+    .await
+    .expect("should accept i32::MAX");
     assert!(threads.is_empty());
     assert_eq!(
         hits.load(Ordering::SeqCst),
@@ -508,7 +529,7 @@ async fn accepts_max_i32_number(repo: RepoInfo) {
 
 #[rstest]
 #[tokio::test]
-async fn fetch_review_threads_with_resolution_can_include_resolved(repo: RepoInfo) {
+async fn fetch_review_threads_with_options_can_include_resolved(repo: RepoInfo) {
     let body = serde_json::json!({
         "data": {"repository": {"pullRequest": {"reviewThreads": {
             "nodes": [
@@ -529,17 +550,33 @@ async fn fetch_review_threads_with_resolution_can_include_resolved(repo: RepoInf
         }}}}
     }).to_string();
     let TestClient { client, join, .. } = start_server(vec![body.clone()]);
-    let all = fetch_review_threads_with_resolution(&client, &repo, 1, true)
-        .await
-        .expect("fetch threads");
+    let all = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        1,
+        FetchOptions {
+            include_resolved: true,
+            include_outdated: true,
+        },
+    )
+    .await
+    .expect("fetch threads");
     assert_eq!(all.len(), 2);
     join.abort();
     let _ = join.await;
 
     let TestClient { client, join, .. } = start_server(vec![body]);
-    let unresolved_only = fetch_review_threads_with_resolution(&client, &repo, 1, false)
-        .await
-        .expect("fetch threads");
+    let unresolved_only = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        1,
+        FetchOptions {
+            include_resolved: false,
+            include_outdated: true,
+        },
+    )
+    .await
+    .expect("fetch threads");
     assert_eq!(unresolved_only.len(), 1);
     assert!(unresolved_only.first().is_some_and(|t| !t.is_resolved));
     join.abort();
