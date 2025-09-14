@@ -112,7 +112,7 @@ impl Default for Endpoint {
 const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
 const BODY_SNIPPET_LEN: usize = 500;
-const PAYLOAD_SNIPPET_LEN: usize = 1024;
+const REQUEST_SNIPPET_LEN: usize = 1024;
 const VALUE_SNIPPET_LEN: usize = 200;
 
 #[derive(Debug)]
@@ -178,7 +178,7 @@ fn payload_snippet(payload: &Value) -> String {
     redact_sensitive(&mut redacted);
     snippet(
         &serde_json::to_string(&redacted).expect("serialising GraphQL request payload"),
-        PAYLOAD_SNIPPET_LEN,
+        REQUEST_SNIPPET_LEN,
     )
 }
 
