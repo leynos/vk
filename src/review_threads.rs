@@ -147,12 +147,31 @@ pub struct User {
 /// let opts = FetchOptions { include_resolved: false, include_outdated: true };
 /// assert!(!opts.include_resolved);
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct FetchOptions {
     /// Retain resolved threads when true.
     pub include_resolved: bool,
     /// Keep outdated threads when true.
     pub include_outdated: bool,
+}
+
+impl FetchOptions {
+    /// Show only current unresolved threads.
+    #[must_use]
+    pub const fn unresolved_current() -> Self {
+        Self {
+            include_resolved: false,
+            include_outdated: true,
+        }
+    }
+    /// Show all threads regardless of status.
+    #[must_use]
+    pub const fn all() -> Self {
+        Self {
+            include_resolved: true,
+            include_outdated: true,
+        }
+    }
 }
 
 /// Fetch all unresolved review threads for a pull request.
@@ -188,16 +207,8 @@ pub async fn fetch_review_threads(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
-    fetch_review_threads_with_options(
-        client,
-        repo,
-        number,
-        FetchOptions {
-            include_resolved: false,
-            include_outdated: true,
-        },
-    )
-    .await
+    fetch_review_threads_with_options(client, repo, number, FetchOptions::unresolved_current())
+        .await
 }
 
 /// Fetch review threads with optional resolution and outdated filters.

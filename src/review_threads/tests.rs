@@ -75,12 +75,19 @@ async fn pagination_client() -> TestClient {
     start_server(vec![thread_body, comment_body])
 }
 
+#[expect(
+    clippy::unused_async,
+    reason = "fixture remains async for symmetry with other variants"
+)]
+#[allow(
+    unfulfilled_lint_expectations,
+    reason = "clippy::unused_async may not trigger in all toolchains"
+)]
 #[fixture]
 async fn path_variant_client(
     #[default(serde_json::Value::Null)] path_value: serde_json::Value,
 ) -> TestClient {
-    // Exercise an await to satisfy clippy::unused_async
-    let () = async {}.await;
+    // Intentionally async: other variants await I/O.
     let body = serde_json::json!({
         "data": {"repository": {"pullRequest": {"reviewThreads": {
             "nodes": [{
@@ -584,6 +591,63 @@ async fn fetch_review_threads_with_options_skips_outdated_comments(repo: RepoInf
     assert_eq!(threads.len(), 1);
     assert!(threads.first().is_some_and(|t| t.id == "t2"));
     assert_eq!(hits.load(Ordering::SeqCst), 2);
+    join.abort();
+    let _ = join.await;
+}
+#[rstest]
+#[tokio::test]
+async fn fetch_review_threads_with_options_can_include_outdated_comments(repo: RepoInfo) {
+    let threads_body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [
+                {
+                    "id": "t1",
+                    "isResolved": false,
+                    "isOutdated": true,
+                    "comments": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "c1"}}
+                },
+                {
+                    "id": "t2",
+                    "isResolved": false,
+                    "isOutdated": false,
+                    "comments": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "c2"}}
+                }
+            ],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    let comment_body_c1 = serde_json::json!({
+        "data": {"node": {"comments": {
+            "nodes": [comment("c1")],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}
+    })
+    .to_string();
+    let comment_body_c2 = serde_json::json!({
+        "data": {"node": {"comments": {
+            "nodes": [comment("c2")],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}
+    })
+    .to_string();
+    let TestClient { client, join, hits } =
+        start_server(vec![threads_body, comment_body_c1, comment_body_c2]);
+    let threads = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        1,
+        FetchOptions {
+            include_resolved: false,
+            include_outdated: true,
+        },
+    )
+    .await
+    .expect("fetch threads");
+    assert_eq!(threads.len(), 2);
+    let ids: Vec<_> = threads.iter().map(|t| t.id.as_ref()).collect();
+    assert!(ids.contains(&"t1") && ids.contains(&"t2"));
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
     join.abort();
     let _ = join.await;
 }
