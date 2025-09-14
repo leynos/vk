@@ -1,9 +1,12 @@
 //! Helpers for fetching and filtering pull request review threads from the
 //! GitHub API.
 //!
-//! The module defines GraphQL response structures and helpers to retrieve all
-//! unresolved review threads along with their comments. It also provides
-//! utilities for filtering threads by file path.
+//! The module defines GraphQL response structures and helpers to retrieve
+//! review threads and their comments. Helpers hide outdated threads by
+//! default, keeping output focused on current discussions. Callers can opt
+//! in to outdated threads via `fetch_review_threads_with_options` or the
+//! CLI flag `--show-outdated`. Utilities for filtering threads by file
+//! path are also provided.
 
 use serde::Deserialize;
 use serde_json::{Map, json};
@@ -346,6 +349,7 @@ async fn fetch_all_comments(
 /// assert_eq!(filtered.len(), 1);
 /// assert!(!filtered[0].is_resolved);
 /// ```
+#[must_use]
 fn filter_unresolved_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
     threads.into_iter().filter(|t| !t.is_resolved).collect()
 }

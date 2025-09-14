@@ -327,26 +327,27 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         return Ok(());
     };
 
-    let threads = {
-        // When a discussion fragment is given, fetch ALL threads (resolved + unresolved)
-        // and filter to the specific thread. Otherwise, fetch only unresolved threads
-        // and apply file filters.
-        let include_resolved = comment.is_some();
-        let all = fetch_review_threads_with_options(
-            &client,
-            &repo,
-            number,
-            include_resolved,
-            args.show_outdated,
-        )
-        .await?;
-
+    // When a discussion fragment is given, fetch ALL threads (resolved + unresolved)
+    // and filter to the specific thread. Otherwise, fetch only unresolved threads
+    // and apply file filters.
+    let include_resolved = comment.is_some();
+    let threads = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        number,
+        include_resolved,
+        args.show_outdated,
+    )
+    .await
+    .map(|threads| {
         if let Some(comment_id) = comment {
-            thread_for_comment(all, comment_id).into_iter().collect()
+            thread_for_comment(threads, comment_id)
+                .into_iter()
+                .collect()
         } else {
-            filter_threads_by_files(all, &args.files)
+            filter_threads_by_files(threads, &args.files)
         }
-    };
+    })?;
 
     if threads.is_empty() {
         handle_empty_threads(&args.files, comment)?;
