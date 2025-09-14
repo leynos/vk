@@ -11,7 +11,7 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
-use std::{borrow::Cow, cell::OnceCell, env};
+use std::{borrow::Cow, env};
 use tokio::time::{Duration, sleep};
 
 use crate::VkError;
@@ -173,20 +173,19 @@ fn redact_sensitive(value: &mut Value) {
 }
 
 /// Build a snippet of the redacted GraphQL payload.
+///
+/// Falls back to a placeholder when serialisation fails, logging the error.
 fn payload_snippet(payload: &Value) -> String {
     let mut redacted = payload.clone();
     redact_sensitive(&mut redacted);
-    snippet(
-        &serde_json::to_string(&redacted).expect("serialising GraphQL request payload"),
-        REQUEST_SNIPPET_LEN,
-    )
-}
-
-fn request_context(operation: &str, snip: &str, status: Option<u16>) -> Box<str> {
-    status.map_or_else(
-        || format!("operation {operation}; {snip}").boxed(),
-        |s| format!("operation {operation}; status {s}; {snip}").boxed(),
-    )
+    let json = match serde_json::to_string(&redacted) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("Failed to serialise redacted payload: {e}");
+            "<failed to serialise payload>".into()
+        }
+    };
+    snippet(&json, REQUEST_SNIPPET_LEN)
 }
 
 fn operation_name(query: &str) -> Option<&str> {
@@ -357,10 +356,14 @@ impl GraphQLClient {
         payload: &serde_json::Value,
         operation: &str,
     ) -> Result<HttpResponse, VkError> {
-        let snippet_cell = OnceCell::<String>::new();
-        let ctx = |status: Option<u16>| {
-            let snip = snippet_cell.get_or_init(|| payload_snippet(payload));
-            request_context(operation, snip, status)
+        let snip = payload_snippet(payload);
+        let make_ctx = |status: Option<u16>| {
+            let base = format!("operation {operation}; {snip}");
+            match status {
+                Some(s) => format!("{base}; status {s}"),
+                None => base,
+            }
+            .boxed()
         };
 
         let response = self
@@ -372,14 +375,14 @@ impl GraphQLClient {
             .send()
             .await
             .map_err(|e| VkError::RequestContext {
-                context: ctx(None),
+                context: make_ctx(None),
                 source: e.into(),
             })?;
         let status = response.status();
         let status_u16 = status.as_u16();
         let status_err = response.error_for_status_ref().err();
         let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: ctx(Some(status_u16)),
+            context: make_ctx(Some(status_u16)),
             source: e.into(),
         })?;
         if !(200..300).contains(&status_u16) {
