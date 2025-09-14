@@ -394,7 +394,9 @@ fn filter_functions_exclude_matching_threads<F, S, G>(
     G: Fn(&ReviewThread) -> bool,
 {
     let mut threads = vec![ReviewThread::default(), ReviewThread::default()];
-    let [first, second] = &mut threads[..] else { unreachable!() };
+    let [first, second] = &mut threads[..] else {
+        unreachable!()
+    };
     set_field(first, true);
     set_field(second, false);
 
@@ -533,6 +535,47 @@ async fn fetch_review_threads_with_resolution_can_include_resolved(repo: RepoInf
         .expect("fetch threads");
     assert_eq!(unresolved_only.len(), 1);
     assert!(unresolved_only.first().is_some_and(|t| !t.is_resolved));
+    join.abort();
+    let _ = join.await;
+}
+
+#[rstest]
+#[tokio::test]
+async fn fetch_review_threads_with_options_skips_outdated_comments(repo: RepoInfo) {
+    let threads_body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [
+                {
+                    "id": "t1",
+                    "isResolved": false,
+                    "isOutdated": true,
+                    "comments": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "c1"}}
+                },
+                {
+                    "id": "t2",
+                    "isResolved": false,
+                    "isOutdated": false,
+                    "comments": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "c2"}}
+                }
+            ],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    let comment_body = serde_json::json!({
+        "data": {"node": {"comments": {
+            "nodes": [comment("c2")],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}
+    })
+    .to_string();
+    let TestClient { client, join, hits } = start_server(vec![threads_body, comment_body]);
+    let threads = fetch_review_threads_with_options(&client, &repo, 1, false, false)
+        .await
+        .expect("fetch threads");
+    assert_eq!(threads.len(), 1);
+    assert!(threads.first().is_some_and(|t| t.id == "t2"));
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
     join.abort();
     let _ = join.await;
 }

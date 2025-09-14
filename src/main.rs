@@ -42,7 +42,8 @@ pub use review_threads::filter_outdated_threads;
 use review_threads::thread_for_comment;
 pub use review_threads::{
     CommentConnection, PageInfo, ReviewComment, ReviewThread, User, exclude_outdated_threads,
-    fetch_review_threads, fetch_review_threads_with_resolution, filter_threads_by_files,
+    fetch_review_threads, fetch_review_threads_with_options, fetch_review_threads_with_resolution,
+    filter_threads_by_files,
 };
 
 use summary::{
@@ -331,20 +332,19 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         // and filter to the specific thread. Otherwise, fetch only unresolved threads
         // and apply file filters.
         let include_resolved = comment.is_some();
-        let all =
-            fetch_review_threads_with_resolution(&client, &repo, number, include_resolved).await?;
+        let all = fetch_review_threads_with_options(
+            &client,
+            &repo,
+            number,
+            include_resolved,
+            args.show_outdated,
+        )
+        .await?;
 
         if let Some(comment_id) = comment {
             thread_for_comment(all, comment_id).into_iter().collect()
         } else {
-            filter_threads_by_files(
-                if args.show_outdated {
-                    all
-                } else {
-                    exclude_outdated_threads(all)
-                },
-                &args.files,
-            )
+            filter_threads_by_files(all, &args.files)
         }
     };
 
