@@ -584,56 +584,15 @@ async fn fetch_review_threads_with_options_can_include_resolved(repo: RepoInfo) 
 }
 
 #[rstest]
+#[case::skip(false, vec!["t2"], 2)]
+#[case::include(true, vec!["t1", "t2"], 3)]
 #[tokio::test]
-async fn fetch_review_threads_with_options_skips_outdated_comments(repo: RepoInfo) {
-    let threads_body = serde_json::json!({
-        "data": {"repository": {"pullRequest": {"reviewThreads": {
-            "nodes": [
-                {
-                    "id": "t1",
-                    "isResolved": false,
-                    "isOutdated": true,
-                    "comments": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "c1"}}
-                },
-                {
-                    "id": "t2",
-                    "isResolved": false,
-                    "isOutdated": false,
-                    "comments": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "c2"}}
-                }
-            ],
-            "pageInfo": {"hasNextPage": false, "endCursor": null}
-        }}}}
-    })
-    .to_string();
-    let comment_body = serde_json::json!({
-        "data": {"node": {"comments": {
-            "nodes": [comment("c2")],
-            "pageInfo": {"hasNextPage": false, "endCursor": null}
-        }}}
-    })
-    .to_string();
-    let TestClient { client, join, hits } = start_server(vec![threads_body, comment_body]);
-    let threads = fetch_review_threads_with_options(
-        &client,
-        &repo,
-        1,
-        FetchOptions {
-            include_resolved: false,
-            include_outdated: false,
-        },
-    )
-    .await
-    .expect("fetch threads");
-    assert_eq!(threads.len(), 1);
-    assert!(threads.first().is_some_and(|t| t.id == "t2"));
-    assert_eq!(hits.load(Ordering::SeqCst), 2);
-    join.abort();
-    let _ = join.await;
-}
-#[rstest]
-#[tokio::test]
-async fn fetch_review_threads_with_options_can_include_outdated_comments(repo: RepoInfo) {
+async fn fetch_review_threads_with_options_filters_outdated(
+    repo: RepoInfo,
+    #[case] include_outdated: bool,
+    #[case] expected_ids: Vec<&'static str>,
+    #[case] expected_hits: usize,
+) {
     let threads_body = serde_json::json!({
         "data": {"repository": {"pullRequest": {"reviewThreads": {
             "nodes": [
@@ -668,23 +627,29 @@ async fn fetch_review_threads_with_options_can_include_outdated_comments(repo: R
         }}}
     })
     .to_string();
-    let TestClient { client, join, hits } =
-        start_server(vec![threads_body, comment_body_c1, comment_body_c2]);
+    let bodies = if include_outdated {
+        vec![threads_body, comment_body_c1, comment_body_c2]
+    } else {
+        vec![threads_body, comment_body_c2]
+    };
+    let TestClient { client, join, hits } = start_server(bodies);
     let threads = fetch_review_threads_with_options(
         &client,
         &repo,
         1,
         FetchOptions {
             include_resolved: false,
-            include_outdated: true,
+            include_outdated,
         },
     )
     .await
     .expect("fetch threads");
-    assert_eq!(threads.len(), 2);
+    assert_eq!(threads.len(), expected_ids.len());
     let ids: Vec<_> = threads.iter().map(|t| t.id.as_ref()).collect();
-    assert!(ids.contains(&"t1") && ids.contains(&"t2"));
-    assert_eq!(hits.load(Ordering::SeqCst), 3);
+    for expected in expected_ids {
+        assert!(ids.contains(&expected));
+    }
+    assert_eq!(hits.load(Ordering::SeqCst), expected_hits);
     join.abort();
     let _ = join.await;
 }
