@@ -19,6 +19,10 @@ use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
 /// Shared handler type invoked for each incoming request.
 pub type Handler = Arc<Mutex<Box<dyn FnMut(&Request<Incoming>) -> Response<Full<Bytes>> + Send>>>;
 
+/// Shared handler type for capturing request bodies.
+pub type CaptureHandler =
+    Arc<Mutex<Box<dyn Fn(&Request<Bytes>) -> Response<Full<Bytes>> + Send + Sync>>>;
+
 /// Handle returned by [`start_mitm`] for shutting down the server.
 pub struct ShutdownHandle {
     join: JoinHandle<()>,
@@ -97,6 +101,77 @@ pub async fn start_mitm() -> Result<(SocketAddr, Handler, ShutdownHandle), std::
     Ok((addr, handler, ShutdownHandle { join, stop: tx }))
 }
 
+/// Start an HTTP server forwarding requests to a shared handler while capturing request bodies for assertions.
+///
+/// # Errors
+///
+/// Returns an error if the server fails to bind to a local port.
+///
+/// # Panics
+///
+/// Panics if the default response cannot be constructed.
+#[allow(dead_code, clippy::type_complexity, reason = "used only in some tests")]
+#[expect(
+    clippy::integer_division_remainder_used,
+    reason = "tokio::select! uses % internally"
+)]
+pub async fn start_mitm_capture()
+-> Result<(SocketAddr, CaptureHandler, ShutdownHandle), std::io::Error> {
+    use http_body_util::BodyExt;
+    let handler: CaptureHandler = Arc::new(Mutex::new(Box::new(|_req| {
+        Response::builder()
+            .status(404)
+            .body(Full::from(Bytes::from_static(b"No handler")))
+            .expect("failed to create default response")
+    })));
+    let handler_clone = handler.clone();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, mut rx) = oneshot::channel();
+
+    let join = tokio::spawn(async move {
+        let builder = auto::Builder::new(TokioExecutor::new());
+        loop {
+            tokio::select! {
+                res = listener.accept() => match res {
+                    Ok((stream, _)) => {
+                        let io = hyper_util::rt::TokioIo::new(stream);
+                        let h = handler_clone.clone();
+                        let service = service_fn(move |req: Request<Incoming>| {
+                            let h = h.clone();
+                            async move {
+                                let (parts, body) = req.into_parts();
+                                let bytes = body.collect().await.unwrap_or_default().to_bytes();
+                                let req2 = Request::from_parts(parts, bytes);
+                                let f = h.lock().expect("lock handler in service");
+                                let resp = (f)(&req2);
+                                Ok::<_, std::convert::Infallible>(resp)
+                            }
+                        });
+                        let builder = builder.clone();
+                        tokio::spawn(async move {
+                            let _ = builder.serve_connection(io, service).await;
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("accept error: {e}");
+                        match e.kind() {
+                            ErrorKind::ConnectionAborted
+                                | ErrorKind::ConnectionReset
+                                | ErrorKind::Interrupted
+                                | ErrorKind::WouldBlock => {}
+                            _ => break,
+                        }
+                    }
+                },
+                _ = &mut rx => break,
+            }
+        }
+    });
+
+    Ok((addr, handler, ShutdownHandle { join, stop: tx }))
+}
 /// Create a `vk` command configured for testing.
 ///
 /// The command points at the MITM server for both GraphQL and REST requests and disables colour output to make

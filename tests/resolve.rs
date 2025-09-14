@@ -9,11 +9,11 @@ use predicates::prelude::*;
 use std::sync::{Arc, Mutex};
 
 mod utils;
-use utils::{start_mitm, vk_cmd};
+use utils::{start_mitm, start_mitm_capture, vk_cmd};
 
 #[tokio::test]
 async fn resolve_flows() {
-    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
     *handler.lock().expect("lock handler") = Box::new(move |req| {
@@ -54,7 +54,7 @@ async fn resolve_flows() {
 
 #[tokio::test]
 async fn resolve_flows_paginates() {
-    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
     *handler.lock().expect("lock handler") = Box::new(move |req| {
@@ -67,6 +67,12 @@ async fn resolve_flows_paginates() {
                     r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":"c1","hasNextPage":true},"nodes":[{"databaseId":2,"pullRequestReviewThread":{"id":"other"}}]}}}}}"#
                 }
                 1 => {
+                    let body_str = std::str::from_utf8(req.body().as_ref()).expect("utf8 body");
+                    assert!(
+                        body_str.contains("\"after\":\"c1\""),
+                        "second page query must include after=c1; got body: {body_str}"
+                    );
+
                     r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
                 }
                 _ => r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#,
