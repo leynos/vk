@@ -570,9 +570,17 @@ async fn fetch_review_threads_with_options_skips_outdated_comments(repo: RepoInf
     })
     .to_string();
     let TestClient { client, join, hits } = start_server(vec![threads_body, comment_body]);
-    let threads = fetch_review_threads_with_options(&client, &repo, 1, false, false)
-        .await
-        .expect("fetch threads");
+    let threads = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        1,
+        FetchOptions {
+            include_resolved: false,
+            include_outdated: false,
+        },
+    )
+    .await
+    .expect("fetch threads");
     assert_eq!(threads.len(), 1);
     assert!(threads.first().is_some_and(|t| t.id == "t2"));
     assert_eq!(hits.load(Ordering::SeqCst), 2);

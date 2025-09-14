@@ -41,9 +41,9 @@ pub use issues::{Issue, fetch_issue};
 pub use review_threads::filter_outdated_threads;
 use review_threads::thread_for_comment;
 pub use review_threads::{
-    CommentConnection, PageInfo, ReviewComment, ReviewThread, User, exclude_outdated_threads,
-    fetch_review_threads, fetch_review_threads_with_options, fetch_review_threads_with_resolution,
-    filter_threads_by_files,
+    CommentConnection, FetchOptions, PageInfo, ReviewComment, ReviewThread, User,
+    exclude_outdated_threads, fetch_review_threads, fetch_review_threads_with_options,
+    fetch_review_threads_with_resolution, filter_threads_by_files,
 };
 
 use summary::{
@@ -335,8 +335,10 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         &client,
         &repo,
         number,
-        include_resolved,
-        args.show_outdated,
+        FetchOptions {
+            include_resolved,
+            include_outdated: args.show_outdated,
+        },
     )
     .await
     .map(|threads| {

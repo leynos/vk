@@ -135,6 +135,26 @@ pub struct User {
     pub login: String,
 }
 
+/// Options controlling which review threads to include.
+///
+/// `include_resolved` retains resolved discussions; `include_outdated` keeps
+/// outdated threads. Keeping both `false` shows only current unresolved
+/// discussions.
+///
+/// # Examples
+/// ```
+/// use vk::review_threads::FetchOptions;
+/// let opts = FetchOptions { include_resolved: false, include_outdated: true };
+/// assert!(!opts.include_resolved);
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct FetchOptions {
+    /// Retain resolved threads when true.
+    pub include_resolved: bool,
+    /// Keep outdated threads when true.
+    pub include_outdated: bool,
+}
+
 /// Fetch all unresolved review threads for a pull request.
 ///
 /// Note:
@@ -168,15 +188,24 @@ pub async fn fetch_review_threads(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<ReviewThread>, VkError> {
-    fetch_review_threads_with_options(client, repo, number, false, true).await
+    fetch_review_threads_with_options(
+        client,
+        repo,
+        number,
+        FetchOptions {
+            include_resolved: false,
+            include_outdated: true,
+        },
+    )
+    .await
 }
 
 /// Fetch review threads with optional resolution and outdated filters.
 ///
-/// Set `include_resolved` to true to include resolved threads. Set
-/// `include_outdated` to false to drop outdated threads before comment
-/// pagination, avoiding unnecessary HTTP calls. Pagination is exhausted so
-/// returned threads contain complete comment lists.
+/// Pass [`FetchOptions`] to control inclusion of resolved or outdated threads.
+/// When `options.include_outdated` is false, outdated threads are dropped before
+/// comment pagination, avoiding unnecessary HTTP calls. Pagination is exhausted
+/// so returned threads contain complete comment lists.
 ///
 /// # Examples
 /// ```no_run
@@ -188,8 +217,7 @@ pub async fn fetch_review_threads(
 ///     &client,
 ///     &repo,
 ///     1,
-///     true,
-///     false,
+///     FetchOptions { include_resolved: true, include_outdated: false },
 /// ).await?;
 /// assert!(!threads.is_empty());
 /// # Ok(())
@@ -204,8 +232,7 @@ pub async fn fetch_review_threads_with_options(
     client: &GraphQLClient,
     repo: &RepoInfo,
     number: u64,
-    include_resolved: bool,
-    include_outdated: bool,
+    options: FetchOptions,
 ) -> Result<Vec<ReviewThread>, VkError> {
     debug_assert!(
         i32::try_from(number).is_ok(),
@@ -225,13 +252,13 @@ pub async fn fetch_review_threads_with_options(
         })
         .await?;
 
-    let mut threads = if include_resolved {
+    let mut threads = if options.include_resolved {
         threads
     } else {
         filter_unresolved_threads(threads)
     };
 
-    if !include_outdated {
+    if !options.include_outdated {
         threads = exclude_outdated_threads(threads);
     }
 
@@ -285,7 +312,16 @@ pub async fn fetch_review_threads_with_resolution(
     number: u64,
     include_resolved: bool,
 ) -> Result<Vec<ReviewThread>, VkError> {
-    fetch_review_threads_with_options(client, repo, number, include_resolved, true).await
+    fetch_review_threads_with_options(
+        client,
+        repo,
+        number,
+        FetchOptions {
+            include_resolved,
+            include_outdated: true,
+        },
+    )
+    .await
 }
 
 /// Fetch all comments for a thread, following pagination when required.
