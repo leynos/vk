@@ -11,23 +11,81 @@ use std::sync::{Arc, Mutex};
 mod utils;
 use utils::{start_mitm, start_mitm_capture, vk_cmd};
 
-#[tokio::test]
-async fn resolve_flows() {
+/// Scripted GraphQL comment page.
+struct Page {
+    end_cursor: Option<&'static str>,
+    comment_id: u32,
+    thread_id: &'static str,
+}
+
+impl Page {
+    fn next(end_cursor: &'static str, comment_id: u32, thread_id: &'static str) -> Self {
+        Self {
+            end_cursor: Some(end_cursor),
+            comment_id,
+            thread_id,
+        }
+    }
+
+    fn last_with(comment_id: u32, thread_id: &'static str) -> Self {
+        Self {
+            end_cursor: None,
+            comment_id,
+            thread_id,
+        }
+    }
+
+    fn body(&self) -> String {
+        self.end_cursor.map_or_else(
+            || {
+                format!(
+                    r#"{{"data":{{"repository":{{"pullRequest":{{"reviewComments":{{"pageInfo":{{"endCursor":null,"hasNextPage":false}},"nodes":[{{"databaseId":{},"pullRequestReviewThread":{{"id":"{}"}}}}]}}}}}}}}}}"#,
+                    self.comment_id,
+                    self.thread_id,
+                )
+            },
+            |cursor| {
+                format!(
+                    r#"{{"data":{{"repository":{{"pullRequest":{{"reviewComments":{{"pageInfo":{{"endCursor":"{cursor}","hasNextPage":true}},"nodes":[{{"databaseId":{},"pullRequestReviewThread":{{"id":"{}"}}}}]}}}}}}}}}}"#,
+                    self.comment_id,
+                    self.thread_id,
+                )
+            },
+        )
+    }
+}
+
+/// Drive `vk resolve` and assert pagination.
+async fn run_resolve_flow(pages: Vec<Page>, expected_posts: usize) {
     let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
-    let clone = Arc::clone(&calls);
+    let pages = Arc::new(Mutex::new(pages));
+    let expected_after = Arc::new(Mutex::new(None::<String>));
+    let calls_clone = Arc::clone(&calls);
+    let pages_clone = Arc::clone(&pages);
+    let expected_after_clone = Arc::clone(&expected_after);
     *handler.lock().expect("lock handler") = Box::new(move |req| {
-        let mut vec = clone.lock().expect("lock");
-        let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
+        let mut vec = calls_clone.lock().expect("lock");
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
-            if gql_calls == 0 {
-                r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
+            let mut after = expected_after_clone.lock().expect("lock after");
+            if let Some(ref cursor) = *after {
+                let body_str = std::str::from_utf8(req.body().as_ref()).expect("utf8 body");
+                assert!(
+                    body_str.contains(&format!("\"after\":\"{cursor}\"")),
+                    "second page query must include after={cursor}; got body: {body_str}"
+                );
+            }
+            let mut pages = pages_clone.lock().expect("lock pages");
+            if pages.is_empty() {
+                r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#.to_owned()
             } else {
-                r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
+                let page = pages.remove(0);
+                *after = page.end_cursor.map(std::string::ToString::to_string);
+                page.body()
             }
         } else {
-            "{}"
+            "{}".to_owned()
         };
         Response::builder()
             .status(StatusCode::OK)
@@ -48,59 +106,16 @@ async fn resolve_flows() {
     shutdown.shutdown().await;
     assert_eq!(
         calls.lock().expect("lock").as_slice(),
-        ["POST /graphql", "POST /graphql"],
+        vec!["POST /graphql"; expected_posts].as_slice()
     );
 }
 
 #[tokio::test]
-async fn resolve_flows_paginates() {
-    let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
-    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
-    let clone = Arc::clone(&calls);
-    *handler.lock().expect("lock handler") = Box::new(move |req| {
-        let mut vec = clone.lock().expect("lock");
-        let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
-        vec.push(format!("{} {}", req.method(), req.uri().path()));
-        let body = if req.uri().path() == "/graphql" {
-            match gql_calls {
-                0 => {
-                    r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":"c1","hasNextPage":true},"nodes":[{"databaseId":2,"pullRequestReviewThread":{"id":"other"}}]}}}}}"#
-                }
-                1 => {
-                    let body_str = std::str::from_utf8(req.body().as_ref()).expect("utf8 body");
-                    assert!(
-                        body_str.contains("\"after\":\"c1\""),
-                        "second page query must include after=c1; got body: {body_str}"
-                    );
-
-                    r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
-                }
-                _ => r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#,
-            }
-        } else {
-            "{}"
-        };
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(Full::from(body))
-            .expect("response")
-    });
-    tokio::task::spawn_blocking(move || {
-        vk_cmd(addr)
-            .args(["resolve", "https://github.com/o/r/pull/83#discussion_r1"])
-            .assert()
-            .success()
-            .stdout(predicate::str::is_empty())
-            .stderr(predicate::str::is_empty());
-    })
-    .await
-    .expect("spawn blocking");
-    shutdown.shutdown().await;
-    assert_eq!(
-        calls.lock().expect("lock").as_slice(),
-        ["POST /graphql", "POST /graphql", "POST /graphql"],
-    );
+#[rstest::rstest]
+#[case::no_pagination(vec![Page::last_with(1, "t")], 2)]
+#[case::two_pages(vec![Page::next("c1", 2, "other"), Page::last_with(1, "t")], 3)]
+async fn resolve_flows(#[case] pages: Vec<Page>, #[case] expected_posts: usize) {
+    run_resolve_flow(pages, expected_posts).await;
 }
 
 async fn run_reply_flow(
