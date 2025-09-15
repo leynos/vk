@@ -52,7 +52,7 @@ pub struct PrArgs {
     pub files: Vec<String>,
     /// Include outdated review threads
     #[arg(short = 'o', long = "show-outdated")]
-    #[serde(default)]
+    #[serde(default, alias = "include_outdated")]
     pub show_outdated: bool,
 }
 
