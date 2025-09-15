@@ -24,7 +24,7 @@ struct DirGuard(PathBuf);
 
 impl Drop for DirGuard {
     fn drop(&mut self) {
-        env::set_current_dir(&self.0).expect("restore dir");
+        let _ = env::set_current_dir(&self.0); // best-effort restore; Drop must not panic
     }
 }
 
