@@ -49,6 +49,7 @@ impl GlobalArgs {
 
 /// Parameters accepted by the `pr` sub-command.
 #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
+#[command(name = "pr")]
 #[ortho_config(prefix = "VK")]
 pub struct PrArgs {
     /// Pull request URL or number.
@@ -72,6 +73,7 @@ pub struct PrArgs {
 ///
 /// Stores the URL or number of the issue to inspect.
 #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
+#[command(name = "issue")]
 #[ortho_config(prefix = "VK")]
 pub struct IssueArgs {
     /// Issue URL or number
@@ -93,6 +95,7 @@ impl Default for IssueArgs {
 
 /// Parameters accepted by the `resolve` sub-command.
 #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone)]
+#[command(name = "resolve")]
 #[ortho_config(prefix = "VK")]
 pub struct ResolveArgs {
     /// Pull request comment URL or number with discussion fragment.

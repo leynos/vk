@@ -5,5 +5,7 @@
 
 pub mod banners;
 pub mod cli_args;
+#[path = "test_utils_env.rs"]
+pub mod test_utils;
 
 pub use cli_args::{GlobalArgs, IssueArgs, PrArgs};
