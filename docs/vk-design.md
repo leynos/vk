@@ -185,9 +185,11 @@ number of attempts, the base delay for the exponential backoff, and whether to
 apply jitter. By default, the client tries a query up to five times, waiting
 `200ms * 2^attempt` with full jitter supplied by `backon` so concurrent callers
 spread out as delays grow. Empty responses include the HTTP status, the
-operation name, and a short response-body snippet to aid triage. Because
-`run_query` only returns after a full page has been fetched, `paginate_all`
-never appends partial results, preserving order and avoiding duplicates.
+operation name, and a short response-body snippet to aid triage. Error contexts
+also carry a redacted snippet of the request payload, replacing sensitive
+fields such as `token` with `<redacted>`. Because `run_query` only returns
+after a full page has been fetched, `paginate_all` never appends partial
+results, preserving order and avoiding duplicates.
 
 The diagram below illustrates how deserialization errors surface the JSON path
 and a response snippet, helping developers quickly locate schema mismatches.

@@ -112,6 +112,7 @@ impl Default for Endpoint {
 const GITHUB_GRAPHQL_URL: &str = "https://api.github.com/graphql";
 
 const BODY_SNIPPET_LEN: usize = 500;
+const REQUEST_SNIPPET_LEN: usize = 1024;
 const VALUE_SNIPPET_LEN: usize = 200;
 
 #[derive(Debug)]
@@ -149,6 +150,42 @@ fn snippet(text: &str, max: usize) -> String {
         out.push_str("...");
         out
     }
+}
+
+/// Recursively redact sensitive values from a JSON structure.
+fn redact_sensitive(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                if matches!(
+                    k.to_ascii_lowercase().as_str(),
+                    "token" | "authorization" | "password" | "secret"
+                ) {
+                    *v = Value::String("<redacted>".into());
+                } else {
+                    redact_sensitive(v);
+                }
+            }
+        }
+        Value::Array(arr) => arr.iter_mut().for_each(redact_sensitive),
+        _ => {}
+    }
+}
+
+/// Build a snippet of the redacted GraphQL payload.
+///
+/// Falls back to a placeholder when serialisation fails, logging the error.
+fn payload_snippet(payload: &Value) -> String {
+    let mut redacted = payload.clone();
+    redact_sensitive(&mut redacted);
+    let json = match serde_json::to_string(&redacted) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("Failed to serialise redacted payload: {e}");
+            "<failed to serialise payload>".into()
+        }
+    };
+    snippet(&json, REQUEST_SNIPPET_LEN)
 }
 
 fn operation_name(query: &str) -> Option<&str> {
@@ -317,9 +354,18 @@ impl GraphQLClient {
     async fn execute_single_request(
         &self,
         payload: &serde_json::Value,
-        ctx: &str,
         operation: &str,
     ) -> Result<HttpResponse, VkError> {
+        let snip = payload_snippet(payload);
+        let make_ctx = |status: Option<u16>| {
+            let base = format!("operation {operation}; {snip}");
+            match status {
+                Some(s) => format!("{base}; status {s}"),
+                None => base,
+            }
+            .boxed()
+        };
+
         let response = self
             .client
             .post(self.endpoint.as_str())
@@ -329,14 +375,14 @@ impl GraphQLClient {
             .send()
             .await
             .map_err(|e| VkError::RequestContext {
-                context: ctx.to_owned().boxed(),
+                context: make_ctx(None),
                 source: e.into(),
             })?;
         let status = response.status();
         let status_u16 = status.as_u16();
         let status_err = response.error_for_status_ref().err();
         let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: format!("{ctx}; status {status_u16}").boxed(),
+            context: make_ctx(Some(status_u16)),
             source: e.into(),
         })?;
         if !(200..300).contains(&status_u16) {
@@ -458,9 +504,6 @@ impl GraphQLClient {
         if let (Some(_), Some(obj)) = (op_name, payload.as_object_mut()) {
             obj.insert("operationName".into(), json!(operation.clone()));
         }
-        let payload_str =
-            serde_json::to_string(&payload).expect("serializing GraphQL request payload");
-        let ctx = format!("operation {operation}; {}", snippet(&payload_str, 1024)).boxed();
         let builder = {
             let b = ExponentialBuilder::default()
                 .with_min_delay(self.retry.base_delay)
@@ -472,9 +515,7 @@ impl GraphQLClient {
             }
         };
         (|| async {
-            let resp = self
-                .execute_single_request(&payload, &ctx, &operation)
-                .await?;
+            let resp = self.execute_single_request(&payload, &operation).await?;
             self.log_transcript(&payload, &operation, &resp);
             Self::process_graphql_response::<T>(&resp, &operation)
         })
