@@ -1,7 +1,7 @@
 //! Test environment helpers.
 //!
 //! Provides functions for setting and removing environment variables in a
-//! threadsafe manner for tests.
+//! thread-safe manner for tests.
 
 use std::sync::{Mutex, OnceLock};
 

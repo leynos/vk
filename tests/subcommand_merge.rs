@@ -71,18 +71,92 @@ fn issue_configuration_precedence() {
 
 #[rstest]
 #[serial]
-#[ignore = "requires config path setup"]
-fn issue_configuration_fallback_to_config_only() {
+#[ignore = "pending config precedence support"]
+fn pr_env_over_file_when_cli_absent() {
+    let cfg = r#"[cmds.pr]
+reference = "file_ref"
+files = ["file.txt"]
+"#;
+    let dir = write_config(cfg);
+    let _guard = set_dir(&dir);
+    let cfg_path = dir.path().join("vk.toml");
+    set_var(
+        "VK_CMDS_PR_CONFIG_PATH",
+        cfg_path.to_str().expect("cfg path"),
+    );
+    set_var("VK_CMDS_PR_REFERENCE", "env_ref");
+    let cli = PrArgs {
+        reference: None,
+        files: vec![],
+    };
+    let merged = load_and_merge_subcommand_for(&cli).expect("merge pr args");
+    assert_eq!(merged.reference.as_deref(), Some("env_ref"));
+    assert_eq!(merged.files, ["file.txt"]);
+    remove_var("VK_CMDS_PR_REFERENCE");
+    remove_var("VK_CMDS_PR_CONFIG_PATH");
+}
+
+#[rstest]
+#[serial]
+#[ignore = "pending config precedence support"]
+fn pr_file_over_defaults_when_env_and_cli_absent() {
+    let cfg = r#"[cmds.pr]
+reference = "file_ref"
+files = ["file.txt"]
+"#;
+    let dir = write_config(cfg);
+    let _guard = set_dir(&dir);
+    let cfg_path = dir.path().join("vk.toml");
+    set_var(
+        "VK_CMDS_PR_CONFIG_PATH",
+        cfg_path.to_str().expect("cfg path"),
+    );
+    let cli = PrArgs {
+        reference: None,
+        files: vec![],
+    };
+    let merged = load_and_merge_subcommand_for(&cli).expect("merge pr args");
+    assert_eq!(merged.reference.as_deref(), Some("file_ref"));
+    assert_eq!(merged.files, ["file.txt"]);
+    remove_var("VK_CMDS_PR_CONFIG_PATH");
+}
+
+#[rstest]
+#[serial]
+#[ignore = "pending config precedence support"]
+fn issue_env_over_file_when_cli_absent() {
     let cfg = r#"[cmds.issue]
 reference = "file_ref"
 "#;
     let dir = write_config(cfg);
+    let _guard = set_dir(&dir);
     let cfg_path = dir.path().join("vk.toml");
     set_var(
         "VK_CMDS_ISSUE_CONFIG_PATH",
         cfg_path.to_str().expect("cfg path"),
     );
+    set_var("VK_CMDS_ISSUE_REFERENCE", "env_ref");
+    let cli = IssueArgs { reference: None };
+    let merged = load_and_merge_subcommand_for(&cli).expect("merge issue args");
+    assert_eq!(merged.reference.as_deref(), Some("env_ref"));
     remove_var("VK_CMDS_ISSUE_REFERENCE");
+    remove_var("VK_CMDS_ISSUE_CONFIG_PATH");
+}
+
+#[rstest]
+#[serial]
+#[ignore = "pending config precedence support"]
+fn issue_file_over_defaults_when_env_and_cli_absent() {
+    let cfg = r#"[cmds.issue]
+reference = "file_ref"
+"#;
+    let dir = write_config(cfg);
+    let _guard = set_dir(&dir);
+    let cfg_path = dir.path().join("vk.toml");
+    set_var(
+        "VK_CMDS_ISSUE_CONFIG_PATH",
+        cfg_path.to_str().expect("cfg path"),
+    );
     let cli = IssueArgs { reference: None };
     let merged = load_and_merge_subcommand_for(&cli).expect("merge issue args");
     assert_eq!(merged.reference.as_deref(), Some("file_ref"));
