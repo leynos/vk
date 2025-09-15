@@ -27,33 +27,43 @@ const REVIEW_COMMENTS_PAGE: &str = r"
 #[cfg(test)]
 use mockall::automock;
 
+#[derive(Debug)]
+pub(crate) struct ReviewCommentsQuery<'a> {
+    pub owner: &'a str,
+    pub name: &'a str,
+    pub number: u64,
+    pub after: Option<String>,
+}
+
 #[cfg_attr(test, automock)]
 #[allow(clippy::ref_option, reason = "automock generates &Option")]
 pub(crate) trait ReviewCommentsFetcher {
-    async fn fetch_review_comments(
+    #[allow(
+        clippy::elidable_lifetime_names,
+        reason = "automock requires explicit lifetime for query struct"
+    )]
+    async fn fetch_review_comments<'a>(
         &self,
-        owner: &str,
-        name: &str,
-        number: u64,
-        after: Option<String>,
+        query: ReviewCommentsQuery<'a>,
     ) -> Result<ReviewCommentsPage, VkError>;
 }
 
 impl ReviewCommentsFetcher for GraphQLClient {
-    async fn fetch_review_comments(
+    #[allow(
+        clippy::elidable_lifetime_names,
+        reason = "automock requires explicit lifetime for query struct"
+    )]
+    async fn fetch_review_comments<'a>(
         &self,
-        owner: &str,
-        name: &str,
-        number: u64,
-        after: Option<String>,
+        query: ReviewCommentsQuery<'a>,
     ) -> Result<ReviewCommentsPage, VkError> {
         self.run_query(
             REVIEW_COMMENTS_PAGE,
             json!({
-                "owner": owner,
-                "name": name,
-                "number": number,
-                "after": after,
+                "owner": query.owner,
+                "name": query.name,
+                "number": query.number,
+                "after": query.after,
             }),
         )
         .await
@@ -122,12 +132,12 @@ pub(crate) async fn get_thread_id(
     let mut cursor: Option<String> = None;
     loop {
         let data = gql
-            .fetch_review_comments(
-                &reference.repo.owner,
-                &reference.repo.name,
-                reference.pull_number,
-                cursor.clone(),
-            )
+            .fetch_review_comments(ReviewCommentsQuery {
+                owner: &reference.repo.owner,
+                name: &reference.repo.name,
+                number: reference.pull_number,
+                after: cursor.clone(),
+            })
             .await?;
         let comments = data
             .repository
@@ -216,10 +226,7 @@ mod tests {
         VkError::CommentNotFound { comment_id: 42 },
     )]
     #[tokio::test]
-    async fn pagination_errors(
-        #[case] pages: Vec<ReviewCommentsPage>,
-        #[case] expected: VkError,
-    ) {
+    async fn pagination_errors(#[case] pages: Vec<ReviewCommentsPage>, #[case] expected: VkError) {
         let mut mock = MockReviewCommentsFetcher::new();
         let mut seq = Sequence::new();
         for page in pages {
@@ -227,11 +234,20 @@ mod tests {
             mock.expect_fetch_review_comments()
                 .times(1)
                 .in_sequence(&mut seq)
-                .returning(move |_, _, _, _| Ok(p.clone()));
+                .returning(move |_| Ok(p.clone()));
         }
-        let repo = RepoInfo { owner: "o".into(), name: "r".into() };
-        let reference = CommentRef { repo: &repo, pull_number: 1, comment_id: 42 };
-        let err = get_thread_id(&mock, reference).await.expect_err("expected error");
+        let repo = RepoInfo {
+            owner: "o".into(),
+            name: "r".into(),
+        };
+        let reference = CommentRef {
+            repo: &repo,
+            pull_number: 1,
+            comment_id: 42,
+        };
+        let err = get_thread_id(&mock, reference)
+            .await
+            .expect_err("expected error");
         assert_eq!(format!("{err:?}"), format!("{expected:?}"));
     }
 }

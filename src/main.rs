@@ -120,7 +120,7 @@ pub enum VkError {
     RequestContext {
         context: Box<str>,
         #[source]
-        source: Box<reqwest::Error>,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
     #[error("invalid reference")]
     InvalidRef,

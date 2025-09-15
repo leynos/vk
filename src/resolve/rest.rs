@@ -1,7 +1,7 @@
 //! REST helpers for replying to review comments.
 
 use super::CommentRef;
-use crate::VkError;
+use crate::{VkError, boxed::BoxedStr};
 use log::warn;
 use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
@@ -26,15 +26,30 @@ pub(crate) fn github_client(
     connect_timeout: Duration,
 ) -> Result<reqwest::Client, VkError> {
     let mut headers = HeaderMap::new();
-    headers.insert(USER_AGENT, HeaderValue::from_static("vk"));
-    let auth = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
-        VkError::BadResponse(format!("invalid auth header: {e}").into())
-    })?;
-    headers.insert(AUTHORIZATION, auth);
-    headers.insert(ACCEPT, HeaderValue::from_static("application/vnd.github+json"));
+    let parse_value = |value: &str, context: &str| -> Result<HeaderValue, VkError> {
+        HeaderValue::from_str(value).map_err(|e| VkError::RequestContext {
+            context: context.boxed(),
+            source: e.into(),
+        })
+    };
+    headers.insert(USER_AGENT, parse_value("vk", "build user agent header")?);
+    let auth_header = format!("Bearer {token}");
     headers.insert(
-        HeaderName::from_static("x-github-api-version"),
-        HeaderValue::from_static("2022-11-28"),
+        AUTHORIZATION,
+        parse_value(&auth_header, "build authorization header")?,
+    );
+    headers.insert(
+        ACCEPT,
+        parse_value("application/vnd.github+json", "build accept header")?,
+    );
+    let api_version_header =
+        HeaderName::from_bytes(b"x-github-api-version").map_err(|e| VkError::RequestContext {
+            context: "build x-github-api-version header name".boxed(),
+            source: e.into(),
+        })?;
+    headers.insert(
+        api_version_header,
+        parse_value("2022-11-28", "build x-github-api-version header value")?,
     );
     reqwest::Client::builder()
         .default_headers(headers)
