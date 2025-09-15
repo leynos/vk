@@ -19,7 +19,8 @@ async fn pr_omits_outdated_threads_by_default() {
         cmd.args(["pr", "https://github.com/o/r/pull/1"])
             .assert()
             .success()
-            .stdout(contains("No unresolved comments."));
+            .stdout(contains("No unresolved comments."))
+            .stderr(predicates::str::is_empty());
     })
     .await
     .expect("spawn blocking");
@@ -39,7 +40,8 @@ async fn pr_shows_outdated_when_flag_set() {
         cmd.args(["pr", "https://github.com/o/r/pull/1", "-o"])
             .assert()
             .success()
-            .stdout(contains("obsolete"));
+            .stdout(contains("obsolete"))
+            .stderr(predicates::str::is_empty());
     })
     .await
     .expect("spawn blocking");
@@ -60,7 +62,8 @@ async fn pr_show_outdated_respects_file_filter() {
         cmd.args(["pr", "https://github.com/o/r/pull/1", "-o", "file.rs"])
             .assert()
             .success()
-            .stdout(contains("obsolete").and(contains("current").not()));
+            .stdout(contains("obsolete").and(contains("current").not()))
+            .stderr(predicates::str::is_empty());
     })
     .await
     .expect("spawn blocking");
