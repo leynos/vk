@@ -65,16 +65,22 @@ where
 }
 
 fn pr_cli(reference: Option<&str>, files: &[&str]) -> PrArgs {
-    PrArgs {
-        reference: reference.map(str::to_owned),
-        files: files.iter().map(|value| (*value).to_owned()).collect(),
+    let mut args = PrArgs::default();
+    if let Some(reference) = reference {
+        args.reference = Some(reference.to_owned());
     }
+    if !files.is_empty() {
+        args.files = files.iter().map(|value| (*value).to_owned()).collect();
+    }
+    args
 }
 
 fn issue_cli(reference: Option<&str>) -> IssueArgs {
-    IssueArgs {
-        reference: reference.map(str::to_owned),
+    let mut args = IssueArgs::default();
+    if let Some(reference) = reference {
+        args.reference = Some(reference.to_owned());
     }
+    args
 }
 
 #[derive(Copy, Clone, Debug)]
