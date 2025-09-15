@@ -26,17 +26,12 @@ pub(crate) fn github_client(
     connect_timeout: Duration,
 ) -> Result<reqwest::Client, VkError> {
     let mut headers = HeaderMap::new();
-    headers.insert(USER_AGENT, "vk".parse().expect("static header"));
-    headers.insert(
-        AUTHORIZATION,
-        format!("Bearer {token}").parse().expect("auth header"),
-    );
-    headers.insert(
-        ACCEPT,
-        "application/vnd.github+json"
-            .parse()
-            .expect("accept header"),
-    );
+    headers.insert(USER_AGENT, HeaderValue::from_static("vk"));
+    let auth = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|e| {
+        VkError::BadResponse(format!("invalid auth header: {e}").into())
+    })?;
+    headers.insert(AUTHORIZATION, auth);
+    headers.insert(ACCEPT, HeaderValue::from_static("application/vnd.github+json"));
     headers.insert(
         HeaderName::from_static("x-github-api-version"),
         HeaderValue::from_static("2022-11-28"),
@@ -59,13 +54,18 @@ pub(crate) struct RestClient {
 }
 
 impl RestClient {
+    /// Create a REST client targeting the provided `api` base URL.
+    /// Falls back to `GITHUB_API_URL` or the public GitHub endpoint when `api` is `None`.
     pub(crate) fn new(
         token: &str,
+        api: Option<&str>,
         timeout: Duration,
         connect_timeout: Duration,
     ) -> Result<Self, VkError> {
-        let api = std::env::var("GITHUB_API_URL")
-            .unwrap_or_else(|_| "https://api.github.com".into())
+        let api = api
+            .map(str::to_owned)
+            .or_else(|| std::env::var("GITHUB_API_URL").ok())
+            .unwrap_or_else(|| "https://api.github.com".into())
             .trim_end_matches('/')
             .to_owned();
         let client = github_client(token, timeout, connect_timeout)?;

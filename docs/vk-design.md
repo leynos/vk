@@ -46,7 +46,8 @@ even when multiple comments reference the same code.
   and the `unstable-rest-resolve` feature is enabled, vk fetches the comment's
   `node_id` using the REST API and retries the GraphQL query. This subcommand
   requires `GITHUB_TOKEN`; if absent, it aborts rather than performing
-  anonymous calls.
+  anonymous calls. Resolution steps emit debug spans via `tracing` to aid
+  diagnostics.
 - **Configurable timeouts**: `--http-timeout` and `--connect-timeout`
   override the default 10 s request and 5 s connection limits for REST replies.
 

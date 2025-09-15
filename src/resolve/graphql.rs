@@ -24,76 +24,109 @@ const REVIEW_COMMENTS_PAGE: &str = r"
     }
 ";
 
-#[derive(Deserialize)]
-struct ReviewCommentsPage {
+#[cfg(test)]
+use mockall::automock;
+
+#[cfg_attr(test, automock)]
+#[allow(clippy::ref_option, reason = "automock generates &Option")]
+pub(crate) trait ReviewCommentsFetcher {
+    async fn fetch_review_comments(
+        &self,
+        owner: &str,
+        name: &str,
+        number: u64,
+        after: Option<String>,
+    ) -> Result<ReviewCommentsPage, VkError>;
+}
+
+impl ReviewCommentsFetcher for GraphQLClient {
+    async fn fetch_review_comments(
+        &self,
+        owner: &str,
+        name: &str,
+        number: u64,
+        after: Option<String>,
+    ) -> Result<ReviewCommentsPage, VkError> {
+        self.run_query(
+            REVIEW_COMMENTS_PAGE,
+            json!({
+                "owner": owner,
+                "name": name,
+                "number": number,
+                "after": after,
+            }),
+        )
+        .await
+    }
+}
+
+#[derive(Clone, Deserialize)]
+pub(crate) struct ReviewCommentsPage {
     repository: Option<Repository>,
 }
 
-#[derive(Deserialize)]
-struct Repository {
-    #[serde(rename = "pullRequest")]
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Repository {
     pull_request: Option<PullRequest>,
 }
 
-#[derive(Deserialize)]
-struct PullRequest {
-    #[serde(rename = "reviewComments")]
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PullRequest {
     review_comments: Option<ReviewComments>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ReviewComments {
+pub(crate) struct ReviewComments {
     page_info: PageInfo,
     nodes: Vec<CommentNode>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PageInfo {
+pub(crate) struct PageInfo {
     end_cursor: Option<String>,
     has_next_page: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CommentNode {
+pub(crate) struct CommentNode {
     database_id: u64,
     pull_request_review_thread: ReviewThread,
 }
 
-#[derive(Deserialize)]
-struct ReviewThread {
+#[derive(Clone, Deserialize)]
+pub(crate) struct ReviewThread {
     id: String,
 }
 
-#[derive(Deserialize)]
-struct ResolveThreadResponse {
+#[derive(Clone, Deserialize)]
+pub(crate) struct ResolveThreadResponse {
     #[serde(rename = "resolveReviewThread")]
     _resolve_review_thread: Option<ResolveThreadInner>,
 }
 
-#[derive(Deserialize)]
-struct ResolveThreadInner {
+#[derive(Clone, Deserialize)]
+pub(crate) struct ResolveThreadInner {
     #[serde(rename = "clientMutationId")]
     _client_mutation_id: Option<String>,
 }
 
 pub(crate) async fn get_thread_id(
-    gql: &GraphQLClient,
+    gql: &impl ReviewCommentsFetcher,
     reference: CommentRef<'_>,
 ) -> Result<String, VkError> {
-    let mut cursor = None;
+    let mut cursor: Option<String> = None;
     loop {
-        let data: ReviewCommentsPage = gql
-            .run_query(
-                REVIEW_COMMENTS_PAGE,
-                json!({
-                    "owner": reference.repo.owner,
-                    "name": reference.repo.name,
-                    "number": reference.pull_number,
-                    "after": cursor,
-                }),
+        let data = gql
+            .fetch_review_comments(
+                &reference.repo.owner,
+                &reference.repo.name,
+                reference.pull_number,
+                cursor.clone(),
             )
             .await?;
         let comments = data
@@ -117,6 +150,11 @@ pub(crate) async fn get_thread_id(
                 "missing endCursor with hasNextPage".into(),
             ));
         }
+        if next == cursor {
+            return Err(VkError::BadResponse(
+                "non-progressing pagination (repeated endCursor)".into(),
+            ));
+        }
         cursor = next;
     }
     Err(VkError::CommentNotFound {
@@ -129,4 +167,71 @@ pub(crate) async fn resolve_thread(gql: &GraphQLClient, thread_id: &str) -> Resu
         .run_query(RESOLVE_THREAD_MUTATION, json!({ "id": thread_id }))
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ref_parser::RepoInfo;
+    use mockall::Sequence;
+    use rstest::rstest;
+
+    fn page(nodes: Vec<u64>, end_cursor: Option<&str>, has_next: bool) -> ReviewCommentsPage {
+        ReviewCommentsPage {
+            repository: Some(Repository {
+                pull_request: Some(PullRequest {
+                    review_comments: Some(ReviewComments {
+                        page_info: PageInfo {
+                            end_cursor: end_cursor.map(ToOwned::to_owned),
+                            has_next_page: has_next,
+                        },
+                        nodes: nodes
+                            .into_iter()
+                            .map(|id| CommentNode {
+                                database_id: id,
+                                pull_request_review_thread: ReviewThread { id: "t".into() },
+                            })
+                            .collect(),
+                    }),
+                }),
+            }),
+        }
+    }
+
+    #[rstest]
+    #[case::missing_comments(vec![ReviewCommentsPage { repository: None }], VkError::BadResponse("missing review comments".into()))]
+    #[case::missing_cursor(vec![page(vec![], None, true)], VkError::BadResponse("missing endCursor with hasNextPage".into()))]
+    #[case::repeated_cursor(
+        vec![
+            page(vec![], Some("a"), true),
+            page(vec![], Some("a"), true),
+        ],
+        VkError::BadResponse("non-progressing pagination (repeated endCursor)".into()),
+    )]
+    #[case::not_found(
+        vec![
+            page(vec![1], Some("a"), true),
+            page(vec![2], None, false),
+        ],
+        VkError::CommentNotFound { comment_id: 42 },
+    )]
+    #[tokio::test]
+    async fn pagination_errors(
+        #[case] pages: Vec<ReviewCommentsPage>,
+        #[case] expected: VkError,
+    ) {
+        let mut mock = MockReviewCommentsFetcher::new();
+        let mut seq = Sequence::new();
+        for page in pages {
+            let p = page.clone();
+            mock.expect_fetch_review_comments()
+                .times(1)
+                .in_sequence(&mut seq)
+                .returning(move |_, _, _, _| Ok(p.clone()));
+        }
+        let repo = RepoInfo { owner: "o".into(), name: "r".into() };
+        let reference = CommentRef { repo: &repo, pull_number: 1, comment_id: 42 };
+        let err = get_thread_id(&mock, reference).await.expect_err("expected error");
+        assert_eq!(format!("{err:?}"), format!("{expected:?}"));
+    }
 }

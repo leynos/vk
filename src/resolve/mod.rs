@@ -5,6 +5,7 @@
 
 use crate::ref_parser::RepoInfo;
 use crate::{VkError, api::GraphQLClient};
+use tracing::{Instrument, debug_span};
 
 #[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
@@ -64,14 +65,28 @@ pub async fn resolve_comment(
     #[cfg(feature = "unstable-rest-resolve")] timeout: Duration,
     #[cfg(feature = "unstable-rest-resolve")] connect_timeout: Duration,
 ) -> Result<(), VkError> {
+    let span = debug_span!(
+        "resolve_comment",
+        owner = reference.repo.owner,
+        repo = reference.repo.name,
+        pull_number = reference.pull_number,
+        comment_id = reference.comment_id
+    );
+    let _enter = span.enter();
     #[cfg(feature = "unstable-rest-resolve")]
     if let Some(body) = message.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
-        let rest_client = rest::RestClient::new(token, timeout, connect_timeout)?;
-        rest::post_reply(&rest_client, reference, body).await?;
+        let rest_client = rest::RestClient::new(token, None, timeout, connect_timeout)?;
+        rest::post_reply(&rest_client, reference, body)
+            .instrument(debug_span!("post_reply"))
+            .await?;
     }
 
     let gql = GraphQLClient::new(token, None)?;
-    let thread_id = graphql::get_thread_id(&gql, reference).await?;
-    graphql::resolve_thread(&gql, &thread_id).await?;
+    let thread_id = graphql::get_thread_id(&gql, reference)
+        .instrument(debug_span!("thread_lookup"))
+        .await?;
+    graphql::resolve_thread(&gql, &thread_id)
+        .instrument(debug_span!("resolve_thread"))
+        .await?;
     Ok(())
 }
