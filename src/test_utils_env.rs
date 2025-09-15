@@ -11,7 +11,7 @@ use std::sync::{Mutex, OnceLock};
 /// A global mutex serialises modifications so parallel tests do not race.
 pub fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
     let _guard = env_lock();
-    // SAFETY: The global mutex serialises access to the environment, making the
+    // The global mutex serialises access to the environment, making the
     // unsynchronised standard library calls safe for our tests.
     unsafe { std::env::set_var(key, value) };
 }
@@ -21,7 +21,7 @@ pub fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, val
 /// The global mutex serialises modifications so parallel tests do not race.
 pub fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
     let _guard = env_lock();
-    // SAFETY: The global mutex serialises access to the environment, making the
+    // The global mutex serialises access to the environment, making the
     // unsynchronised standard library calls safe for our tests.
     unsafe { std::env::remove_var(key) };
 }
