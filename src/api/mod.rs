@@ -6,13 +6,13 @@
 //! a cursor-based connection.
 
 use backon::{ExponentialBuilder, Retryable};
-use log::warn;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 use std::{borrow::Cow, env};
 use tokio::time::{Duration, sleep};
+use tracing::warn;
 
 use crate::VkError;
 use crate::boxed::BoxedStr;
@@ -365,23 +365,22 @@ impl GraphQLClient {
     fn log_transcript(&self, payload: &serde_json::Value, operation: &str, resp: &HttpResponse) {
         if let Some(t) = &self.transcript {
             use std::io::Write as _;
-            match t.lock() {
-                Ok(mut f) => {
-                    if let Err(e) = writeln!(
-                        f,
-                        "{}",
-                        serde_json::to_string(&json!({
-                            "operation": operation,
-                            "status": resp.status,
-                            "request": payload,
-                            "response": snippet(&resp.body, BODY_SNIPPET_LEN)
-                        }))
-                        .expect("serializing GraphQL transcript"),
-                    ) {
-                        warn!("failed to write transcript: {e}");
-                    }
+            if let Ok(mut f) = t.lock() {
+                if let Err(e) = writeln!(
+                    f,
+                    "{}",
+                    serde_json::to_string(&json!({
+                        "operation": operation,
+                        "status": resp.status,
+                        "request": payload,
+                        "response": snippet(&resp.body, BODY_SNIPPET_LEN)
+                    }))
+                    .expect("serializing GraphQL transcript"),
+                ) {
+                    warn!("failed to write transcript: {e}");
                 }
-                Err(_) => warn!("failed to lock transcript"),
+            } else {
+                warn!("failed to lock transcript");
             }
         }
     }

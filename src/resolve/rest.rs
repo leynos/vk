@@ -2,11 +2,13 @@
 
 use super::CommentRef;
 use crate::{VkError, boxed::BoxedStr};
-use log::warn;
 use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use serde_json::json;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
+use tracing::warn;
 
 /// Build an authenticated client with GitHub headers.
 ///
@@ -66,6 +68,8 @@ pub(crate) fn github_client(
 pub(crate) struct RestClient {
     api: String,
     client: reqwest::Client,
+    #[cfg(test)]
+    request_count: AtomicUsize,
 }
 
 impl RestClient {
@@ -84,7 +88,12 @@ impl RestClient {
             .trim_end_matches('/')
             .to_owned();
         let client = github_client(token, timeout, connect_timeout)?;
-        Ok(Self { api, client })
+        Ok(Self {
+            api,
+            client,
+            #[cfg(test)]
+            request_count: AtomicUsize::new(0),
+        })
     }
 }
 
@@ -108,6 +117,8 @@ pub(crate) async fn post_reply(
         reference.pull_number,
         reference.comment_id
     );
+    #[cfg(test)]
+    rest.request_count.fetch_add(1, Ordering::SeqCst);
     let res = rest
         .client
         .post(url)
@@ -120,8 +131,12 @@ pub(crate) async fn post_reply(
         })?;
     if res.status() == StatusCode::NOT_FOUND {
         warn!(
-            "reply target not found: {}/{} comment {} in PR #{}",
-            reference.repo.owner, reference.repo.name, reference.comment_id, reference.pull_number
+            "reply target not found (url={}): {}/{} comment {} in PR #{}",
+            res.url(),
+            reference.repo.owner,
+            reference.repo.name,
+            reference.comment_id,
+            reference.pull_number
         );
         // Treat missing original comment as non-fatal: continue to resolve.
         return Ok(());
@@ -129,4 +144,36 @@ pub(crate) async fn post_reply(
     res.error_for_status()
         .map(|_| ())
         .map_err(|e| VkError::Request(Box::new(e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ref_parser::RepoInfo;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn skips_whitespace_reply_without_request() {
+        let rest = RestClient::new(
+            "token",
+            Some("https://example.test"),
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+        .expect("rest client");
+        let repo = RepoInfo {
+            owner: "octocat".into(),
+            name: "hello-world".into(),
+        };
+        let reference = CommentRef {
+            repo: &repo,
+            pull_number: 1,
+            comment_id: 42,
+        };
+        post_reply(&rest, reference, "   ")
+            .await
+            .expect("skip whitespace reply");
+        assert_eq!(rest.request_count.load(Ordering::SeqCst), 0);
+    }
 }

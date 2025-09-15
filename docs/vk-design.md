@@ -47,7 +47,9 @@ even when multiple comments reference the same code.
   `node_id` using the REST API and retries the GraphQL query. This subcommand
   requires `GITHUB_TOKEN`; if absent, it aborts rather than performing
   anonymous calls. Resolution steps emit debug spans via `tracing` to aid
-  diagnostics.
+  diagnostics; the binary initialises `tracing_subscriber::fmt()` with an
+  environment filter so running with `RUST_LOG=vk=debug` (or a more specific
+  filter) surfaces the spans on stderr.
 - **Configurable timeouts**: `--http-timeout` and `--connect-timeout`
   override the default 10 s request and 5 s connection limits for REST replies.
 
