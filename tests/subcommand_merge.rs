@@ -12,10 +12,10 @@ use tempfile::TempDir;
 use vk::test_utils::{remove_var, set_var};
 use vk::{IssueArgs, PrArgs};
 
-/// Write `content` to a temporary `.vk.toml` file and return its directory.
+/// Write `content` to a temporary `vk.toml` file and return its directory.
 fn write_config(content: &str) -> TempDir {
     let dir = tempfile::tempdir().expect("create config dir");
-    fs::write(dir.path().join(".vk.toml"), content).expect("write config");
+    fs::write(dir.path().join("vk.toml"), content).expect("write config");
     dir
 }
 
@@ -67,4 +67,24 @@ fn issue_configuration_precedence() {
     let merged = load_and_merge_subcommand_for(&cli).expect("merge issue args");
     assert_eq!(merged.reference.as_deref(), Some("cli_ref"));
     remove_var("VK_CMDS_ISSUE_REFERENCE");
+}
+
+#[rstest]
+#[serial]
+#[ignore = "requires config path setup"]
+fn issue_configuration_fallback_to_config_only() {
+    let cfg = r#"[cmds.issue]
+reference = "file_ref"
+"#;
+    let dir = write_config(cfg);
+    let cfg_path = dir.path().join("vk.toml");
+    set_var(
+        "VK_CMDS_ISSUE_CONFIG_PATH",
+        cfg_path.to_str().expect("cfg path"),
+    );
+    remove_var("VK_CMDS_ISSUE_REFERENCE");
+    let cli = IssueArgs { reference: None };
+    let merged = load_and_merge_subcommand_for(&cli).expect("merge issue args");
+    assert_eq!(merged.reference.as_deref(), Some("file_ref"));
+    remove_var("VK_CMDS_ISSUE_CONFIG_PATH");
 }
