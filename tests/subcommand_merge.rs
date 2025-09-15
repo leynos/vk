@@ -64,6 +64,19 @@ where
     merged
 }
 
+fn pr_cli(reference: Option<&str>, files: &[&str]) -> PrArgs {
+    PrArgs {
+        reference: reference.map(str::to_owned),
+        files: files.iter().map(|value| (*value).to_owned()).collect(),
+    }
+}
+
+fn issue_cli(reference: Option<&str>) -> IssueArgs {
+    IssueArgs {
+        reference: reference.map(str::to_owned),
+    }
+}
+
 #[rstest]
 #[serial]
 fn pr_configuration_precedence() {
@@ -71,17 +84,8 @@ fn pr_configuration_precedence() {
 reference = "file_ref"
 files = ["file.txt"]
 "#;
-    let merged = merge_with_sources(
-        cfg,
-        &[
-            ("VKCMDS_PR_REFERENCE", Some("env_ref")),
-            ("VKCMDS_PR_FILES", Some("env.txt")),
-        ],
-        &PrArgs {
-            reference: Some("cli_ref".into()),
-            files: vec!["cli.txt".into()],
-        },
-    );
+    let cli = pr_cli(Some("cli_ref"), &["cli.txt"]);
+    let merged = merge_with_sources(cfg, &[("VKCMDS_PR_REFERENCE", Some("env_ref"))], &cli);
     assert_eq!(merged.reference.as_deref(), Some("cli_ref"));
 }
 
@@ -91,13 +95,8 @@ fn issue_configuration_precedence() {
     let cfg = r#"[cmds.issue]
 reference = "file_ref"
 "#;
-    let merged = merge_with_sources(
-        cfg,
-        &[("VKCMDS_ISSUE_REFERENCE", Some("env_ref"))],
-        &IssueArgs {
-            reference: Some("cli_ref".into()),
-        },
-    );
+    let cli = issue_cli(Some("cli_ref"));
+    let merged = merge_with_sources(cfg, &[("VKCMDS_ISSUE_REFERENCE", Some("env_ref"))], &cli);
     assert_eq!(merged.reference.as_deref(), Some("cli_ref"));
 }
 
@@ -108,17 +107,8 @@ fn pr_env_over_file_when_cli_absent() {
 reference = "file_ref"
 files = ["file.txt"]
 "#;
-    let merged = merge_with_sources(
-        cfg,
-        &[
-            ("VKCMDS_PR_REFERENCE", Some("env_ref")),
-            ("VKCMDS_PR_FILES", None),
-        ],
-        &PrArgs {
-            reference: None,
-            files: vec![],
-        },
-    );
+    let cli = pr_cli(None, &[]);
+    let merged = merge_with_sources(cfg, &[("VKCMDS_PR_REFERENCE", Some("env_ref"))], &cli);
     assert_eq!(merged.reference.as_deref(), Some("env_ref"));
 }
 
@@ -129,13 +119,11 @@ fn pr_file_over_defaults_when_env_and_cli_absent() {
 reference = "file_ref"
 files = ["file.txt"]
 "#;
+    let cli = pr_cli(None, &[]);
     let merged = merge_with_sources(
         cfg,
         &[("VKCMDS_PR_REFERENCE", None), ("VKCMDS_PR_FILES", None)],
-        &PrArgs {
-            reference: None,
-            files: vec![],
-        },
+        &cli,
     );
     assert_eq!(merged.reference.as_deref(), Some("file_ref"));
 }
@@ -146,11 +134,8 @@ fn issue_env_over_file_when_cli_absent() {
     let cfg = r#"[cmds.issue]
 reference = "file_ref"
 "#;
-    let merged = merge_with_sources(
-        cfg,
-        &[("VKCMDS_ISSUE_REFERENCE", Some("env_ref"))],
-        &IssueArgs { reference: None },
-    );
+    let cli = issue_cli(None);
+    let merged = merge_with_sources(cfg, &[("VKCMDS_ISSUE_REFERENCE", Some("env_ref"))], &cli);
     assert_eq!(merged.reference.as_deref(), Some("env_ref"));
 }
 
@@ -160,10 +145,7 @@ fn issue_file_over_defaults_when_env_and_cli_absent() {
     let cfg = r#"[cmds.issue]
 reference = "file_ref"
 "#;
-    let merged = merge_with_sources(
-        cfg,
-        &[("VKCMDS_ISSUE_REFERENCE", None)],
-        &IssueArgs { reference: None },
-    );
+    let cli = issue_cli(None);
+    let merged = merge_with_sources(cfg, &[("VKCMDS_ISSUE_REFERENCE", None)], &cli);
     assert_eq!(merged.reference.as_deref(), Some("file_ref"));
 }
