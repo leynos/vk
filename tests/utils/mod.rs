@@ -6,10 +6,11 @@
 use assert_cmd::prelude::*;
 use bytes::Bytes;
 use http_body_util::Full;
-use hyper::{Request, Response, body::Incoming, service::service_fn};
+use hyper::{Request, Response, StatusCode, body::Incoming, service::service_fn};
 use hyper_util::{rt::TokioExecutor, server::conn::auto};
 use std::io::ErrorKind;
 use std::{
+    collections::VecDeque,
     net::SocketAddr,
     process::Command,
     sync::{Arc, Mutex},
@@ -114,6 +115,29 @@ pub fn vk_cmd(addr: SocketAddr) -> Command {
         .env("NO_COLOR", "1")
         .env("CLICOLOR_FORCE", "0");
     cmd
+}
+
+/// Configure handler to respond with bodies sequentially.
+///
+/// # Panics
+///
+/// Panics if a response body is missing or if building the response fails.
+#[allow(dead_code, reason = "helper used in some tests only")]
+pub fn set_sequential_responder(handler: &Handler, bodies: impl Into<Vec<String>>) {
+    let responses = Arc::new(Mutex::new(VecDeque::from(bodies.into())));
+    let responses_clone = Arc::clone(&responses);
+    *handler.lock().expect("lock handler") = Box::new(move |_req| {
+        let body = responses_clone
+            .lock()
+            .expect("lock responses")
+            .pop_front()
+            .expect("response");
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::from(body))
+            .expect("build response")
+    });
 }
 
 const _: fn(SocketAddr) -> Command = vk_cmd;
