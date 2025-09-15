@@ -6,6 +6,9 @@ use assert_cmd::prelude::*;
 use http_body_util::Full;
 use hyper::{Response, StatusCode};
 use predicates::prelude::*;
+use serde_json::Value;
+use std::borrow::ToOwned;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 mod utils;
@@ -59,7 +62,7 @@ impl Page {
 async fn run_resolve_flow(pages: Vec<Page>, expected_posts: usize) {
     let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
-    let pages = Arc::new(Mutex::new(pages));
+    let pages = Arc::new(Mutex::new(VecDeque::from(pages)));
     let expected_after = Arc::new(Mutex::new(None::<String>));
     let calls_clone = Arc::clone(&calls);
     let pages_clone = Arc::clone(&pages);
@@ -69,18 +72,28 @@ async fn run_resolve_flow(pages: Vec<Page>, expected_posts: usize) {
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             let mut after = expected_after_clone.lock().expect("lock after");
-            if let Some(ref cursor) = *after {
-                let body_str = std::str::from_utf8(req.body().as_ref()).expect("utf8 body");
-                assert!(
-                    body_str.contains(&format!("\"after\":\"{cursor}\"")),
-                    "second page query must include after={cursor}; got body: {body_str}"
-                );
+            let body_bytes = req.body().as_ref();
+            let v: Value = serde_json::from_slice(body_bytes).expect("JSON body for /graphql");
+            let got_after = v
+                .pointer("/variables/after")
+                .and_then(|x| x.as_str())
+                .map(ToOwned::to_owned);
+            match after.as_deref() {
+                Some(cursor) => assert_eq!(
+                    got_after.as_deref(),
+                    Some(cursor),
+                    "query must include variables.after={cursor}; got: {v}"
+                ),
+                None => assert!(
+                    got_after.is_none(),
+                    "first page query must not include variables.after; got: {v}"
+                ),
             }
             let mut pages = pages_clone.lock().expect("lock pages");
             if pages.is_empty() {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#.to_owned()
             } else {
-                let page = pages.remove(0);
+                let page = pages.pop_front().expect("non-empty script");
                 *after = page.end_cursor.map(std::string::ToString::to_string);
                 page.body()
             }
