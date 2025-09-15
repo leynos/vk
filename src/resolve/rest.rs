@@ -2,8 +2,8 @@
 
 use super::CommentRef;
 use crate::{VkError, boxed::BoxedStr};
-use reqwest::StatusCode;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
+use reqwest::{StatusCode, Url};
 use serde_json::json;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -66,7 +66,7 @@ pub(crate) fn github_client(
 
 /// GitHub REST client configuration.
 pub(crate) struct RestClient {
-    api: String,
+    api: Url,
     client: reqwest::Client,
     #[cfg(test)]
     request_count: AtomicUsize,
@@ -81,12 +81,22 @@ impl RestClient {
         timeout: Duration,
         connect_timeout: Duration,
     ) -> Result<Self, VkError> {
-        let api = api
+        let mut base = api
             .map(str::to_owned)
             .or_else(|| std::env::var("GITHUB_API_URL").ok())
-            .unwrap_or_else(|| "https://api.github.com".into())
-            .trim_end_matches('/')
-            .to_owned();
+            .unwrap_or_else(|| "https://api.github.com".into());
+        while base.ends_with('/') {
+            base.pop();
+        }
+        let mut api = Url::parse(&base).map_err(|e| VkError::RequestContext {
+            context: format!("parse API base URL from {base}").boxed(),
+            source: Box::new(e),
+        })?;
+        let normalised_path = match api.path().trim_end_matches('/') {
+            "" => "/".to_owned(),
+            path => format!("{path}/"),
+        };
+        api.set_path(&normalised_path);
         let client = github_client(token, timeout, connect_timeout)?;
         Ok(Self {
             api,
@@ -109,14 +119,18 @@ pub(crate) async fn post_reply(
         return Ok(());
     }
 
-    let url = format!(
-        "{}/repos/{}/{}/pulls/{}/comments/{}/replies",
-        rest.api,
-        reference.repo.owner,
-        reference.repo.name,
-        reference.pull_number,
-        reference.comment_id
+    let path = format!(
+        "repos/{}/{}/pulls/{}/comments/{}/replies",
+        reference.repo.owner, reference.repo.name, reference.pull_number, reference.comment_id
     );
+    let url = rest.api.join(&path).map_err(|e| VkError::RequestContext {
+        context: format!(
+            "build reply URL for comment {} in repo {}/{}",
+            reference.comment_id, reference.repo.owner, reference.repo.name
+        )
+        .boxed(),
+        source: Box::new(e),
+    })?;
     #[cfg(test)]
     rest.request_count.fetch_add(1, Ordering::SeqCst);
     let res = rest

@@ -365,22 +365,29 @@ impl GraphQLClient {
     fn log_transcript(&self, payload: &serde_json::Value, operation: &str, resp: &HttpResponse) {
         if let Some(t) = &self.transcript {
             use std::io::Write as _;
-            if let Ok(mut f) = t.lock() {
-                if let Err(e) = writeln!(
-                    f,
-                    "{}",
-                    serde_json::to_string(&json!({
-                        "operation": operation,
-                        "status": resp.status,
-                        "request": payload,
-                        "response": snippet(&resp.body, BODY_SNIPPET_LEN)
-                    }))
-                    .expect("serializing GraphQL transcript"),
-                ) {
-                    warn!("failed to write transcript: {e}");
+            match t.lock() {
+                Ok(mut f) => {
+                    if let Err(e) = writeln!(
+                        f,
+                        "{}",
+                        serde_json::to_string(&json!({
+                            "operation": operation,
+                            "status": resp.status,
+                            "request": payload,
+                            "response": snippet(&resp.body, BODY_SNIPPET_LEN)
+                        }))
+                        .expect("serializing GraphQL transcript"),
+                    ) {
+                        warn!("failed to write transcript for op={operation}: {e}");
+                        return;
+                    }
+                    if let Err(e) = f.flush() {
+                        warn!("failed to flush transcript for op={operation}: {e}");
+                    }
                 }
-            } else {
-                warn!("failed to lock transcript");
+                Err(e) => {
+                    warn!("failed to lock transcript for op={operation}: {e}");
+                }
             }
         }
     }
