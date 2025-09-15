@@ -28,6 +28,8 @@ even when multiple comments reference the same code.
   [GitHub's guide to linking to pull request comments](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/commenting-on-a-pull-request#linking-to-a-pull-request-comment).
 - **Concise output**: Each thread shows the diff once followed by all comments,
   reducing clutter when multiple remarks target the same line.
+- **Outdated threads**: hidden by default; pass `-o` (`--show-outdated`) to
+  include them when needed.
 - **Error visibility**: Failures encountered while printing a thread are logged
   to stderr instead of being silently discarded.
 - **Banners**: Output opens with a `code review` banner
@@ -60,13 +62,17 @@ The code centres on three printing helpers:
 3. `write_thread` iterates over a thread and prints each comment body in turn.
 
 `run_pr` fetches the latest review from each reviewer and all unresolved
-threads. After printing a `code review` banner and a summary, the reviews are
-printed, followed by a `review comments` banner and the individual threads. If
-standard output is closed (broken pipe), the run terminates early. The comments
-banner is only emitted when threads will be printed; otherwise it is omitted.
-Other errors from `print_thread` and banner printing are surfaced via logging.
-Once all threads have been printed, a final banner reading `end of code review`
-confirms completion.
+threads. The helper `fetch_review_threads_with_options` accepts a
+`FetchOptions` struct and skips outdated threads before comment pagination
+unless `--show-outdated` is set, avoiding unnecessary requests. After printing
+a `code review` banner and a summary, the reviews are printed, followed by a
+`review comments` banner and the individual threads. If standard output is
+closed (broken pipe), the run terminates early. The comments banner is only
+emitted when threads will be printed; otherwise it is omitted. Other errors
+from `print_thread` and banner printing are surfaced via logging. Once all
+threads have been printed, a final banner reading `end of code review` confirms
+completion. Review threads missing the GraphQL `isOutdated` field are treated
+as current (client-side default) to preserve legacy fixture compatibility.
 
 ### CLI arguments
 
@@ -138,6 +144,7 @@ classDiagram
     class ReviewThread {
         +ID! id
         +Boolean! isResolved
+        +Boolean isOutdated
         +CommentConnection! comments
     }
     class CommentConnection {

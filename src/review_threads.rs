@@ -1,9 +1,12 @@
 //! Helpers for fetching and filtering pull request review threads from the
 //! GitHub API.
 //!
-//! The module defines GraphQL response structures and helpers to retrieve all
-//! unresolved review threads along with their comments. It also provides
-//! utilities for filtering threads by file path.
+//! The module defines GraphQL response structures and helpers to retrieve
+//! review threads and their comments. Helpers hide outdated threads by
+//! default, keeping output focused on current discussions. Callers can opt
+//! in to outdated threads via `fetch_review_threads_with_options` or the
+//! CLI flag `--show-outdated`. Utilities for filtering threads by file
+//! path are also provided.
 
 use serde::Deserialize;
 use serde_json::{Map, json};
@@ -57,6 +60,8 @@ pub struct ReviewThread {
     pub id: String,
     #[serde(rename = "isResolved")]
     pub is_resolved: bool,
+    #[serde(default, rename = "isOutdated")]
+    pub is_outdated: bool,
     pub comments: CommentConnection,
 }
 
@@ -130,51 +135,54 @@ pub struct User {
     pub login: String,
 }
 
+/// Options controlling which review threads to include.
+///
+/// `include_resolved` retains resolved discussions; `include_outdated` keeps
+/// outdated threads. Keeping both `false` shows only current unresolved
+/// discussions.
+///
+/// # Examples
+/// ```
+/// use vk::review_threads::FetchOptions;
+/// let opts = FetchOptions { include_resolved: false, include_outdated: true };
+/// assert!(!opts.include_resolved);
+/// ```
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FetchOptions {
+    /// Retain resolved threads when true.
+    pub include_resolved: bool,
+    /// Keep outdated threads when true.
+    pub include_outdated: bool,
+}
+
+impl FetchOptions {
+    /// Show only current unresolved threads.
+    #[must_use]
+    pub const fn unresolved_current() -> Self {
+        Self {
+            include_resolved: false,
+            include_outdated: true,
+        }
+    }
+    /// Show all threads regardless of status.
+    #[must_use]
+    pub const fn all() -> Self {
+        Self {
+            include_resolved: true,
+            include_outdated: true,
+        }
+    }
+}
+
 /// Fetch all unresolved review threads for a pull request.
 ///
 /// Note:
-/// - GitHub GraphQL `Int` is a 32-bit signed integer (range −2^31..=2^31−1).
-///   This function accepts a non-negative `number`; values above `i32::MAX`
-///   are rejected with [`VkError::InvalidNumber`].
-/// - The token must have sufficient scopes (for example, `repo` for private
-///   repositories) or the API may return partial data that fails to
-///   deserialise.
-/// - Pagination is fully exhausted so each returned thread's comments are
-///   complete.
+/// Fetch review threads with optional resolution and outdated filters.
 ///
-/// ```no_run
-/// use vk::{api::GraphQLClient, ref_parser::RepoInfo};
-///
-/// # async fn run() -> Result<(), vk::VkError> {
-/// let client = GraphQLClient::new("token", None).expect("client");
-/// let repo = RepoInfo { owner: "o".into(), name: "r".into() };
-/// let threads = vk::review_threads::fetch_review_threads(&client, &repo, 1).await?;
-/// assert!(threads.iter().all(|t| !t.comments.nodes.is_empty()));
-/// # Ok(())
-/// # }
-/// ```
-///
-/// # Errors
-///
-/// Returns [`VkError::InvalidNumber`] if `number` exceeds `i32::MAX`, or a
-/// general [`VkError`] if any API request fails or the response is malformed.
-pub async fn fetch_review_threads(
-    client: &GraphQLClient,
-    repo: &RepoInfo,
-    number: u64,
-) -> Result<Vec<ReviewThread>, VkError> {
-    fetch_review_threads_with_resolution(client, repo, number, false).await
-}
-
-/// Fetch review threads from a pull request.
-///
-/// When `include_resolved` is true, returns both resolved and unresolved
-/// threads. When false, returns only unresolved threads (same as
-/// [`fetch_review_threads`]).
-///
-/// This function follows the same pagination and validation logic as
-/// [`fetch_review_threads`] but bypasses the unresolved filtering when
-/// requested.
+/// Pass [`FetchOptions`] to control inclusion of resolved or outdated threads.
+/// When `options.include_outdated` is false, outdated threads are dropped before
+/// comment pagination, avoiding unnecessary HTTP calls. Pagination is exhausted
+/// so returned threads contain complete comment lists.
 ///
 /// # Examples
 /// ```no_run
@@ -182,11 +190,11 @@ pub async fn fetch_review_threads(
 /// # async fn run() -> Result<(), vk::VkError> {
 /// let client = GraphQLClient::new("token", None).expect("client");
 /// let repo = RepoInfo { owner: "o".into(), name: "r".into() };
-/// let threads = vk::review_threads::fetch_review_threads_with_resolution(
+/// let threads = vk::review_threads::fetch_review_threads_with_options(
 ///     &client,
 ///     &repo,
 ///     1,
-///     true,
+///     FetchOptions { include_resolved: true, include_outdated: false },
 /// ).await?;
 /// assert!(!threads.is_empty());
 /// # Ok(())
@@ -197,11 +205,11 @@ pub async fn fetch_review_threads(
 ///
 /// Returns [`VkError::InvalidNumber`] if `number` exceeds `i32::MAX`, or a
 /// general [`VkError`] if any API request fails or the response is malformed.
-pub async fn fetch_review_threads_with_resolution(
+pub async fn fetch_review_threads_with_options(
     client: &GraphQLClient,
     repo: &RepoInfo,
     number: u64,
-    include_resolved: bool,
+    options: FetchOptions,
 ) -> Result<Vec<ReviewThread>, VkError> {
     debug_assert!(
         i32::try_from(number).is_ok(),
@@ -221,14 +229,16 @@ pub async fn fetch_review_threads_with_resolution(
         })
         .await?;
 
-    // Apply unresolved filtering only when include_resolved is false
-    let mut threads = if include_resolved {
+    let mut threads = if options.include_resolved {
         threads
     } else {
         filter_unresolved_threads(threads)
     };
 
-    // Rest of the function remains identical to fetch_review_threads
+    if !options.include_outdated {
+        threads = exclude_outdated_threads(threads);
+    }
+
     for thread in &mut threads {
         let initial = std::mem::take(&mut thread.comments);
         thread.comments = fetch_all_comments(client, &thread.id, initial).await?;
@@ -305,9 +315,33 @@ async fn fetch_all_comments(
 /// assert_eq!(filtered.len(), 1);
 /// assert!(!filtered[0].is_resolved);
 /// ```
+#[must_use]
 fn filter_unresolved_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
     threads.into_iter().filter(|t| !t.is_resolved).collect()
 }
+
+/// Retain only non-outdated review threads.
+///
+/// # Examples
+///
+/// ```ignore
+/// use vk::review_threads::{exclude_outdated_threads, ReviewThread};
+/// let threads = vec![
+///     ReviewThread { is_outdated: true, ..Default::default() },
+///     ReviewThread { is_outdated: false, ..Default::default() },
+/// ];
+/// let filtered = exclude_outdated_threads(threads);
+/// assert_eq!(filtered.len(), 1);
+/// assert!(!filtered[0].is_outdated);
+/// ```
+#[must_use]
+pub fn exclude_outdated_threads(threads: Vec<ReviewThread>) -> Vec<ReviewThread> {
+    threads.into_iter().filter(|t| !t.is_outdated).collect()
+}
+
+/// Retain only non-outdated review threads.
+/// Alias retained for documentation and CLI consistency.
+pub use exclude_outdated_threads as filter_outdated_threads;
 
 /// Filter review threads to those whose first comment matches one of `files`.
 ///

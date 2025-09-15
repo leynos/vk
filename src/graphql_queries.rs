@@ -8,6 +8,7 @@ pub const THREADS_QUERY: &str = r"
             nodes {
               id
               isResolved
+                isOutdated
               comments(first: 100) {
                 nodes {
                   body

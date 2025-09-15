@@ -2,8 +2,7 @@
 //!
 //! Isolates clap derivations so lint expectations remain scoped, keeping
 //! `main.rs` focused on runtime logic.
-#![allow(non_snake_case, reason = "clap generates non-snake-case modules")]
-#![allow(unused_imports, reason = "clap derives import the struct internally")]
+// Imports are referenced by derives; no suppression required.
 
 use clap::Parser;
 use ortho_config::OrthoConfig;
@@ -63,6 +62,10 @@ pub struct PrArgs {
     #[arg(value_name = "FILE", num_args = 0..)]
     #[serde(default)]
     pub files: Vec<String>,
+    /// Include outdated review threads
+    #[arg(short = 'o', long = "show-outdated")]
+    #[serde(default, alias = "include_outdated")]
+    pub show_outdated: bool,
 }
 
 /// Parameters accepted by the `issue` sub-command.

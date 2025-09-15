@@ -58,6 +58,7 @@ async fn pagination_client() -> TestClient {
             "nodes": [{
                 "id": "t",
                 "isResolved": false,
+                "isOutdated": false,
                 "comments": {"nodes": first, "pageInfo": {"hasNextPage": true, "endCursor": "c99"}}
             }],
             "pageInfo": {"hasNextPage": false, "endCursor": null}
@@ -74,20 +75,25 @@ async fn pagination_client() -> TestClient {
     start_server(vec![thread_body, comment_body])
 }
 
-#[fixture]
-#[expect(clippy::unused_async, reason = "rstest requires async fixtures")]
+#[expect(
+    clippy::unused_async,
+    reason = "fixture remains async for symmetry with other variants"
+)]
 #[allow(
     unfulfilled_lint_expectations,
-    reason = "rstest macro suppresses lint, expectation kept for future safety"
+    reason = "clippy::unused_async may not trigger in all toolchains"
 )]
+#[fixture]
 async fn path_variant_client(
     #[default(serde_json::Value::Null)] path_value: serde_json::Value,
 ) -> TestClient {
+    // Intentionally async: other variants await I/O.
     let body = serde_json::json!({
         "data": {"repository": {"pullRequest": {"reviewThreads": {
             "nodes": [{
                 "id": "t",
                 "isResolved": false,
+                "isOutdated": false,
                 "comments": {"nodes": [{
                     "body": "c",
                     "diffHunk": "",
@@ -112,7 +118,9 @@ async fn run_query_missing_nodes_reports_path(
     #[future] missing_nodes_client: TestClient,
 ) {
     let TestClient { client, join, .. } = missing_nodes_client.await;
-    let result = fetch_review_threads(&client, &repo, 1).await;
+    let result =
+        fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
+            .await;
     let err = result.expect_err("expected error");
     let VkError::BadResponseSerde {
         status,
@@ -238,9 +246,10 @@ async fn comment_path_validation_error(
     path_variant_client: TestClient,
 ) {
     let TestClient { client, join, .. } = path_variant_client.await;
-    let err = fetch_review_threads(&client, &repo, 1)
-        .await
-        .expect_err("expected error");
+    let err =
+        fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
+            .await
+            .expect_err("expected error");
     match err {
         VkError::EmptyCommentPath { thread_id, index } => {
             assert_eq!(thread_id.as_ref(), "t");
@@ -261,9 +270,10 @@ async fn null_comment_path_is_error(
     path_variant_client: TestClient,
 ) {
     let TestClient { client, join, .. } = path_variant_client.await;
-    let err = fetch_review_threads(&client, &repo, 1)
-        .await
-        .expect_err("expected error");
+    let err =
+        fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
+            .await
+            .expect_err("expected error");
     let VkError::BadResponseSerde {
         status,
         message,
@@ -313,23 +323,6 @@ fn filter_threads_by_files_retains_matches() {
     assert_eq!(path, Some("README.md"));
 }
 
-#[test]
-fn retains_only_unresolved_threads() {
-    let threads = vec![
-        ReviewThread {
-            is_resolved: true,
-            ..Default::default()
-        },
-        ReviewThread {
-            is_resolved: false,
-            ..Default::default()
-        },
-    ];
-    let filtered = filter_unresolved_threads(threads);
-    assert_eq!(filtered.len(), 1);
-    assert!(filtered.first().is_some_and(|t| !t.is_resolved));
-}
-
 #[rstest]
 #[tokio::test]
 async fn threads_with_many_comments_do_not_duplicate_first_page(
@@ -337,9 +330,10 @@ async fn threads_with_many_comments_do_not_duplicate_first_page(
     #[future] pagination_client: TestClient,
 ) {
     let TestClient { client, join, .. } = pagination_client.await;
-    let threads = fetch_review_threads(&client, &repo, 1)
-        .await
-        .expect("fetch threads");
+    let threads =
+        fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
+            .await
+            .expect("fetch threads");
     let thread = threads.first().expect("thread present");
     assert_eq!(thread.comments.nodes.len(), 101);
     let bodies: Vec<_> = thread
@@ -356,6 +350,80 @@ async fn threads_with_many_comments_do_not_duplicate_first_page(
     let _ = join.await;
 }
 
+#[rstest]
+#[case::mixed(
+    vec![
+        ReviewThread { is_outdated: true, ..Default::default() },
+        ReviewThread { is_outdated: false, ..Default::default() },
+    ],
+    1,
+)]
+#[case::empty(vec![], 0)]
+#[case::all_outdated(
+    vec![
+        ReviewThread { is_outdated: true, ..Default::default() },
+        ReviewThread { is_outdated: true, ..Default::default() },
+    ],
+    0,
+)]
+#[case::none_outdated(
+    vec![
+        ReviewThread { is_outdated: false, ..Default::default() },
+        ReviewThread { is_outdated: false, ..Default::default() },
+    ],
+    2,
+)]
+fn exclude_outdated_threads_filters(
+    #[case] threads: Vec<ReviewThread>,
+    #[case] expected_len: usize,
+) {
+    let filtered = super::exclude_outdated_threads(threads);
+    assert_eq!(filtered.len(), expected_len);
+    assert!(filtered.iter().all(|t| !t.is_outdated));
+}
+
+#[rstest]
+#[case::outdated(
+    |threads| super::filter_outdated_threads(threads),
+    |thread: &mut ReviewThread, value| thread.is_outdated = value,
+    |thread: &ReviewThread| thread.is_outdated,
+    "outdated",
+)]
+#[case::unresolved(
+    |threads| filter_unresolved_threads(threads),
+    |thread: &mut ReviewThread, value| thread.is_resolved = value,
+    |thread: &ReviewThread| thread.is_resolved,
+    "resolved",
+)]
+fn filter_functions_exclude_matching_threads<F, S, G>(
+    #[case] filter_fn: F,
+    #[case] set_field: S,
+    #[case] get_field: G,
+    #[case] field_name: &str,
+) where
+    F: Fn(Vec<ReviewThread>) -> Vec<ReviewThread>,
+    S: Fn(&mut ReviewThread, bool),
+    G: Fn(&ReviewThread) -> bool,
+{
+    let mut threads = vec![ReviewThread::default(), ReviewThread::default()];
+    let [first, second] = &mut threads[..] else {
+        unreachable!()
+    };
+    set_field(first, true);
+    set_field(second, false);
+
+    let filtered = filter_fn(threads);
+    assert_eq!(
+        filtered.len(),
+        1,
+        "should retain exactly one thread for {field_name}"
+    );
+    assert!(
+        !get_field(filtered.first().expect("thread present")),
+        "remaining thread should have {field_name} = false"
+    );
+}
+
 #[fixture]
 async fn retry_client() -> TestClient {
     let page1 = serde_json::json!({
@@ -363,6 +431,7 @@ async fn retry_client() -> TestClient {
             "nodes": [{
                 "id": "t1",
                 "isResolved": false,
+                "isOutdated": false,
                 "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
             }],
             "pageInfo": {"hasNextPage": true, "endCursor": "c1"},
@@ -375,6 +444,7 @@ async fn retry_client() -> TestClient {
             "nodes": [{
                 "id": "t2",
                 "isResolved": false,
+                "isOutdated": false,
                 "comments": {"nodes": [], "pageInfo": {"hasNextPage": false, "endCursor": null}}
             }],
             "pageInfo": {"hasNextPage": false, "endCursor": null},
@@ -388,9 +458,10 @@ async fn retry_client() -> TestClient {
 #[tokio::test]
 async fn retries_bad_page_and_preserves_order(repo: RepoInfo, #[future] retry_client: TestClient) {
     let TestClient { client, join, hits } = retry_client.await;
-    let threads = fetch_review_threads(&client, &repo, 1)
-        .await
-        .expect("fetch threads");
+    let threads =
+        fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
+            .await
+            .expect("fetch threads");
     let ids: Vec<_> = threads.iter().map(|t| t.id.as_str()).collect();
     assert_eq!(ids, ["t1", "t2"]);
     assert_eq!(hits.load(Ordering::SeqCst), 3);
@@ -404,15 +475,25 @@ async fn rejects_out_of_range_number(repo: RepoInfo) {
     let client = GraphQLClient::new("token", None).expect("client");
     let number = i32::MAX as u64 + 1;
     if cfg!(debug_assertions) {
-        let result = AssertUnwindSafe(fetch_review_threads(&client, &repo, number))
-            .catch_unwind()
-            .await;
+        let result = AssertUnwindSafe(fetch_review_threads_with_options(
+            &client,
+            &repo,
+            number,
+            FetchOptions::unresolved_current(),
+        ))
+        .catch_unwind()
+        .await;
         assert!(result.is_err());
         return;
     }
-    let err = fetch_review_threads(&client, &repo, number)
-        .await
-        .expect_err("error");
+    let err = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        number,
+        FetchOptions::unresolved_current(),
+    )
+    .await
+    .expect_err("error");
     assert!(matches!(err, VkError::InvalidNumber));
 }
 
@@ -428,9 +509,14 @@ async fn accepts_max_i32_number(repo: RepoInfo) {
     })
     .to_string();
     let TestClient { client, join, hits } = start_server(vec![body]);
-    let threads = fetch_review_threads(&client, &repo, i32::MAX as u64)
-        .await
-        .expect("should accept i32::MAX");
+    let threads = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        i32::MAX as u64,
+        FetchOptions::unresolved_current(),
+    )
+    .await
+    .expect("should accept i32::MAX");
     assert!(threads.is_empty());
     assert_eq!(
         hits.load(Ordering::SeqCst),
@@ -443,18 +529,20 @@ async fn accepts_max_i32_number(repo: RepoInfo) {
 
 #[rstest]
 #[tokio::test]
-async fn fetch_review_threads_with_resolution_can_include_resolved(repo: RepoInfo) {
+async fn fetch_review_threads_with_options_can_include_resolved(repo: RepoInfo) {
     let body = serde_json::json!({
         "data": {"repository": {"pullRequest": {"reviewThreads": {
             "nodes": [
                 {
                     "id": "t1",
                     "isResolved": true,
+                    "isOutdated": false,
                     "comments": {"nodes": [comment("c1")], "pageInfo": {"hasNextPage": false, "endCursor": null}}
                 },
                 {
                     "id": "t2",
                     "isResolved": false,
+                "isOutdated": false,
                     "comments": {"nodes": [comment("c2")], "pageInfo": {"hasNextPage": false, "endCursor": null}}
                 }
             ],
@@ -462,19 +550,106 @@ async fn fetch_review_threads_with_resolution_can_include_resolved(repo: RepoInf
         }}}}
     }).to_string();
     let TestClient { client, join, .. } = start_server(vec![body.clone()]);
-    let all = fetch_review_threads_with_resolution(&client, &repo, 1, true)
-        .await
-        .expect("fetch threads");
+    let all = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        1,
+        FetchOptions {
+            include_resolved: true,
+            include_outdated: true,
+        },
+    )
+    .await
+    .expect("fetch threads");
     assert_eq!(all.len(), 2);
     join.abort();
     let _ = join.await;
 
     let TestClient { client, join, .. } = start_server(vec![body]);
-    let unresolved_only = fetch_review_threads_with_resolution(&client, &repo, 1, false)
-        .await
-        .expect("fetch threads");
+    let unresolved_only = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        1,
+        FetchOptions {
+            include_resolved: false,
+            include_outdated: true,
+        },
+    )
+    .await
+    .expect("fetch threads");
     assert_eq!(unresolved_only.len(), 1);
     assert!(unresolved_only.first().is_some_and(|t| !t.is_resolved));
+    join.abort();
+    let _ = join.await;
+}
+
+#[rstest]
+#[case::skip(false, vec!["t2"], 2)]
+#[case::include(true, vec!["t1", "t2"], 3)]
+#[tokio::test]
+async fn fetch_review_threads_with_options_filters_outdated(
+    repo: RepoInfo,
+    #[case] include_outdated: bool,
+    #[case] expected_ids: Vec<&'static str>,
+    #[case] expected_hits: usize,
+) {
+    let threads_body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [
+                {
+                    "id": "t1",
+                    "isResolved": false,
+                    "isOutdated": true,
+                    "comments": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "c1"}}
+                },
+                {
+                    "id": "t2",
+                    "isResolved": false,
+                    "isOutdated": false,
+                    "comments": {"nodes": [], "pageInfo": {"hasNextPage": true, "endCursor": "c2"}}
+                }
+            ],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    let comment_body_c1 = serde_json::json!({
+        "data": {"node": {"comments": {
+            "nodes": [comment("c1")],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}
+    })
+    .to_string();
+    let comment_body_c2 = serde_json::json!({
+        "data": {"node": {"comments": {
+            "nodes": [comment("c2")],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}
+    })
+    .to_string();
+    let bodies = if include_outdated {
+        vec![threads_body, comment_body_c1, comment_body_c2]
+    } else {
+        vec![threads_body, comment_body_c2]
+    };
+    let TestClient { client, join, hits } = start_server(bodies);
+    let threads = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        1,
+        FetchOptions {
+            include_resolved: false,
+            include_outdated,
+        },
+    )
+    .await
+    .expect("fetch threads");
+    assert_eq!(threads.len(), expected_ids.len());
+    let ids: Vec<_> = threads.iter().map(|t| t.id.as_ref()).collect();
+    for expected in expected_ids {
+        assert!(ids.contains(&expected));
+    }
+    assert_eq!(hits.load(Ordering::SeqCst), expected_hits);
     join.abort();
     let _ = join.await;
 }

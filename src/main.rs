@@ -40,9 +40,11 @@ pub use crate::api::{GraphQLClient, paginate};
 pub use issues::{Issue, fetch_issue};
 use review_threads::thread_for_comment;
 pub use review_threads::{
-    CommentConnection, PageInfo, ReviewComment, ReviewThread, User, fetch_review_threads,
-    fetch_review_threads_with_resolution, filter_threads_by_files,
+    CommentConnection, FetchOptions, PageInfo, ReviewComment, ReviewThread, User,
+    exclude_outdated_threads, fetch_review_threads_with_options, filter_outdated_threads,
+    filter_threads_by_files,
 };
+
 use summary::{
     print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
 };
@@ -328,20 +330,29 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
         return Ok(());
     };
 
-    let threads = {
-        // When a discussion fragment is given, fetch ALL threads (resolved + unresolved)
-        // and filter to the specific thread. Otherwise, fetch only unresolved threads
-        // and apply file filters.
-        let include_resolved = comment.is_some();
-        let all =
-            fetch_review_threads_with_resolution(&client, &repo, number, include_resolved).await?;
-
+    // When a discussion fragment is given, fetch ALL threads (resolved + unresolved)
+    // and filter to the specific thread. Otherwise, fetch only unresolved threads
+    // and apply file filters.
+    let include_resolved = comment.is_some();
+    let threads = fetch_review_threads_with_options(
+        &client,
+        &repo,
+        number,
+        FetchOptions {
+            include_resolved,
+            include_outdated: args.show_outdated,
+        },
+    )
+    .await
+    .map(|threads| {
         if let Some(comment_id) = comment {
-            thread_for_comment(all, comment_id).into_iter().collect()
+            thread_for_comment(threads, comment_id)
+                .into_iter()
+                .collect()
         } else {
-            filter_threads_by_files(all, &args.files)
+            filter_threads_by_files(threads, &args.files)
         }
-    };
+    })?;
 
     if threads.is_empty() {
         handle_empty_threads(&args.files, comment)?;
