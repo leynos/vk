@@ -24,8 +24,8 @@ even when multiple comments reference the same code.
   searched. If the discussion lacks comments, the tool prints an explicit
   message.
 - **Permalink format**: GitHub review comment links always end with a
-  `#discussion_r<ID>` fragment as documented in
-  [GitHub's guide to linking to pull request comments](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/reviewing-changes-in-pull-requests/commenting-on-a-pull-request#linking-to-a-pull-request-comment).
+  `#discussion_r<ID>` fragment as documented in GitHub's guide to linking to
+  pull request comments.[^github-link]
 - **Concise output**: Each thread shows the diff once followed by all comments,
   reducing clutter when multiple remarks target the same line.
 - **Error visibility**: Failures encountered while printing a thread are logged
@@ -39,19 +39,24 @@ even when multiple comments reference the same code.
 - **Resolve threads**: `vk resolve <comment-ref>` resolves the thread via the
   `resolveReviewThread` GraphQL mutation. When compiled with the
   `unstable-rest-resolve` feature and a reply message is supplied (`-m`), it
-  posts a reply via the REST API before resolving. The resolver pages through
-  the pull request's `reviewComments` connection using typed `serde` structures
-  (see `src/resolve/graphql.rs`), matching the requested `databaseId` and
-  extracting the owning thread identifier. Pagination detects repeated or
-  non-advancing cursors and aborts with an error rather than looping
-  indefinitely. This subcommand requires `GITHUB_TOKEN` with sufficient scopes
-  (resolving threads and posting replies require `repo`); if absent, it aborts
-  rather than performing anonymous calls. Resolution steps emit debug spans via
-  `tracing` to aid diagnostics; the binary initialises
-  `tracing_subscriber::fmt()` with an environment filter, so running with
-  `RUST_LOG=vk=debug` (or a more specific filter) surfaces the spans on stderr.
+  posts a reply via the REST API before resolving. If the REST reply fails the
+  command aborts without calling `resolveReviewThread`; missing comments return
+  a warning and continue. The resolver pages through the pull request's
+  `reviewComments` connection using typed `serde` structures (see
+  `src/resolve/graphql.rs`), matching the requested `databaseId` and extracting
+  the owning thread identifier. Pagination detects repeated or non-advancing
+  cursors and aborts with an error rather than looping indefinitely. This
+  subcommand requires `GITHUB_TOKEN` with sufficient scopes (resolving threads
+  and posting replies require `repo`); if absent, it aborts rather than
+  performing anonymous calls. Resolution steps emit debug spans via `tracing`
+  to aid diagnostics; the binary initialises `tracing_subscriber::fmt()` with
+  an environment filter, so running with `RUST_LOG=vk=debug` (or a more
+  specific filter) surfaces the spans on stderr.
 - **Configurable timeouts**: `--http-timeout` and `--connect-timeout`
   override the default 10 s request and 5 s connection limits for REST replies.
+
+[^github-link]: GitHub Docs. "Linking to a pull request comment."
+    <https://docs.github.com/en/articles/linking-to-a-pull-request-comment>
 
 ## Architecture
 
