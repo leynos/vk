@@ -54,7 +54,6 @@ use crate::printer::{print_reviews, write_thread};
 use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_thread_reference};
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
-use log::{error, warn};
 use ortho_config::{OrthoConfig, subcommand::load_and_merge_subcommand_for};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -65,6 +64,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use termimad::MadSkin;
 use thiserror::Error;
+use tracing::{error, warn};
 
 struct PrContext {
     repo: RepoInfo,
@@ -122,7 +122,7 @@ pub enum VkError {
     RequestContext {
         context: Box<str>,
         #[source]
-        source: Box<reqwest::Error>,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
     #[error("invalid reference")]
     InvalidRef,
@@ -426,7 +426,10 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
 
 #[tokio::main]
 async fn main() -> Result<(), VkError> {
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .init();
     let cli = Cli::parse();
     let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
     global.merge(cli.global);

@@ -6,13 +6,13 @@
 //! a cursor-based connection.
 
 use backon::{ExponentialBuilder, Retryable};
-use log::warn;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 use std::{borrow::Cow, env};
 use tokio::time::{Duration, sleep};
+use tracing::warn;
 
 use crate::VkError;
 use crate::boxed::BoxedStr;
@@ -424,10 +424,16 @@ impl GraphQLClient {
                         }))
                         .expect("serializing GraphQL transcript"),
                     ) {
-                        warn!("failed to write transcript: {e}");
+                        warn!("failed to write transcript for op={operation}: {e}");
+                        return;
+                    }
+                    if let Err(e) = f.flush() {
+                        warn!("failed to flush transcript for op={operation}: {e}");
                     }
                 }
-                Err(_) => warn!("failed to lock transcript"),
+                Err(e) => {
+                    warn!("failed to lock transcript for op={operation}: {e}");
+                }
             }
         }
     }

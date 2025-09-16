@@ -345,28 +345,44 @@ mod tests {
         use std::io;
         use std::os::unix::io::AsRawFd;
 
-        // Redirect stdout to a closed pipe so writes fail with BrokenPipe.
-        // SAFETY: All libc calls are provided valid FDs; this test runs under
-        // `#[serial]` to avoid concurrent mutation of process stdout; the
-        // original stdout FD is restored before exiting the unsafe block.
+        // Fork to isolate stdout mutations from the parent test harness.
+        // The child exits with 0 when BrokenPipe is observed, or a non-zero
+        // code otherwise.
         unsafe {
-            let mut fds = [0; 2];
-            assert_eq!(libc::pipe(fds.as_mut_ptr()), 0, "pipe");
-            let read_end = fds[0];
-            let write_end = fds[1];
-            libc::close(read_end);
+            let pid = libc::fork();
+            assert_ne!(pid, -1, "fork");
+            if pid == 0 {
+                let mut fds = [0; 2];
+                assert_eq!(libc::pipe(fds.as_mut_ptr()), 0, "pipe");
+                let read_end = fds[0];
+                let write_end = fds[1];
+                libc::close(read_end);
 
-            let stdout_fd = std::io::stdout().as_raw_fd();
-            let dup_fd = libc::dup(stdout_fd);
+                let stdout_fd = std::io::stdout().as_raw_fd();
+                let dup_fd = libc::dup(stdout_fd);
 
-            libc::dup2(write_end, stdout_fd);
-            libc::close(write_end);
+                libc::dup2(write_end, stdout_fd);
+                libc::close(write_end);
 
-            let err = print_comments_banner().expect_err("expect error");
-            assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+                let code = match print_comments_banner() {
+                    Ok(()) => 1,
+                    Err(err) if err.kind() == io::ErrorKind::BrokenPipe => 0,
+                    Err(_) => 2,
+                };
 
-            libc::dup2(dup_fd, stdout_fd);
-            libc::close(dup_fd);
+                libc::dup2(dup_fd, stdout_fd);
+                libc::close(dup_fd);
+                libc::_exit(code);
+            } else {
+                let mut status = 0;
+                assert_eq!(
+                    libc::waitpid(pid, std::ptr::addr_of_mut!(status), 0),
+                    pid,
+                    "waitpid"
+                );
+                assert!(libc::WIFEXITED(status), "child exit");
+                assert_eq!(libc::WEXITSTATUS(status), 0, "child status");
+            }
         }
     }
 
