@@ -8,8 +8,8 @@ license = "ISC"
 clap = { version = "4.5.47", features = ["derive"] }
 reqwest = { version = "0.12.23", features = ["json", "rustls-tls"] }
 serde = { version = "1.0.225", features = ["derive"] }
-serde_json = "1.0.113"
-serde_path_to_error = "0.1.17"
+serde_json = "1.0.145"
+serde_path_to_error = "0.1.20"
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "macros"] }
 termimad = "0.34.0"
 thiserror = "2.0.16"
@@ -42,9 +42,9 @@ third-wheel = "0.6"
 tokio = { version = "1.36.0", features = ["full"] }
 serde_json = "1.0"
 predicates = "3.1"
-mockall = "0.12.1"
+mockall = "0.13.1"
 hyper = "1.6.0"
-hyper-util = { version = "0.1.16", features = ["server", "http1", "tokio"] }
+hyper-util = { version = "0.1.17", features = ["server", "http1", "tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 futures = "0.3"
