@@ -9,7 +9,7 @@ clap = { version = "4.5.47", features = ["derive"] }
 reqwest = { version = "0.12.23", features = ["json", "rustls-tls"] }
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.145"
-serde_path_to_error = "0.1.17"
+serde_path_to_error = "0.1.20"
 tokio = { version = "1.36.0", features = ["rt-multi-thread", "macros"] }
 termimad = "0.34.0"
 thiserror = "2.0.16"
