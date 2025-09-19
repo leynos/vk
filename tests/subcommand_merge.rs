@@ -10,6 +10,7 @@ use ortho_config::SubcmdConfigMerge;
 use rstest::rstest;
 use serial_test::serial;
 use tempfile::TempDir;
+use vk::cli_args::ResolveArgs;
 use vk::test_utils::{remove_var, set_var};
 use vk::{IssueArgs, PrArgs};
 
@@ -84,10 +85,18 @@ fn issue_cli(reference: Option<&str>) -> IssueArgs {
     args
 }
 
+fn resolve_cli(reference: &str, message: Option<&str>) -> ResolveArgs {
+    ResolveArgs {
+        reference: reference.to_owned(),
+        message: message.map(str::to_owned),
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 enum SubcommandType {
     Pr,
     Issue,
+    Resolve,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -104,6 +113,9 @@ enum PrecedenceScenario {
 #[case(SubcommandType::Issue, PrecedenceScenario::CliOverEnv)]
 #[case(SubcommandType::Issue, PrecedenceScenario::EnvOverFile)]
 #[case(SubcommandType::Issue, PrecedenceScenario::FileOverDefaults)]
+#[case(SubcommandType::Resolve, PrecedenceScenario::CliOverEnv)]
+#[case(SubcommandType::Resolve, PrecedenceScenario::EnvOverFile)]
+#[case(SubcommandType::Resolve, PrecedenceScenario::FileOverDefaults)]
 #[serial]
 fn test_configuration_precedence(
     #[case] subcommand: SubcommandType,
@@ -166,6 +178,45 @@ reference = "file_ref"
             let cli = issue_cli(None);
             let merged = merge_with_sources(cfg, &[("VKCMDS_ISSUE_REFERENCE", None)], &cli);
             assert_eq!(merged.reference.as_deref(), Some("file_ref"));
+        }
+        (SubcommandType::Resolve, PrecedenceScenario::CliOverEnv) => {
+            let cfg = r#"[cmds.resolve]
+reference = "file_ref"
+message = "file message"
+"#;
+            let cli = resolve_cli("cli_ref", Some("cli message"));
+            let merged = merge_with_sources(
+                cfg,
+                &[
+                    ("VKCMDS_RESOLVE_REFERENCE", Some("env_ref")),
+                    ("VKCMDS_RESOLVE_MESSAGE", Some("env message")),
+                ],
+                &cli,
+            );
+            assert_eq!(merged.reference, "cli_ref");
+            assert_eq!(merged.message.as_deref(), Some("cli message"));
+        }
+        (SubcommandType::Resolve, PrecedenceScenario::EnvOverFile) => {
+            let cfg = r#"[cmds.resolve]
+message = "file message"
+"#;
+            let cli = resolve_cli("cli_ref", None);
+            let merged = merge_with_sources(
+                cfg,
+                &[("VKCMDS_RESOLVE_MESSAGE", Some("env message"))],
+                &cli,
+            );
+            assert_eq!(merged.reference, "cli_ref");
+            assert_eq!(merged.message.as_deref(), Some("env message"));
+        }
+        (SubcommandType::Resolve, PrecedenceScenario::FileOverDefaults) => {
+            let cfg = r#"[cmds.resolve]
+message = "file message"
+"#;
+            let cli = resolve_cli("cli_ref", None);
+            let merged = merge_with_sources(cfg, &[("VKCMDS_RESOLVE_MESSAGE", None)], &cli);
+            assert_eq!(merged.reference, "cli_ref");
+            assert_eq!(merged.message.as_deref(), Some("file message"));
         }
     }
 }

@@ -279,4 +279,192 @@ show_outdated = false
         assert_eq!(merged.files, vec![String::from("cli.txt")]);
         assert!(merged.show_outdated);
     }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_prefers_cli_issue_reference() {
+        let _guard = EnvGuard::new(&["VK_CONFIG_PATH", "VKCMDS_ISSUE_REFERENCE"]);
+
+        let cfg = r#"[cmds.issue]
+reference = "file_ref"
+"#;
+        let (_config_dir, config_path) = write_config(cfg);
+        set_var("VK_CONFIG_PATH", config_path.as_os_str());
+        set_var("VKCMDS_ISSUE_REFERENCE", "env_ref");
+
+        let cli = IssueArgs {
+            reference: Some(String::from("cli_ref")),
+        };
+
+        let merged = cli.load_and_merge().expect("merge issue args");
+
+        assert_eq!(merged.reference.as_deref(), Some("cli_ref"));
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_uses_issue_environment_reference() {
+        let _guard = EnvGuard::new(&["VK_CONFIG_PATH", "VKCMDS_ISSUE_REFERENCE"]);
+
+        let cfg = r#"[cmds.issue]
+reference = "file_ref"
+"#;
+        let (_config_dir, config_path) = write_config(cfg);
+        set_var("VK_CONFIG_PATH", config_path.as_os_str());
+        set_var("VKCMDS_ISSUE_REFERENCE", "env_ref");
+
+        let cli = IssueArgs::default();
+        let merged = cli.load_and_merge().expect("merge issue args");
+
+        assert_eq!(merged.reference.as_deref(), Some("env_ref"));
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_uses_issue_config_reference() {
+        let _guard = EnvGuard::new(&["VK_CONFIG_PATH", "VKCMDS_ISSUE_REFERENCE"]);
+
+        let cfg = r#"[cmds.issue]
+reference = "file_ref"
+"#;
+        let (_config_dir, config_path) = write_config(cfg);
+        set_var("VK_CONFIG_PATH", config_path.as_os_str());
+
+        let cli = IssueArgs::default();
+        // Change into the config directory so the default `.vk.toml` is discovered.
+        let prev_dir = std::env::current_dir().expect("current dir");
+        let config_dir = config_path.parent().expect("config dir");
+        std::env::set_current_dir(config_dir).expect("set dir");
+        let merged = cli.load_and_merge().expect("merge issue args");
+        std::env::set_current_dir(prev_dir).expect("restore dir");
+
+        assert_eq!(merged.reference.as_deref(), Some("file_ref"));
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_preserves_issue_cli_instance() {
+        let _guard = EnvGuard::new(&["VK_CONFIG_PATH", "VKCMDS_ISSUE_REFERENCE"]);
+
+        let cli = IssueArgs {
+            reference: Some(String::from("cli_ref")),
+        };
+        let snapshot = cli.clone();
+
+        let merged = cli.load_and_merge().expect("merge issue args");
+
+        assert_eq!(cli.reference, snapshot.reference);
+        assert_eq!(merged.reference.as_deref(), Some("cli_ref"));
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_prefers_cli_resolve_values() {
+        let _guard = EnvGuard::new(&[
+            "VK_CONFIG_PATH",
+            "VKCMDS_RESOLVE_REFERENCE",
+            "VKCMDS_RESOLVE_MESSAGE",
+        ]);
+
+        let cfg = r#"[cmds.resolve]
+reference = "file_ref"
+message = "file message"
+"#;
+        let (_config_dir, config_path) = write_config(cfg);
+        set_var("VK_CONFIG_PATH", config_path.as_os_str());
+        set_var("VKCMDS_RESOLVE_REFERENCE", "env_ref");
+        set_var("VKCMDS_RESOLVE_MESSAGE", "env message");
+
+        let cli = ResolveArgs {
+            reference: String::from("cli_ref"),
+            message: Some(String::from("cli message")),
+        };
+
+        let merged = cli.load_and_merge().expect("merge resolve args");
+
+        assert_eq!(merged.reference, "cli_ref");
+        assert_eq!(merged.message.as_deref(), Some("cli message"));
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_uses_resolve_environment_message() {
+        let _guard = EnvGuard::new(&[
+            "VK_CONFIG_PATH",
+            "VKCMDS_RESOLVE_REFERENCE",
+            "VKCMDS_RESOLVE_MESSAGE",
+        ]);
+
+        let cfg = r#"[cmds.resolve]
+message = "file message"
+"#;
+        let (_config_dir, config_path) = write_config(cfg);
+        set_var("VK_CONFIG_PATH", config_path.as_os_str());
+        set_var("VKCMDS_RESOLVE_MESSAGE", "env message");
+        set_var("VKCMDS_RESOLVE_REFERENCE", "env_ref");
+
+        let cli = ResolveArgs {
+            reference: String::from("cli_ref"),
+            message: None,
+        };
+
+        let merged = cli.load_and_merge().expect("merge resolve args");
+
+        assert_eq!(merged.reference, "cli_ref");
+        assert_eq!(merged.message.as_deref(), Some("env message"));
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_uses_resolve_config_message() {
+        let _guard = EnvGuard::new(&[
+            "VK_CONFIG_PATH",
+            "VKCMDS_RESOLVE_REFERENCE",
+            "VKCMDS_RESOLVE_MESSAGE",
+        ]);
+
+        let cfg = r#"[cmds.resolve]
+message = "file message"
+"#;
+        let (_config_dir, config_path) = write_config(cfg);
+        set_var("VK_CONFIG_PATH", config_path.as_os_str());
+
+        let cli = ResolveArgs {
+            reference: String::from("cli_ref"),
+            message: None,
+        };
+
+        // Change into the config directory so the default `.vk.toml` is discovered.
+        let prev_dir = std::env::current_dir().expect("current dir");
+        let config_dir = config_path.parent().expect("config dir");
+        std::env::set_current_dir(config_dir).expect("set dir");
+        let merged = cli.load_and_merge().expect("merge resolve args");
+        std::env::set_current_dir(prev_dir).expect("restore dir");
+
+        assert_eq!(merged.reference, "cli_ref");
+        assert_eq!(merged.message.as_deref(), Some("file message"));
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_preserves_resolve_cli_instance() {
+        let _guard = EnvGuard::new(&[
+            "VK_CONFIG_PATH",
+            "VKCMDS_RESOLVE_REFERENCE",
+            "VKCMDS_RESOLVE_MESSAGE",
+        ]);
+
+        let cli = ResolveArgs {
+            reference: String::from("cli_ref"),
+            message: Some(String::from("cli message")),
+        };
+        let snapshot = cli.clone();
+
+        let merged = cli.load_and_merge().expect("merge resolve args");
+
+        assert_eq!(cli.reference, snapshot.reference);
+        assert_eq!(cli.message, snapshot.message);
+        assert_eq!(merged.reference, "cli_ref");
+        assert_eq!(merged.message.as_deref(), Some("cli message"));
+    }
 }
