@@ -52,7 +52,8 @@ where
         }
     }
 
-    let merged = cli.load_and_merge()
+    let merged = cli
+        .load_and_merge()
         .unwrap_or_else(|err| panic!("merge {} args: {err}", std::any::type_name::<T>()));
 
     for (key, _) in env {
@@ -167,4 +168,51 @@ reference = "file_ref"
             assert_eq!(merged.reference.as_deref(), Some("file_ref"));
         }
     }
+}
+
+#[test]
+#[serial]
+fn pr_load_and_merge_uses_environment_reference() {
+    let cfg = r#"[cmds.pr]
+reference = "file_ref"
+files = ["config.txt"]
+show_outdated = false
+"#;
+    let cli = pr_cli(None, &[]);
+    let merged = merge_with_sources(
+        cfg,
+        &[
+            ("VKCMDS_PR_REFERENCE", Some("env_ref")),
+            ("VKCMDS_PR_FILES", Some("env.rs,extra.rs")),
+            ("VKCMDS_PR_SHOW_OUTDATED", Some("1")),
+        ],
+        &cli,
+    );
+    assert_eq!(merged.reference.as_deref(), Some("env_ref"));
+    assert!(merged.files.is_empty());
+    assert!(!merged.show_outdated);
+}
+
+#[test]
+#[serial]
+fn pr_load_and_merge_cli_values_override_env() {
+    let cfg = r#"[cmds.pr]
+reference = "file_ref"
+files = ["config.txt"]
+show_outdated = false
+"#;
+    let mut cli = pr_cli(Some("cli_ref"), &["cli.txt"]);
+    cli.show_outdated = true;
+    let merged = merge_with_sources(
+        cfg,
+        &[
+            ("VKCMDS_PR_REFERENCE", Some("env_ref")),
+            ("VKCMDS_PR_FILES", Some("env.txt")),
+            ("VKCMDS_PR_SHOW_OUTDATED", Some("false")),
+        ],
+        &cli,
+    );
+    assert_eq!(merged.reference.as_deref(), Some("cli_ref"));
+    assert_eq!(merged.files, vec![String::from("cli.txt")]);
+    assert!(merged.show_outdated);
 }

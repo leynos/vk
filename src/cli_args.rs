@@ -123,3 +123,160 @@ impl Default for ResolveArgs {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::{remove_var, set_var};
+    use ortho_config::SubcmdConfigMerge;
+    use serial_test::serial;
+    use std::fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    struct EnvGuard {
+        keys: Vec<&'static str>,
+    }
+
+    impl EnvGuard {
+        fn new(keys: &[&'static str]) -> Self {
+            for key in keys {
+                remove_var(key);
+            }
+            Self {
+                keys: keys.to_vec(),
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for key in &self.keys {
+                remove_var(key);
+            }
+        }
+    }
+
+    fn write_config(content: &str) -> (TempDir, PathBuf) {
+        let dir = TempDir::new().expect("create config dir");
+        let path = dir.path().join(".vk.toml");
+        fs::write(&path, content).expect("write config");
+        (dir, path)
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_prefers_cli_over_other_sources() {
+        let _guard = EnvGuard::new(&[
+            "VK_CONFIG_PATH",
+            "VKCMDS_PR_REFERENCE",
+            "VKCMDS_PR_FILES",
+            "VKCMDS_PR_SHOW_OUTDATED",
+        ]);
+
+        let cfg = r#"[cmds.pr]
+reference = "file_ref"
+files = ["config.txt"]
+show_outdated = false
+"#;
+        let (_config_dir, config_path) = write_config(cfg);
+        set_var("VK_CONFIG_PATH", config_path.as_os_str());
+        set_var("VKCMDS_PR_REFERENCE", "env_ref");
+        set_var("VKCMDS_PR_FILES", "env.txt");
+        set_var("VKCMDS_PR_SHOW_OUTDATED", "false");
+
+        let cli = PrArgs {
+            reference: Some(String::from("cli_ref")),
+            files: vec![String::from("cli.txt")],
+            show_outdated: true,
+        };
+
+        let merged = cli.load_and_merge().expect("merge pr args");
+
+        assert_eq!(merged.reference.as_deref(), Some("cli_ref"));
+        assert_eq!(merged.files, vec![String::from("cli.txt")]);
+        assert!(merged.show_outdated);
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_uses_environment_reference() {
+        let _guard = EnvGuard::new(&[
+            "VK_CONFIG_PATH",
+            "VKCMDS_PR_REFERENCE",
+            "VKCMDS_PR_FILES",
+            "VKCMDS_PR_SHOW_OUTDATED",
+        ]);
+
+        let cfg = r#"[cmds.pr]
+reference = "file_ref"
+files = ["config.txt"]
+show_outdated = false
+"#;
+        let (_config_dir, config_path) = write_config(cfg);
+        set_var("VK_CONFIG_PATH", config_path.as_os_str());
+        set_var("VKCMDS_PR_REFERENCE", "env_ref");
+        set_var("VKCMDS_PR_FILES", "env_one.rs,env_two.rs");
+        set_var("VKCMDS_PR_SHOW_OUTDATED", "1");
+
+        let cli = PrArgs::default();
+        let merged = cli.load_and_merge().expect("merge pr args");
+
+        // Only the optional reference can be filled from the environment. Clap
+        // initialises vectors and booleans eagerly, so their defaults read as
+        // explicit CLI choices and we leave them untouched by config or
+        // environment overrides.
+
+        assert_eq!(merged.reference.as_deref(), Some("env_ref"));
+        assert!(merged.files.is_empty());
+        assert!(!merged.show_outdated);
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_retains_none_without_sources() {
+        let _guard = EnvGuard::new(&[
+            "VK_CONFIG_PATH",
+            "VKCMDS_PR_REFERENCE",
+            "VKCMDS_PR_FILES",
+            "VKCMDS_PR_SHOW_OUTDATED",
+        ]);
+
+        let cfg = "";
+        let (_config_dir, config_path) = write_config(cfg);
+        set_var("VK_CONFIG_PATH", config_path.as_os_str());
+
+        let cli = PrArgs::default();
+        let merged = cli.load_and_merge().expect("merge pr args");
+
+        assert!(merged.reference.is_none());
+        assert!(!merged.show_outdated);
+    }
+
+    #[test]
+    #[serial]
+    fn load_and_merge_preserves_cli_instance() {
+        let _guard = EnvGuard::new(&[
+            "VK_CONFIG_PATH",
+            "VKCMDS_PR_REFERENCE",
+            "VKCMDS_PR_FILES",
+            "VKCMDS_PR_SHOW_OUTDATED",
+        ]);
+
+        let cli = PrArgs {
+            reference: Some(String::from("cli_ref")),
+            files: vec![String::from("cli.txt")],
+            show_outdated: true,
+        };
+        let snapshot = cli.clone();
+
+        let merged = cli.load_and_merge().expect("merge pr args");
+
+        assert_eq!(cli.reference, snapshot.reference);
+        assert_eq!(cli.files, snapshot.files);
+        assert_eq!(cli.show_outdated, snapshot.show_outdated);
+        assert_eq!(merged.reference.as_deref(), Some("cli_ref"));
+        assert_eq!(merged.files, vec![String::from("cli.txt")]);
+        assert!(merged.show_outdated);
+    }
+}
