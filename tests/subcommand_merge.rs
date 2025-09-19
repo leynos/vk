@@ -170,49 +170,67 @@ reference = "file_ref"
     }
 }
 
-#[test]
-#[serial]
-fn pr_load_and_merge_uses_environment_reference() {
-    let cfg = r#"[cmds.pr]
-reference = "file_ref"
-files = ["config.txt"]
-show_outdated = false
-"#;
-    let cli = pr_cli(None, &[]);
-    let merged = merge_with_sources(
-        cfg,
-        &[
-            ("VKCMDS_PR_REFERENCE", Some("env_ref")),
-            ("VKCMDS_PR_FILES", Some("env.rs,extra.rs")),
-            ("VKCMDS_PR_SHOW_OUTDATED", Some("1")),
-        ],
-        &cli,
-    );
-    assert_eq!(merged.reference.as_deref(), Some("env_ref"));
-    assert!(merged.files.is_empty());
-    assert!(!merged.show_outdated);
+#[derive(Debug)]
+struct PrMergeTestCase {
+    cli: PrArgs,
+    env: &'static [(&'static str, Option<&'static str>)],
+    expected_reference: Option<&'static str>,
+    expected_files: &'static [&'static str],
+    expected_show_outdated: bool,
 }
 
-#[test]
-#[serial]
-fn pr_load_and_merge_cli_values_override_env() {
-    let cfg = r#"[cmds.pr]
-reference = "file_ref"
-files = ["config.txt"]
-show_outdated = false
-"#;
+#[rstest]
+#[case::uses_environment_reference(PrMergeTestCase {
+    cli: pr_cli(None, &[]),
+    env: &[
+        ("VKCMDS_PR_REFERENCE", Some("env_ref")),
+        ("VKCMDS_PR_FILES", Some("env.rs,extra.rs")),
+        ("VKCMDS_PR_SHOW_OUTDATED", Some("1")),
+    ],
+    expected_reference: Some("env_ref"),
+    expected_files: &[],
+    expected_show_outdated: false,
+})]
+#[case::cli_values_override_environment({
     let mut cli = pr_cli(Some("cli_ref"), &["cli.txt"]);
     cli.show_outdated = true;
-    let merged = merge_with_sources(
-        cfg,
-        &[
+    PrMergeTestCase {
+        cli,
+        env: &[
             ("VKCMDS_PR_REFERENCE", Some("env_ref")),
             ("VKCMDS_PR_FILES", Some("env.txt")),
             ("VKCMDS_PR_SHOW_OUTDATED", Some("false")),
         ],
-        &cli,
+        expected_reference: Some("cli_ref"),
+        expected_files: &["cli.txt"],
+        expected_show_outdated: true,
+    }
+})]
+#[serial]
+fn test_pr_load_and_merge_precedence(#[case] case: PrMergeTestCase) {
+    let config = r#"[cmds.pr]
+reference = "file_ref"
+files = ["config.txt"]
+show_outdated = false
+"#;
+
+    let PrMergeTestCase {
+        cli,
+        env,
+        expected_reference,
+        expected_files,
+        expected_show_outdated,
+    } = case;
+
+    let merged = merge_with_sources(config, env, &cli);
+
+    assert_eq!(merged.reference.as_deref(), expected_reference);
+    assert_eq!(
+        merged.files,
+        expected_files
+            .iter()
+            .map(|value| String::from(*value))
+            .collect::<Vec<_>>()
     );
-    assert_eq!(merged.reference.as_deref(), Some("cli_ref"));
-    assert_eq!(merged.files, vec![String::from("cli.txt")]);
-    assert!(merged.show_outdated);
+    assert_eq!(merged.show_outdated, expected_show_outdated);
 }
