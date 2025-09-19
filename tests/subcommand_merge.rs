@@ -6,7 +6,7 @@
 use std::{env, fs, path::PathBuf};
 
 use clap::CommandFactory;
-use ortho_config::subcommand::load_and_merge_subcommand_for;
+use ortho_config::SubcmdConfigMerge;
 use rstest::rstest;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -52,7 +52,7 @@ where
         }
     }
 
-    let merged = load_and_merge_subcommand_for(cli)
+    let merged = cli.load_and_merge()
         .unwrap_or_else(|err| panic!("merge {} args: {err}", std::any::type_name::<T>()));
 
     for (key, _) in env {
