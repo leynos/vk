@@ -1,12 +1,12 @@
-# OrthoConfig User's Guide
+# OrthoConfig user's guide
 
-The `ortho_config` crate provides the `OrthoConfig` derive macro to unify
-command-line arguments, environment variables and configuration files into a
-single, strongly typed configuration struct. It is inspired by tools such as
-`esbuild` and is designed to minimize boilerplate. The library uses `serde` for
-deserialization and `clap` for argument parsing, while layered logic merges
-configuration sources. This guide covers the functionality currently
-implemented in the repository.
+`OrthoConfig` is a Rust library that unifies command‑line arguments,
+environment variables and configuration files into a single, strongly typed
+configuration struct. It is inspired by tools such as `esbuild` and is designed
+to minimize boiler‑plate. The library uses `serde` for deserialization and
+`clap` for argument parsing, while `figment` provides layered configuration
+management. This guide covers the functionality currently implemented in the
+repository.
 
 ## Core concepts and motivation
 
@@ -36,8 +36,8 @@ values from multiple sources. The core features are:
   configuration struct and call a generated method to load the configuration.
 
 - **Customizable behaviour** – Attributes such as `default`, `cli_long`,
-  `cli_short` and `merge_strategy` provide fine‑grained control over naming and
-  merging behaviour.
+  `cli_short`, and `merge_strategy` provide fine‑grained control over naming
+  and merging behaviour.
 
 ## Installation and dependencies
 
@@ -45,9 +45,9 @@ Add `ortho_config` as a dependency in `Cargo.toml` along with `serde`:
 
 ```toml
 [dependencies]
-ortho_config = "0.5.0-beta1"     # replace with the latest compatible version
+ortho_config = "0.5.0-beta2"            # replace with the latest version
 serde = { version = "1.0", features = ["derive"] }
-clap = { version = "4.5", features = ["derive"] }       # required for CLI support
+clap = { version = "4", features = ["derive"] }    # required for CLI support
 ```
 
 By default, only TOML configuration files are supported. To enable JSON5
@@ -56,7 +56,7 @@ corresponding cargo features:
 
 ```toml
 [dependencies]
-ortho_config = { version = "0.5.0-beta1", features = ["json5", "yaml"] }
+ortho_config = { version = "0.5.0-beta2", features = ["json5", "yaml"] }
 # Enabling these features expands file formats; precedence stays: defaults < file < env < CLI.
 ```
 
@@ -66,23 +66,35 @@ during discovery and do not cause errors if present. The `yaml` feature
 similarly enables `.yaml` and `.yml` files; without it, such files are skipped
 during discovery and do not cause errors if present.
 
+`ortho_config` re-exports its parsing dependencies, so consumers do not need to
+declare them directly. Access `figment`, `uncased`, `xdg` (on Unix-like and
+Redox targets), and the optional parsers (`figment_json5`, `json5`,
+`serde_yaml`, `toml`) via `ortho_config::` paths.
+
 ## Migrating from earlier versions
 
-Projects using a pre‑0.3 release can upgrade with the following steps:
+Projects using a pre‑0.5 release can upgrade with the following steps:
 
 - `#[derive(OrthoConfig)]` remains the correct way to annotate configuration
   structs. No additional derives are required.
 - Remove any `load_with_reference_fallback` helpers. The merge logic inside
   `load_and_merge_subcommand_for` supersedes this workaround.
 - Replace calls to deprecated helpers such as `load_subcommand_config_for` with
-  `ortho_config::subcommand::load_and_merge_subcommand_for`.
+  `ortho_config::subcommand::load_and_merge_subcommand_for` or import
+  `ortho_config::SubcmdConfigMerge` to call `load_and_merge` directly.
 
-Each subcommand struct can expose a wrapper method that forwards to
-`load_and_merge_subcommand_for`:
+Import it with:
 
 ```rust
-use ortho_config::{subcommand::load_and_merge_subcommand_for, OrthoConfig,
-                   OrthoError};
+use ortho_config::SubcmdConfigMerge;
+```
+
+Subcommand structs can leverage the `SubcmdConfigMerge` trait to expose a
+`load_and_merge` method automatically:
+
+```rust
+use ortho_config::{OrthoConfig, OrthoResult};
+use ortho_config::SubcmdConfigMerge;
 use serde::Deserialize;
 
 #[derive(Deserialize, OrthoConfig)]
@@ -90,15 +102,16 @@ struct PrArgs {
     reference: String,
 }
 
-impl PrArgs {
-    fn load_and_merge(cli: &Cli) -> Result<Self, OrthoError> {
-        load_and_merge_subcommand_for::<Self>(cli)
-    }
-}
+# fn demo(pr_args: &PrArgs) -> OrthoResult<()> {
+let merged = pr_args.load_and_merge()?;
+# let _ = merged;
+# Ok(())
+# }
 ```
 
-After parsing the top‑level `Cli` struct, call `PrArgs::load_and_merge(&cli)`
-to obtain the merged configuration for that subcommand.
+After parsing the relevant subcommand struct, call `load_and_merge()?` on that
+value (for example, `pr_args.load_and_merge()?`) to obtain the merged
+configuration for that subcommand.
 
 ## Defining configuration structures
 
@@ -123,38 +136,45 @@ lower‑cased when used to form file names. For example, a prefix of `APP_`
 results in environment variables like `APP_PORT` and file names such as
 `.app.toml`.
 
-### Field‑level attributes
+### Field-level attributes
 
 Field attributes modify how a field is sourced or merged:
 
 | Attribute                   | Behaviour                                                                                                                                                                     |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `default = expr`            | Supplies a default value when no source provides one. The expression can be a literal or a function path.                                                                     |
-| `cli_long = "name"`         | Overrides the automatically generated long CLI flag (kebab‑case).                                                                                                             |
-| `cli_short = 'c'`           | Adds a single‑letter short flag for the field.                                                                                                                                |
+| `cli_long = "name"`         | Overrides the automatically generated long CLI flag (kebab-case).                                                                                                             |
+| `cli_short = 'c'`           | Adds a single-letter short flag for the field.                                                                                                                                |
 | `merge_strategy = "append"` | For `Vec<T>` fields, specifies that values from different sources should be concatenated. This is currently the only supported strategy and is the default for vector fields. |
 
 Unrecognized keys are ignored by the derive macro for forwards compatibility.
 Unknown keys will therefore silently do nothing. Developers who require
 stricter validation may add manual `compile_error!` guards.
 
-By default, each field receives a long-flag derived from its name in kebab-case
-and a short-flag. The macro chooses the short-flag using these rules:
+By default, each field receives a long flag derived from its name in kebab‑case
+and a short flag. The macro chooses the short flag using these rules:
 
 - Use the field's first ASCII alphanumeric character.
-- If that character is already taken or reserved, try its upper-case form.
-- If both are unavailable, no short-flag is assigned; specify `cli_short` to
+- If that character is already taken or reserved, try its uppercase form.
+- If both are unavailable, no short flag is assigned; specify `cli_short` to
   resolve the collision.
 
-Collisions are evaluated against short-flags already assigned within the same
-parser and reserved characters such as clap's `-h` and `-V`. A character is
+| Scenario                          | Result                 |
+| --------------------------------- | ---------------------- |
+| First letter free                 | `-p`                   |
+| Lowercase taken; uppercase free   | `-P`                   |
+| Both cases taken                  | none (set `cli_short`) |
+| Explicit override via `cli_short` | `-r`                   |
+
+Collisions are evaluated against short flags already assigned within the same
+parser, and reserved characters such as clap's `-h` and `-V`. A character is
 considered taken if it matches either set.
 
 The macro does not scan other characters in the field name when deriving the
-short-flag. Short-flags must be single ASCII alphanumeric characters and may
-not use clap's global `-h` or `-V` options. Long-flags must contain only ASCII
-alphanumeric characters, hyphens or underscores and cannot be named `help` or
-`version`.
+short flag. Short flags must be single ASCII alphanumeric characters and may
+not use clap's global `-h` or `-V` options. Long flags must contain only ASCII
+alphanumerics and hyphens, must not start with `-` or `_`, and cannot be named
+`help` or `version`.
 
 For example, when multiple fields begin with the same character, `cli_short`
 can disambiguate the final field:
@@ -231,31 +251,29 @@ overwriting them.
 The `load_from_iter` method (used by the convenience `load`) performs the
 following steps:
 
-1. Builds a configuration profile. Defaults from the
-   `#[ortho_config(default = …)]` attributes are layered first.
+1. Builds a `figment` configuration profile. A defaults provider constructed
+   from the `#[ortho_config(default = …)]` attributes is added first.
 
 2. Attempts to load a configuration file. Candidate file paths are searched in
    the following order:
 
-   1. A `--config-path` CLI argument. A hidden option is generated
-      automatically by the derive macro; if the user defines a `config_path`
-      field in their struct then that will override the hidden option.
-      Alternatively, the environment variable `<PREFIX>CONFIG_PATH` (for
-      example, `APP_CONFIG_PATH`, or `CONFIG_PATH` if no prefix is set) can
-      specify an explicit file.
+    1. If provided, a path supplied via the hidden `--config-path` flag or the
+       `<PREFIX>CONFIG_PATH` environment variable (for example,
+       `APP_CONFIG_PATH` or `CONFIG_PATH`)—both generated by the derive macro
+       even when no `config_path` field exists—takes precedence; see
+       [Config path override](#config-path-override).
 
-   2. A dotfile named `.config.toml` or `.<prefix>.toml` in the current working
-      directory.
+    2. A dotfile named `.<prefix>.toml` in the current working directory.
 
-   3. A dotfile of the same name in the user's home directory.
+    3. A dotfile of the same name in the user's home directory.
 
-   4. On Unix‑like systems, the standard XDG configuration directory (for
-      example, `~/.config/app/config.toml`) is searched; on Windows the
-      `%APPDATA%` and `%LOCALAPPDATA%` directories are examined.
+    4. On Unix‑like systems, the XDG configuration directory (e.g.
+       `~/.config/app/config.toml`) is searched using the `xdg` crate; on
+       Windows, the `%APPDATA%` and `%LOCALAPPDATA%` directories are checked.
 
-   5. If the `json5` or `yaml` features are enabled, files with `.json`,
-      `.json5`, `.yaml` or `.yml` extensions are also considered in these
-      locations.
+    5. If the `json5` or `yaml` features are enabled, files with `.json`,
+       `.json5`, `.yaml`, or `.yml` extensions are also considered in these
+       locations.
 
 3. Adds an environment provider using the prefix specified on the struct. Keys
    are upper‑cased and nested fields use double underscores (`__`) to separate
@@ -271,6 +289,30 @@ following steps:
 6. Attempts to extract the merged configuration into the concrete struct. On
    success it returns the completed configuration; otherwise an `OrthoError` is
    returned.
+
+### Config path override
+
+The derive macro always inserts a hidden `--config-path` option and two
+environment variables: `<PREFIX>CONFIG_PATH` and the unprefixed `CONFIG_PATH`.
+For example, with the prefix `APP`, both `APP_CONFIG_PATH` and `CONFIG_PATH`
+are recognized. `ortho_config` accepts `--config-path` even when no
+`config_path` field exists. Declaring a `config_path` field with a `cli_long`
+attribute merely exposes or renames the same flag and both environment
+variables:
+
+```rust
+#[derive(Debug, Deserialize, ortho_config::OrthoConfig)]
+struct CliArgs {
+    #[serde(skip)]
+    #[ortho_config(cli_long = "config")]
+    config_path: Option<std::path::PathBuf>,
+}
+```
+
+The example above exposes the flag as `--config` and the environment variables
+`<PREFIX>CONFIG_PATH` and `CONFIG_PATH`. Without this field, `--config-path`,
+`<PREFIX>CONFIG_PATH` and `CONFIG_PATH` remain available but hidden from help
+output.
 
 ### Source precedence
 
@@ -366,24 +408,27 @@ mytool --ignore-patterns target/
 
 results in `ignore_patterns = [".git/", "build/", "target/"]`.
 
+By default, the ignore-pattern list includes `[".git/", "build/", "target/"]`.
+These defaults are extended (not replaced) by environment variables and CLI
+flags via the `append` merge strategy.
+
 ## Subcommand configuration
 
 Many CLI applications use `clap` subcommands to perform different operations.
 `OrthoConfig` supports per‑subcommand defaults via a dedicated `cmds`
 namespace. The helper function `load_and_merge_subcommand_for` loads defaults
-for a specific subcommand and merges them beneath the CLI values. The older
-`load_subcommand_config` and `load_subcommand_config_for` helpers are
-deprecated in favour of this function. The merged struct is returned as a new
-instance; the original `cli` struct remains unchanged. CLI fields left unset
-(`None`) do not override environment or file defaults, avoiding accidental loss
-of configuration.
+for a specific subcommand and merges them beneath the CLI values. The legacy
+`load_subcommand_config` and `load_subcommand_config_for` helpers were removed
+in v0.5.0. The merged struct is returned as a new instance; the original `cli`
+struct remains unchanged. CLI fields left unset (`None`) do not override
+environment or file defaults, avoiding accidental loss of configuration.
 
 ### How it works
 
 When a struct derives `OrthoConfig`, it also implements the associated
 `prefix()` method. This method returns the configured prefix string.
-`load_and_merge_subcommand_for::<T>(&cli_struct)` uses the derived prefix to
-build a `cmds.<subcommand>` section name for the configuration file and a
+`load_and_merge_subcommand_for(prefix, cli_struct)` uses this prefix to build a
+`cmds.<subcommand>` section name for the configuration file and an
 `PREFIX_CMDS_SUBCOMMAND_` prefix for environment variables. Configuration is
 loaded in the same order as global configuration (defaults → file → environment
 → CLI), but only values in the `[cmds.<subcommand>]` section or environment
@@ -397,7 +442,8 @@ might be defined as follows:
 
 ```rust
 use clap::Parser;
-use ortho_config::{OrthoConfig, subcommand::load_and_merge_subcommand_for};
+use ortho_config::OrthoConfig;
+use ortho_config::SubcmdConfigMerge;
 use serde::{Deserialize, Serialize};
 
 #[derive(Parser, Deserialize, Serialize, Debug, OrthoConfig, Clone, Default)]
@@ -416,7 +462,7 @@ pub struct PrArgs {
 fn main() -> Result<(), ortho_config::OrthoError> {
     let cli_pr = PrArgs::parse();
     // Merge defaults from [cmds.pr] and VK_CMDS_PR_* over CLI
-    let merged_pr = load_and_merge_subcommand_for::<PrArgs>(&cli_pr)?;
+    let merged_pr = cli_pr.load_and_merge()?;
     println!("PrArgs after merging: {:#?}", merged_pr);
     Ok(())
 }
@@ -458,20 +504,78 @@ for a complete example.
 
 ## Error handling
 
-`load` and `load_and_merge_subcommand_for` return a `Result<T, OrthoError>`.
-`OrthoError` wraps errors from `clap`, file I/O and the configuration layering
-logic. Failures during the final merge of CLI values over configuration sources
-surface as the `Merge` variant, providing clearer diagnostics when the combined
-data is invalid. When multiple sources fail, the errors are collected into the
-`Aggregate` variant so callers can inspect each individual failure. Consumers
-should handle these errors appropriately, for example by printing them to
-stderr and exiting. If required fields are missing after merging, the crate
-returns `OrthoError::MissingRequiredValues` with a user‑friendly list of
-missing paths and hints on how to provide them. For example:
+`load` and `load_and_merge_subcommand_for` return `OrthoResult<T>`, an alias
+for `Result<T, Arc<OrthoError>>`. `OrthoError` wraps errors from `clap`, file
+I/O and `figment`. Failures during the final merge of CLI values over
+configuration sources surface as the `Merge` variant, providing clearer
+diagnostics when the combined data is invalid. When multiple sources fail, the
+errors are collected into the `Aggregate` variant so callers can inspect each
+individual failure. Consumers should handle these errors appropriately, for
+example by printing them to stderr and exiting. If required fields are missing
+after merging, the crate returns `OrthoError::MissingRequiredValues` with a
+user‑friendly list of missing paths and hints on how to provide them. For
+example:
 
-```text
+```plaintext
 Missing required values:
   sample_value (use --sample-value, SAMPLE_VALUE, or file entry)
+```
+
+### Aggregating multiple errors
+
+To return multiple errors in one go, use `OrthoError::aggregate`. It accepts
+any iterator of items that can be converted into `Arc<OrthoError>` so both
+owned and shared errors are supported. If the list might be empty,
+`OrthoError::try_aggregate` returns `Option<OrthoError>` instead of panicking:
+
+```rust
+use std::sync::Arc;
+use ortho_config::OrthoError;
+
+// From bare errors
+let err = OrthoError::aggregate(vec![
+    OrthoError::Validation { key: "port".into(), message: "must be positive".into() },
+    OrthoError::gathering(figment::Error::from("invalid")),
+]);
+
+// From shared errors
+let err = OrthoError::aggregate(vec![
+    Arc::new(OrthoError::Validation { key: "x".into(), message: "bad".into() }),
+    OrthoError::gathering_arc(figment::Error::from("boom")),
+]);
+```
+
+### Mapping errors ergonomically
+
+To reduce boiler‑plate when converting between error types, the crate exposes
+small extension traits:
+
+- `OrthoResultExt::into_ortho()` converts `Result<T, E>` into
+  `OrthoResult<T>` when `E: Into<OrthoError>` (e.g., `serde_json::Error`).
+- `OrthoMergeExt::into_ortho_merge()` converts `Result<T, figment::Error>`
+  into `OrthoResult<T>` as `OrthoError::Merge`.
+- `IntoFigmentError::into_figment()` converts `Arc<OrthoError>` (or
+  `&Arc<OrthoError>`) into `figment::Error` for interop in tests or adapters,
+  cloning the inner error to preserve structured details where possible.
+- `ResultIntoFigment::to_figment()` converts `OrthoResult<T>` into
+  `Result<T, figment::Error>`.
+
+Examples:
+
+```rust
+use ortho_config::{OrthoMergeExt, OrthoResultExt, ResultIntoFigment};
+
+fn sanitize<T: serde::Serialize>(v: &T) -> ortho_config::OrthoResult<serde_json::Value> {
+    serde_json::to_value(v).into_ortho()
+}
+
+fn extract(fig: figment::Figment) -> ortho_config::OrthoResult<MyCfg> {
+    fig.extract::<MyCfg>().into_ortho_merge()
+}
+
+fn interop(r: ortho_config::OrthoResult<MyCfg>) -> Result<MyCfg, figment::Error> {
+    r.to_figment()
+}
 ```
 
 ## Additional notes
@@ -488,41 +592,27 @@ Missing required values:
   while still requiring the CLI to provide a value when defaults are absent;
   see the `vk` example above.
 
-- **Config path flag** – The derive macro inserts a hidden `--config-path`
-  option into the CLI to override the configuration file path. To expose or
-  rename this flag, define your own `config_path` field with a `cli_long`
-  attribute:
-
-  ```rust
-  #[derive(ortho_config::OrthoConfig)]
-  struct AppConfig {
-      #[serde(skip)]
-      #[ortho_config(cli_long = "config")]
-      config_path: Option<std::path::PathBuf>,
-  }
-  ```
-
-  The example above enables `--config` and the `CONFIG_PATH` environment
-  variable. The option remains hidden from help output unless a `config_path`
-  field is declared.
-
 - **Changing naming conventions** – Currently, only the default
-  snake/kebab/upper snake mappings are supported. Future versions may introduce
-  attributes such as `file_key` or `env` to customize names further.
+  snake/hyphenated (underscores → hyphens)/upper snake mappings are supported.
+  Future versions may introduce attributes such as `file_key` or `env` to
+  customize names further.
 
 - **Testing** – Because the CLI and environment variables are merged at
   runtime, integration tests should set environment variables and construct CLI
-  argument vectors to exercise the merge logic. Layering helpers make it easy
-  to inject additional providers when writing unit tests.
+  argument vectors to exercise the merge logic. The `figment` crate makes it
+  easy to inject additional providers when writing unit tests.
 
-- **Sanitized providers** – The `sanitized_provider` helper returns a provider
-  with `None` fields removed. It aids manual layering when bypassing the derive
-  macro. For example:
+- **Sanitized providers** – The `sanitized_provider` helper returns a `Figment`
+  provider with `None` fields removed. It aids manual layering when bypassing
+  the derive macro. For example:
 
   ```rust
+  use figment::{Figment, providers::Serialized};
   use ortho_config::sanitized_provider;
 
-  let layer = sanitized_provider(&cli)?; // merge with defaults as needed
+  let fig = Figment::from(Serialized::defaults(&Defaults::default()))
+      .merge(sanitized_provider(&cli)?);
+  let cfg: Defaults = fig.extract()?;
   ```
 
 ## Conclusion
