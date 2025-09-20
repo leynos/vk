@@ -39,7 +39,7 @@ fn set_dir(dir: &TempDir) -> DirGuard {
 
 fn merge_with_sources<T>(config: &str, env: &[(&str, Option<&str>)], cli: &T) -> T
 where
-    T: ortho_config::OrthoConfig + serde::Serialize + Default + CommandFactory,
+    T: SubcmdConfigMerge + ortho_config::OrthoConfig + serde::Serialize + Default + CommandFactory,
 {
     let dir = write_config(config);
     let _guard = set_dir(&dir);
