@@ -54,7 +54,7 @@ use crate::printer::{print_reviews, write_thread};
 use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_thread_reference};
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
-use ortho_config::{OrthoConfig, subcommand::load_and_merge_subcommand_for};
+use ortho_config::{OrthoConfig, SubcmdConfigMerge};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -435,15 +435,15 @@ async fn main() -> Result<(), VkError> {
     global.merge(cli.global);
     let result = match cli.command {
         Commands::Pr(pr_cli) => {
-            let args = load_and_merge_subcommand_for(&pr_cli)?;
+            let args = pr_cli.load_and_merge()?;
             run_pr(args, &global).await
         }
         Commands::Issue(issue_cli) => {
-            let args = load_and_merge_subcommand_for(&issue_cli)?;
+            let args = issue_cli.load_and_merge()?;
             run_issue(args, &global).await
         }
         Commands::Resolve(resolve_cli) => {
-            let args = load_and_merge_subcommand_for(&resolve_cli)?;
+            let args = resolve_cli.load_and_merge()?;
             run_resolve(args, &global).await
         }
     };
