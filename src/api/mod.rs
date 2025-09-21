@@ -10,12 +10,12 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
-use std::{borrow::Cow, env};
+use std::borrow::Cow;
 use tokio::time::{Duration, sleep};
 use tracing::warn;
 
-use crate::VkError;
 use crate::boxed::BoxedStr;
+use crate::{VkError, environment};
 
 /// A GraphQL query string with type safety.
 #[derive(Debug, Clone)]
@@ -278,7 +278,7 @@ impl GraphQLClient {
         transcript: Option<std::path::PathBuf>,
     ) -> Result<Self, std::io::Error> {
         let token = token.into();
-        let endpoint = env::var("GITHUB_GRAPHQL_URL")
+        let endpoint = environment::var("GITHUB_GRAPHQL_URL")
             .map(Endpoint::new)
             .unwrap_or_default();
         Self::with_endpoint_retry(token, endpoint, transcript, RetryConfig::default())

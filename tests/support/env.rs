@@ -9,6 +9,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+use vk::environment;
 use vk::test_utils::{remove_var, set_var};
 
 /// RAII guard that restores captured environment variables on drop.
@@ -29,7 +30,7 @@ impl EnvGuard {
         let mut entries = Vec::new();
         for key in keys {
             let key = OsString::from(key);
-            let previous = env::var_os(&key);
+            let previous = environment::with_lock(|| env::var_os(key.as_os_str()));
             remove_var(&key);
             entries.push((key, previous));
         }
