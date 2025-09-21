@@ -54,7 +54,7 @@ use crate::printer::{print_reviews, write_thread};
 use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_thread_reference};
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
-use ortho_config::{OrthoConfig, subcommand::load_and_merge_subcommand_for};
+use ortho_config::{OrthoConfig, SubcmdConfigMerge};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -65,6 +65,7 @@ use std::time::Duration;
 use termimad::MadSkin;
 use thiserror::Error;
 use tracing::{error, warn};
+use vk::environment;
 
 struct PrContext {
     repo: RepoInfo,
@@ -234,7 +235,7 @@ where
 fn setup_pr_output(args: &PrArgs, global: &GlobalArgs) -> Result<Option<PrContext>, VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number, comment) = parse_pr_thread_reference(reference, global.repo.as_deref())?;
-    let token = env::var("GITHUB_TOKEN").unwrap_or_default();
+    let token = environment::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         warn!("GITHUB_TOKEN not set, using anonymous API access");
     }
@@ -366,7 +367,7 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
 async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_issue_reference(reference, global.repo.as_deref())?;
-    let token = env::var("GITHUB_TOKEN").unwrap_or_default();
+    let token = environment::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         warn!("GITHUB_TOKEN not set, using anonymous API access");
     }
@@ -388,7 +389,7 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
     let (repo, number, comment) =
         parse_pr_thread_reference(&args.reference, global.repo.as_deref())?;
     let comment_id = comment.ok_or(VkError::InvalidRef)?;
-    let token = env::var("GITHUB_TOKEN").unwrap_or_default();
+    let token = environment::var("GITHUB_TOKEN").unwrap_or_default();
     if token.is_empty() {
         return Err(VkError::MissingAuth);
     }
@@ -431,19 +432,19 @@ async fn main() -> Result<(), VkError> {
         .with_writer(std::io::stderr)
         .init();
     let cli = Cli::parse();
-    let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
+    let mut global = GlobalArgs::load_from_iter(env::args_os().take(1))?;
     global.merge(cli.global);
     let result = match cli.command {
         Commands::Pr(pr_cli) => {
-            let args = load_and_merge_subcommand_for(&pr_cli)?;
+            let args = pr_cli.load_and_merge()?;
             run_pr(args, &global).await
         }
         Commands::Issue(issue_cli) => {
-            let args = load_and_merge_subcommand_for(&issue_cli)?;
+            let args = issue_cli.load_and_merge()?;
             run_issue(args, &global).await
         }
         Commands::Resolve(resolve_cli) => {
-            let args = load_and_merge_subcommand_for(&resolve_cli)?;
+            let args = resolve_cli.load_and_merge()?;
             run_resolve(args, &global).await
         }
     };
@@ -460,9 +461,9 @@ async fn main() -> Result<(), VkError> {
 }
 
 fn locale_is_utf8() -> bool {
-    env::var("LC_ALL")
-        .or_else(|_| env::var("LC_CTYPE"))
-        .or_else(|_| env::var("LANG"))
+    environment::var("LC_ALL")
+        .or_else(|_| environment::var("LC_CTYPE"))
+        .or_else(|_| environment::var("LANG"))
         .map(|v| UTF8_RE.is_match(&v))
         .unwrap_or(false)
 }
@@ -485,9 +486,9 @@ mod tests {
     #[test]
     #[serial]
     fn detect_utf8_locale() {
-        let old_all = std::env::var("LC_ALL").ok();
-        let old_ctype = std::env::var("LC_CTYPE").ok();
-        let old_lang = std::env::var("LANG").ok();
+        let old_all = environment::var("LC_ALL").ok();
+        let old_ctype = environment::var("LC_CTYPE").ok();
+        let old_lang = environment::var("LANG").ok();
 
         set_var("LC_ALL", "en_GB.UTF-8");
         remove_var("LC_CTYPE");
