@@ -3,94 +3,15 @@
 //! These tests ensure configuration file values override defaults, are overridden
 //! by environment variables, and finally by command-line arguments.
 
-use std::{env, fs, path::PathBuf};
+#[path = "support/env.rs"]
+mod env_support;
+#[path = "support/subcommand.rs"]
+mod sub_support;
 
-use clap::CommandFactory;
-use ortho_config::SubcmdConfigMerge;
 use rstest::rstest;
 use serial_test::serial;
-use tempfile::TempDir;
-use vk::cli_args::ResolveArgs;
-use vk::test_utils::{remove_var, set_var};
-use vk::{IssueArgs, PrArgs};
-
-/// Write `content` to a temporary `.vk.toml` file and return its directory.
-fn write_config(content: &str) -> TempDir {
-    let dir = tempfile::tempdir().expect("create config dir");
-    fs::write(dir.path().join(".vk.toml"), content).expect("write config");
-    dir
-}
-
-/// RAII guard restoring the working directory on drop.
-struct DirGuard(PathBuf);
-
-impl Drop for DirGuard {
-    fn drop(&mut self) {
-        let _ = env::set_current_dir(&self.0); // best-effort restore; Drop must not panic
-    }
-}
-
-/// Change into `dir`, returning a guard that restores the previous directory.
-fn set_dir(dir: &TempDir) -> DirGuard {
-    let prev = env::current_dir().expect("current dir");
-    env::set_current_dir(dir.path()).expect("change dir");
-    DirGuard(prev)
-}
-
-fn merge_with_sources<T>(config: &str, env: &[(&str, Option<&str>)], cli: &T) -> T
-where
-    T: SubcmdConfigMerge + ortho_config::OrthoConfig + serde::Serialize + Default + CommandFactory,
-{
-    let dir = write_config(config);
-    let _guard = set_dir(&dir);
-    let config_path = dir.path().join(".vk.toml");
-    set_var("VK_CONFIG_PATH", config_path.as_os_str());
-
-    for (key, value) in env {
-        match value {
-            Some(v) => set_var(key, v),
-            None => remove_var(key),
-        }
-    }
-
-    let merged = cli
-        .load_and_merge()
-        .unwrap_or_else(|err| panic!("merge {} args: {err}", std::any::type_name::<T>()));
-
-    for (key, _) in env {
-        remove_var(key);
-    }
-
-    remove_var("VK_CONFIG_PATH");
-
-    merged
-}
-
-fn pr_cli(reference: Option<&str>, files: &[&str]) -> PrArgs {
-    let mut args = PrArgs::default();
-    if let Some(reference) = reference {
-        args.reference = Some(reference.to_owned());
-    }
-    if !files.is_empty() {
-        args.files = files.iter().map(|value| (*value).to_owned()).collect();
-    }
-    args
-}
-
-fn issue_cli(reference: Option<&str>) -> IssueArgs {
-    let mut args = IssueArgs::default();
-    if let Some(reference) = reference {
-        args.reference = Some(reference.to_owned());
-    }
-    args
-}
-
-fn resolve_cli(reference: &str, message: Option<&str>) -> ResolveArgs {
-    ResolveArgs {
-        reference: reference.to_owned(),
-        message: message.map(str::to_owned),
-    }
-}
+use sub_support::{issue_cli, merge_with_sources, pr_cli, resolve_cli};
+use vk::PrArgs;
 
 #[derive(Copy, Clone, Debug)]
 enum SubcommandType {

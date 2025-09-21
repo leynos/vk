@@ -1,44 +1,14 @@
 //! Behavioural coverage for CLI argument merging helpers.
 
+#[path = "support/env.rs"]
+mod support;
+
 use ortho_config::SubcmdConfigMerge;
 use rstest::{fixture, rstest};
 use serial_test::serial;
-use std::any::Any;
-use std::fs;
-use std::path::PathBuf;
-use tempfile::TempDir;
+use support::{DirGuard, EnvGuard, setup_env_and_config};
 use vk::cli_args::{IssueArgs, PrArgs, ResolveArgs};
-use vk::test_utils::{remove_var, set_var};
-
-struct EnvGuard {
-    keys: Vec<&'static str>,
-}
-
-impl EnvGuard {
-    fn new(keys: &[&'static str]) -> Self {
-        for key in keys {
-            remove_var(key);
-        }
-        Self {
-            keys: keys.to_vec(),
-        }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        for key in &self.keys {
-            remove_var(key);
-        }
-    }
-}
-
-fn write_config(content: &str) -> (TempDir, PathBuf) {
-    let dir = TempDir::new().expect("create config dir");
-    let path = dir.path().join(".vk.toml");
-    fs::write(&path, content).expect("write config");
-    (dir, path)
-}
+use vk::test_utils::set_var;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SubcommandType {
@@ -52,6 +22,28 @@ struct TestScenario {
     subcommand: SubcommandType,
     env_vars: &'static [&'static str],
     config_section: &'static str,
+}
+
+trait RefStr {
+    fn reference_str(&self) -> Option<&str>;
+}
+
+impl RefStr for PrArgs {
+    fn reference_str(&self) -> Option<&str> {
+        self.reference.as_deref()
+    }
+}
+
+impl RefStr for IssueArgs {
+    fn reference_str(&self) -> Option<&str> {
+        self.reference.as_deref()
+    }
+}
+
+impl RefStr for ResolveArgs {
+    fn reference_str(&self) -> Option<&str> {
+        Some(self.reference.as_str())
+    }
 }
 
 const SCENARIO_DATA: &[(SubcommandType, &[&str], &str)] = &[
@@ -110,37 +102,8 @@ fn resolve_scenario() -> TestScenario {
     create_scenario(SubcommandType::Resolve)
 }
 
-fn setup_env_and_config(scenario: &TestScenario, config_content: &str) -> (TempDir, PathBuf) {
-    debug_assert!(
-        scenario.env_vars.contains(&"VK_CONFIG_PATH"),
-        "scenarios must guard VK_CONFIG_PATH before setting it",
-    );
-    let (config_dir, config_path) = write_config(config_content);
-    set_var("VK_CONFIG_PATH", config_path.as_os_str());
-    (config_dir, config_path)
-}
-
-fn assert_reference_equals(subcommand: SubcommandType, merged: &dyn Any, expected: &str) {
-    match subcommand {
-        SubcommandType::Pr => {
-            let args = merged
-                .downcast_ref::<PrArgs>()
-                .expect("reference downcasts to PrArgs");
-            assert_eq!(args.reference.as_deref(), Some(expected));
-        }
-        SubcommandType::Issue => {
-            let args = merged
-                .downcast_ref::<IssueArgs>()
-                .expect("reference downcasts to IssueArgs");
-            assert_eq!(args.reference.as_deref(), Some(expected));
-        }
-        SubcommandType::Resolve => {
-            let args = merged
-                .downcast_ref::<ResolveArgs>()
-                .expect("reference downcasts to ResolveArgs");
-            assert_eq!(args.reference, expected);
-        }
-    }
+fn assert_reference_equals<T: RefStr>(merged: &T, expected: &str) {
+    assert_eq!(merged.reference_str(), Some(expected));
 }
 
 #[rstest]
@@ -174,7 +137,7 @@ message = "file message"
             section = scenario.config_section
         ),
     };
-    let (_config_dir, _config_path) = setup_env_and_config(&scenario, &cfg);
+    let (_config_dir, _config_path) = setup_env_and_config(&cfg);
 
     match scenario.subcommand {
         SubcommandType::Pr => {
@@ -190,7 +153,7 @@ message = "file message"
 
             let merged = cli.load_and_merge().expect("merge pr args");
 
-            assert_reference_equals(SubcommandType::Pr, &merged, "cli_ref");
+            assert_reference_equals(&merged, "cli_ref");
             assert_eq!(merged.files, vec![String::from("cli.txt")]);
             assert!(merged.show_outdated);
         }
@@ -203,7 +166,7 @@ message = "file message"
 
             let merged = cli.load_and_merge().expect("merge issue args");
 
-            assert_reference_equals(SubcommandType::Issue, &merged, "cli_ref");
+            assert_reference_equals(&merged, "cli_ref");
         }
         SubcommandType::Resolve => {
             set_var("VKCMDS_RESOLVE_REFERENCE", "env_ref");
@@ -216,7 +179,7 @@ message = "file message"
 
             let merged = cli.load_and_merge().expect("merge resolve args");
 
-            assert_reference_equals(SubcommandType::Resolve, &merged, "cli_ref");
+            assert_reference_equals(&merged, "cli_ref");
             assert_eq!(merged.message.as_deref(), Some("cli message"));
         }
     }
@@ -252,7 +215,7 @@ message = "file message"
             section = scenario.config_section
         ),
     };
-    let (_config_dir, _config_path) = setup_env_and_config(&scenario, &cfg);
+    let (_config_dir, _config_path) = setup_env_and_config(&cfg);
 
     match scenario.subcommand {
         SubcommandType::Pr => {
@@ -267,7 +230,7 @@ message = "file message"
             // initialises vectors and booleans eagerly, so their defaults read as
             // explicit CLI choices and we leave them untouched by config or
             // environment overrides.
-            assert_reference_equals(SubcommandType::Pr, &merged, "env_ref");
+            assert_reference_equals(&merged, "env_ref");
             assert!(merged.files.is_empty());
             assert!(!merged.show_outdated);
         }
@@ -277,7 +240,7 @@ message = "file message"
             let cli = IssueArgs::default();
             let merged = cli.load_and_merge().expect("merge issue args");
 
-            assert_reference_equals(SubcommandType::Issue, &merged, "env_ref");
+            assert_reference_equals(&merged, "env_ref");
         }
         SubcommandType::Resolve => {
             set_var("VKCMDS_RESOLVE_MESSAGE", "env message");
@@ -289,7 +252,7 @@ message = "file message"
             };
             let merged = cli.load_and_merge().expect("merge resolve args");
 
-            assert_reference_equals(SubcommandType::Resolve, &merged, "cli_ref");
+            assert_reference_equals(&merged, "cli_ref");
             assert_eq!(merged.message.as_deref(), Some("env message"));
         }
     }
@@ -318,7 +281,7 @@ message = "file message"
             section = scenario.config_section
         ),
     };
-    let (_config_dir, config_path) = setup_env_and_config(&scenario, &cfg);
+    let (config_dir, _config_path) = setup_env_and_config(&cfg);
 
     match scenario.subcommand {
         SubcommandType::Pr => {
@@ -331,13 +294,9 @@ message = "file message"
         SubcommandType::Issue => {
             let cli = IssueArgs::default();
 
-            let prev_dir = std::env::current_dir().expect("current dir");
-            let config_dir = config_path.parent().expect("config dir");
-            std::env::set_current_dir(config_dir).expect("set dir");
+            let _dir = DirGuard::enter(config_dir.path());
             let merged = cli.load_and_merge().expect("merge issue args");
-            std::env::set_current_dir(prev_dir).expect("restore dir");
-
-            assert_reference_equals(SubcommandType::Issue, &merged, "file_ref");
+            assert_reference_equals(&merged, "file_ref");
         }
         SubcommandType::Resolve => {
             let cli = ResolveArgs {
@@ -345,13 +304,9 @@ message = "file message"
                 message: None,
             };
 
-            let prev_dir = std::env::current_dir().expect("current dir");
-            let config_dir = config_path.parent().expect("config dir");
-            std::env::set_current_dir(config_dir).expect("set dir");
+            let _dir = DirGuard::enter(config_dir.path());
             let merged = cli.load_and_merge().expect("merge resolve args");
-            std::env::set_current_dir(prev_dir).expect("restore dir");
-
-            assert_reference_equals(SubcommandType::Resolve, &merged, "cli_ref");
+            assert_reference_equals(&merged, "cli_ref");
             assert_eq!(merged.message.as_deref(), Some("file message"));
         }
     }
@@ -379,7 +334,7 @@ fn load_and_merge_preserves_cli_instance(#[case] scenario: TestScenario) {
             assert_eq!(cli.reference, snapshot.reference);
             assert_eq!(cli.files, snapshot.files);
             assert_eq!(cli.show_outdated, snapshot.show_outdated);
-            assert_reference_equals(SubcommandType::Pr, &merged, "cli_ref");
+            assert_reference_equals(&merged, "cli_ref");
             assert_eq!(merged.files, vec![String::from("cli.txt")]);
             assert!(merged.show_outdated);
         }
@@ -392,7 +347,7 @@ fn load_and_merge_preserves_cli_instance(#[case] scenario: TestScenario) {
             let merged = cli.load_and_merge().expect("merge issue args");
 
             assert_eq!(cli.reference, snapshot.reference);
-            assert_reference_equals(SubcommandType::Issue, &merged, "cli_ref");
+            assert_reference_equals(&merged, "cli_ref");
         }
         SubcommandType::Resolve => {
             let cli = ResolveArgs {
@@ -405,7 +360,7 @@ fn load_and_merge_preserves_cli_instance(#[case] scenario: TestScenario) {
 
             assert_eq!(cli.reference, snapshot.reference);
             assert_eq!(cli.message, snapshot.message);
-            assert_reference_equals(SubcommandType::Resolve, &merged, "cli_ref");
+            assert_reference_equals(&merged, "cli_ref");
             assert_eq!(merged.message.as_deref(), Some("cli message"));
         }
     }
