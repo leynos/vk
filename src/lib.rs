@@ -5,6 +5,7 @@
 
 pub mod banners;
 pub mod cli_args;
+pub mod environment;
 #[path = "test_utils_env.rs"]
 pub mod test_utils;
 

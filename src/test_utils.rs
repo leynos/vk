@@ -4,8 +4,9 @@
 //! stub GraphQL server for integration tests.
 
 use crate::api::{GraphQLClient, RetryConfig};
+use crate::environment;
 use std::sync::{
-    Arc, Mutex, OnceLock,
+    Arc,
     atomic::{AtomicUsize, Ordering},
 };
 use third_wheel::hyper::{
@@ -101,27 +102,12 @@ pub fn start_server(responses: Vec<String>) -> TestClient {
 /// remove_var("MY_VAR");
 /// ```
 pub fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
-    let _guard = env_lock();
-    // SAFETY: The global mutex serialises access to the environment, making the
-    // unsynchronised standard library calls safe for our tests.
-    unsafe { std::env::set_var(key, value) };
+    environment::set_var(key, value);
 }
 
 /// Remove an environment variable set during testing.
 ///
 /// The global mutex serialises modifications so parallel tests do not race.
 pub fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
-    let _guard = env_lock();
-    // SAFETY: The global mutex serialises access to the environment, making the
-    // unsynchronised standard library calls safe for our tests.
-    unsafe { std::env::remove_var(key) };
-}
-
-static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    ENV_LOCK
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("env lock")
+    environment::remove_var(key);
 }

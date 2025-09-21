@@ -1,7 +1,7 @@
 //! REST helpers for replying to review comments.
 
 use super::CommentRef;
-use crate::{VkError, boxed::BoxedStr};
+use crate::{VkError, boxed::BoxedStr, environment};
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use reqwest::{StatusCode, Url};
 use serde_json::json;
@@ -83,7 +83,7 @@ impl RestClient {
     ) -> Result<Self, VkError> {
         let mut base = api
             .map(str::to_owned)
-            .or_else(|| std::env::var("GITHUB_API_URL").ok())
+            .or_else(|| environment::var("GITHUB_API_URL").ok())
             .unwrap_or_else(|| "https://api.github.com".into());
         while base.ends_with('/') {
             base.pop();

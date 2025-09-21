@@ -220,7 +220,7 @@ fn load_and_merge_uses_environment_when_cli_defaults(#[case] scenario: TestScena
         SubcommandType::Pr => {
             set_var("VKCMDS_PR_REFERENCE", "env_ref");
             set_var("VKCMDS_PR_FILES", "env_one.rs,env_two.rs");
-            set_var("VKCMDS_PR_SHOW_OUTDATED", "1");
+            set_var("VKCMDS_PR_SHOW_OUTDATED", "true");
 
             let cli = PrArgs::default();
             let merged = cli.load_and_merge().expect("merge pr args");
