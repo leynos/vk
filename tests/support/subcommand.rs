@@ -18,7 +18,7 @@ where
     let mut keys: Vec<&str> = env.iter().map(|(key, _)| *key).collect();
     keys.push("VK_CONFIG_PATH");
     let _guard = EnvGuard::new(&keys);
-    let (config_dir, _config_path) = setup_env_and_config(config);
+    let (config_dir, config_path) = setup_env_and_config(config);
     let _dir = DirGuard::enter(config_dir.path());
 
     for (key, value) in env {
@@ -28,8 +28,13 @@ where
         }
     }
 
-    cli.load_and_merge()
-        .unwrap_or_else(|err| panic!("merge {} args: {err}", std::any::type_name::<T>()))
+    cli.load_and_merge().unwrap_or_else(|err| {
+        panic!(
+            "merge {} args with config {}: {err}",
+            std::any::type_name::<T>(),
+            config_path.display()
+        )
+    })
 }
 
 /// Helper to build PR CLI arguments for tests.
@@ -39,7 +44,7 @@ pub fn pr_cli(reference: Option<&str>, files: &[&str]) -> PrArgs {
         args.reference = Some(reference.to_owned());
     }
     if !files.is_empty() {
-        args.files = files.iter().map(|value| (*value).to_owned()).collect();
+        args.files = files.iter().copied().map(str::to_owned).collect();
     }
     args
 }

@@ -124,7 +124,10 @@ message = "file message"
             let cli = resolve_cli("cli_ref", None);
             let merged = merge_with_sources(
                 cfg,
-                &[("VKCMDS_RESOLVE_MESSAGE", Some("env message"))],
+                &[
+                    ("VKCMDS_RESOLVE_REFERENCE", None),
+                    ("VKCMDS_RESOLVE_MESSAGE", Some("env message")),
+                ],
                 &cli,
             );
             assert_eq!(merged.reference, "cli_ref");
@@ -135,7 +138,14 @@ message = "file message"
 message = "file message"
 "#;
             let cli = resolve_cli("cli_ref", None);
-            let merged = merge_with_sources(cfg, &[("VKCMDS_RESOLVE_MESSAGE", None)], &cli);
+            let merged = merge_with_sources(
+                cfg,
+                &[
+                    ("VKCMDS_RESOLVE_REFERENCE", None),
+                    ("VKCMDS_RESOLVE_MESSAGE", None),
+                ],
+                &cli,
+            );
             assert_eq!(merged.reference, "cli_ref");
             assert_eq!(merged.message.as_deref(), Some("file message"));
         }

@@ -24,6 +24,13 @@ struct TestScenario {
     config_section: &'static str,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ConfigVariant {
+    CliDominant,
+    EnvFallback,
+    ConfigFallback,
+}
+
 trait RefStr {
     fn reference_str(&self) -> Option<&str>;
 }
@@ -73,6 +80,41 @@ const SCENARIO_DATA: &[(SubcommandType, &[&str], &str)] = &[
     ),
 ];
 
+fn config_for_scenario(scenario: &TestScenario, variant: ConfigVariant) -> String {
+    match (scenario.subcommand, variant) {
+        (SubcommandType::Pr, ConfigVariant::CliDominant | ConfigVariant::EnvFallback) => format!(
+            r#"[cmds.{section}]
+reference = "file_ref"
+files = ["config.txt"]
+show_outdated = false
+"#,
+            section = scenario.config_section,
+        ),
+        (SubcommandType::Pr, ConfigVariant::ConfigFallback) => String::new(),
+        (SubcommandType::Issue, _) => format!(
+            r#"[cmds.{section}]
+reference = "file_ref"
+"#,
+            section = scenario.config_section,
+        ),
+        (SubcommandType::Resolve, ConfigVariant::CliDominant) => format!(
+            r#"[cmds.{section}]
+reference = "file_ref"
+message = "file message"
+"#,
+            section = scenario.config_section,
+        ),
+        (SubcommandType::Resolve, ConfigVariant::EnvFallback | ConfigVariant::ConfigFallback) => {
+            format!(
+                r#"[cmds.{section}]
+message = "file message"
+"#,
+                section = scenario.config_section,
+            )
+        }
+    }
+}
+
 fn create_scenario(subcommand: SubcommandType) -> TestScenario {
     let (kind, env_vars, section) = SCENARIO_DATA
         .iter()
@@ -114,29 +156,7 @@ fn assert_reference_equals<T: RefStr>(merged: &T, expected: &str) {
 fn load_and_merge_prefers_cli_over_other_sources(#[case] scenario: TestScenario) {
     let _guard = EnvGuard::new(scenario.env_vars);
 
-    let cfg = match scenario.subcommand {
-        SubcommandType::Pr => format!(
-            r#"[cmds.{section}]
-reference = "file_ref"
-files = ["config.txt"]
-show_outdated = false
-"#,
-            section = scenario.config_section
-        ),
-        SubcommandType::Issue => format!(
-            r#"[cmds.{section}]
-reference = "file_ref"
-"#,
-            section = scenario.config_section
-        ),
-        SubcommandType::Resolve => format!(
-            r#"[cmds.{section}]
-reference = "file_ref"
-message = "file message"
-"#,
-            section = scenario.config_section
-        ),
-    };
+    let cfg = config_for_scenario(&scenario, ConfigVariant::CliDominant);
     let (_config_dir, _config_path) = setup_env_and_config(&cfg);
 
     match scenario.subcommand {
@@ -193,28 +213,7 @@ message = "file message"
 fn load_and_merge_uses_environment_when_cli_defaults(#[case] scenario: TestScenario) {
     let _guard = EnvGuard::new(scenario.env_vars);
 
-    let cfg = match scenario.subcommand {
-        SubcommandType::Pr => format!(
-            r#"[cmds.{section}]
-reference = "file_ref"
-files = ["config.txt"]
-show_outdated = false
-"#,
-            section = scenario.config_section
-        ),
-        SubcommandType::Issue => format!(
-            r#"[cmds.{section}]
-reference = "file_ref"
-"#,
-            section = scenario.config_section
-        ),
-        SubcommandType::Resolve => format!(
-            r#"[cmds.{section}]
-message = "file message"
-"#,
-            section = scenario.config_section
-        ),
-    };
+    let cfg = config_for_scenario(&scenario, ConfigVariant::EnvFallback);
     let (_config_dir, _config_path) = setup_env_and_config(&cfg);
 
     match scenario.subcommand {
@@ -266,21 +265,7 @@ message = "file message"
 fn load_and_merge_uses_config_or_defaults(#[case] scenario: TestScenario) {
     let _guard = EnvGuard::new(scenario.env_vars);
 
-    let cfg = match scenario.subcommand {
-        SubcommandType::Pr => String::new(),
-        SubcommandType::Issue => format!(
-            r#"[cmds.{section}]
-reference = "file_ref"
-"#,
-            section = scenario.config_section
-        ),
-        SubcommandType::Resolve => format!(
-            r#"[cmds.{section}]
-message = "file message"
-"#,
-            section = scenario.config_section
-        ),
-    };
+    let cfg = config_for_scenario(&scenario, ConfigVariant::ConfigFallback);
     let (config_dir, _config_path) = setup_env_and_config(&cfg);
 
     match scenario.subcommand {

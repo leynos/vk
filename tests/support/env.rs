@@ -19,6 +19,12 @@ pub struct EnvGuard {
 impl EnvGuard {
     /// Capture `keys`, removing them from the environment for the guard's
     /// lifetime.
+    ///
+    /// # Safety
+    /// Mutating the process environment is globally visible. `EnvGuard` acquires
+    /// the `vk::test_utils` environment lock so callers must serialise tests with
+    /// `#[serial]` and include `VK_CONFIG_PATH` when configuration helpers are
+    /// used.
     pub fn new(keys: &[&str]) -> Self {
         let mut entries = Vec::new();
         for key in keys {
@@ -73,6 +79,9 @@ pub fn write_config(content: &str) -> (TempDir, PathBuf) {
 }
 
 /// Write a config file, set `VK_CONFIG_PATH`, and return the directory and path.
+///
+/// Callers must create an [`EnvGuard`] that captures `VK_CONFIG_PATH` before
+/// invoking this helper so the variable is removed once the guard drops.
 pub fn setup_env_and_config(config_content: &str) -> (TempDir, PathBuf) {
     let (dir, path) = write_config(config_content);
     set_var("VK_CONFIG_PATH", path.as_os_str());
