@@ -69,7 +69,11 @@ files = ["file.txt"]
             let cli = pr_cli(None, &[]);
             let merged = merge_with_sources(
                 cfg,
-                &[("VKCMDS_PR_REFERENCE", None), ("VKCMDS_PR_FILES", None)],
+                &[
+                    ("VKCMDS_PR_REFERENCE", None),
+                    ("VKCMDS_PR_FILES", None),
+                    ("VKCMDS_PR_SHOW_OUTDATED", None),
+                ],
                 &cli,
             );
             assert_eq!(merged.reference.as_deref(), Some("file_ref"));
