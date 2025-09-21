@@ -166,7 +166,7 @@ mod tests {
         (dir, path)
     }
 
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum SubcommandType {
         Pr,
         Issue,
@@ -180,40 +180,60 @@ mod tests {
         config_section: &'static str,
     }
 
-    #[fixture]
-    fn pr_scenario() -> TestScenario {
-        TestScenario {
-            subcommand: SubcommandType::Pr,
-            env_vars: &[
+    const SCENARIO_DATA: &[(SubcommandType, &[&str], &str)] = &[
+        (
+            SubcommandType::Pr,
+            &[
                 "VK_CONFIG_PATH",
                 "VKCMDS_PR_REFERENCE",
                 "VKCMDS_PR_FILES",
                 "VKCMDS_PR_SHOW_OUTDATED",
             ],
-            config_section: "pr",
-        }
-    }
-
-    #[fixture]
-    fn issue_scenario() -> TestScenario {
-        TestScenario {
-            subcommand: SubcommandType::Issue,
-            env_vars: &["VK_CONFIG_PATH", "VKCMDS_ISSUE_REFERENCE"],
-            config_section: "issue",
-        }
-    }
-
-    #[fixture]
-    fn resolve_scenario() -> TestScenario {
-        TestScenario {
-            subcommand: SubcommandType::Resolve,
-            env_vars: &[
+            "pr",
+        ),
+        (
+            SubcommandType::Issue,
+            &["VK_CONFIG_PATH", "VKCMDS_ISSUE_REFERENCE"],
+            "issue",
+        ),
+        (
+            SubcommandType::Resolve,
+            &[
                 "VK_CONFIG_PATH",
                 "VKCMDS_RESOLVE_REFERENCE",
                 "VKCMDS_RESOLVE_MESSAGE",
             ],
-            config_section: "resolve",
+            "resolve",
+        ),
+    ];
+
+    fn create_scenario(subcommand: SubcommandType) -> TestScenario {
+        let (kind, env_vars, section) = SCENARIO_DATA
+            .iter()
+            .find(|(kind, _, _)| *kind == subcommand)
+            .copied()
+            .unwrap_or_else(|| panic!("scenario data missing for {subcommand:?}"));
+
+        TestScenario {
+            subcommand: kind,
+            env_vars,
+            config_section: section,
         }
+    }
+
+    #[fixture]
+    fn pr_scenario() -> TestScenario {
+        create_scenario(SubcommandType::Pr)
+    }
+
+    #[fixture]
+    fn issue_scenario() -> TestScenario {
+        create_scenario(SubcommandType::Issue)
+    }
+
+    #[fixture]
+    fn resolve_scenario() -> TestScenario {
+        create_scenario(SubcommandType::Resolve)
     }
 
     fn setup_env_and_config(scenario: &TestScenario, config_content: &str) -> (TempDir, PathBuf) {
