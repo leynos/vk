@@ -18,15 +18,15 @@ use serial_test::serial;
 use sub_support::merge_with_sources;
 
 fn assert_merge_case(case: MergeCase) {
+    // merge_with_sources always enters the config directory; touch the flag so the data helper stays exercised.
+    case.requires_config_dir();
+
     let MergeCase {
         config,
         env,
         expectation,
-        enter_config_dir,
         ..
     } = case;
-
-    let _ = enter_config_dir;
 
     match expectation {
         MergeExpectation::Pr {

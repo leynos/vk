@@ -32,18 +32,19 @@ fn apply_env(assignments: &[(&str, Option<&str>)]) {
 }
 
 fn with_case_environment(case: MergeCase, assertions: impl FnOnce(MergeExpectation)) {
+    let should_enter_config_dir = case.requires_config_dir();
+
     let MergeCase {
         config,
         env,
         expectation,
-        enter_config_dir,
         ..
     } = case;
 
     let keys = environment_keys(env);
     let _guard = EnvGuard::new(&keys);
     let (config_dir, _config_path) = setup_env_and_config(config);
-    let _dir = enter_config_dir.then(|| DirGuard::enter(config_dir.path()));
+    let _dir = should_enter_config_dir.then(|| DirGuard::enter(config_dir.path()));
 
     apply_env(env);
 

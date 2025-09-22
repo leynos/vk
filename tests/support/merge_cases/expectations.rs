@@ -1,3 +1,4 @@
+//! Expected merged outputs for each subcommand/scenario pair used by data-driven tests.
 use super::data::MergeScenario;
 use vk::cli_args::{IssueArgs, PrArgs, ResolveArgs};
 
@@ -31,13 +32,13 @@ pub(super) fn build_pr_expectation(scenario: MergeScenario) -> MergeExpectation 
         MergeScenario::EnvOverFile => MergeExpectation::Pr {
             cli: build_pr_args(None, &[], false),
             expected_reference: Some("env_ref"),
-            expected_files: &[],
-            expected_show_outdated: false,
+            expected_files: &["env_one.rs", "env_two.rs"],
+            expected_show_outdated: true,
         },
         MergeScenario::FileOverDefaults => MergeExpectation::Pr {
             cli: build_pr_args(None, &[], false),
             expected_reference: Some("file_ref"),
-            expected_files: &[],
+            expected_files: &["config.txt"],
             expected_show_outdated: false,
         },
     }

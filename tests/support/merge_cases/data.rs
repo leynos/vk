@@ -1,3 +1,6 @@
+//! Data-driven merge precedence cases consumed by CLI and subcommand tests.
+//! Defines subcommands, scenarios, input sources (config/env), and how to set up
+//! each case so behavioural tests share a single source of truth.
 use super::expectations::{
     MergeExpectation, build_issue_expectation, build_pr_expectation, build_resolve_expectation,
 };
@@ -45,6 +48,13 @@ pub struct MergeCase {
     pub enter_config_dir: bool,
 }
 
+impl MergeCase {
+    /// True when CLI tests must enter the generated config directory before merging.
+    pub fn requires_config_dir(&self) -> bool {
+        self.enter_config_dir
+    }
+}
+
 fn build_cases_from_data(data: &SubcommandCaseData) -> Vec<MergeCase> {
     data.scenarios
         .iter()
@@ -66,84 +76,86 @@ pub fn case(subcommand: MergeSubcommand, scenario: MergeScenario) -> MergeCase {
         .unwrap_or_else(|| panic!("missing merge case for {subcommand:?} and {scenario:?}"))
 }
 
+const SUBCOMMAND_CASE_DATA: [SubcommandCaseData; 3] = [
+    SubcommandCaseData {
+        subcommand: MergeSubcommand::Pr,
+        scenarios: [
+            (
+                MergeScenario::CliOverEnv,
+                PR_CONFIG,
+                PR_ENV_CLI_OVER_ENV,
+                true,
+            ),
+            (
+                MergeScenario::EnvOverFile,
+                PR_CONFIG,
+                PR_ENV_ENV_OVER_FILE,
+                true,
+            ),
+            (
+                MergeScenario::FileOverDefaults,
+                PR_CONFIG,
+                PR_ENV_FILE_OVER_DEFAULTS,
+                true,
+            ),
+        ],
+        expectation_builder: build_pr_expectation,
+    },
+    SubcommandCaseData {
+        subcommand: MergeSubcommand::Issue,
+        scenarios: [
+            (
+                MergeScenario::CliOverEnv,
+                ISSUE_CONFIG,
+                ISSUE_ENV_CLI_OVER_ENV,
+                false,
+            ),
+            (
+                MergeScenario::EnvOverFile,
+                ISSUE_CONFIG,
+                ISSUE_ENV_ENV_OVER_FILE,
+                false,
+            ),
+            (
+                MergeScenario::FileOverDefaults,
+                ISSUE_CONFIG,
+                ISSUE_ENV_FILE_OVER_DEFAULTS,
+                true,
+            ),
+        ],
+        expectation_builder: build_issue_expectation,
+    },
+    SubcommandCaseData {
+        subcommand: MergeSubcommand::Resolve,
+        scenarios: [
+            (
+                MergeScenario::CliOverEnv,
+                RESOLVE_CONFIG_WITH_REFERENCE,
+                RESOLVE_ENV_CLI_OVER_ENV,
+                false,
+            ),
+            (
+                MergeScenario::EnvOverFile,
+                RESOLVE_MESSAGE_CONFIG,
+                RESOLVE_ENV_ENV_OVER_FILE,
+                false,
+            ),
+            (
+                MergeScenario::FileOverDefaults,
+                RESOLVE_MESSAGE_CONFIG,
+                RESOLVE_ENV_FILE_OVER_DEFAULTS,
+                true,
+            ),
+        ],
+        expectation_builder: build_resolve_expectation,
+    },
+];
+
 fn all_cases() -> Vec<MergeCase> {
-    [
-        SubcommandCaseData {
-            subcommand: MergeSubcommand::Pr,
-            scenarios: [
-                (
-                    MergeScenario::CliOverEnv,
-                    PR_CONFIG,
-                    PR_ENV_CLI_OVER_ENV,
-                    true,
-                ),
-                (
-                    MergeScenario::EnvOverFile,
-                    PR_CONFIG,
-                    PR_ENV_ENV_OVER_FILE,
-                    true,
-                ),
-                (
-                    MergeScenario::FileOverDefaults,
-                    PR_CONFIG,
-                    PR_ENV_FILE_OVER_DEFAULTS,
-                    true,
-                ),
-            ],
-            expectation_builder: build_pr_expectation,
-        },
-        SubcommandCaseData {
-            subcommand: MergeSubcommand::Issue,
-            scenarios: [
-                (
-                    MergeScenario::CliOverEnv,
-                    ISSUE_CONFIG,
-                    ISSUE_ENV_CLI_OVER_ENV,
-                    false,
-                ),
-                (
-                    MergeScenario::EnvOverFile,
-                    ISSUE_CONFIG,
-                    ISSUE_ENV_ENV_OVER_FILE,
-                    false,
-                ),
-                (
-                    MergeScenario::FileOverDefaults,
-                    ISSUE_CONFIG,
-                    ISSUE_ENV_FILE_OVER_DEFAULTS,
-                    true,
-                ),
-            ],
-            expectation_builder: build_issue_expectation,
-        },
-        SubcommandCaseData {
-            subcommand: MergeSubcommand::Resolve,
-            scenarios: [
-                (
-                    MergeScenario::CliOverEnv,
-                    RESOLVE_CONFIG_WITH_REFERENCE,
-                    RESOLVE_ENV_CLI_OVER_ENV,
-                    false,
-                ),
-                (
-                    MergeScenario::EnvOverFile,
-                    RESOLVE_MESSAGE_CONFIG,
-                    RESOLVE_ENV_ENV_OVER_FILE,
-                    false,
-                ),
-                (
-                    MergeScenario::FileOverDefaults,
-                    RESOLVE_MESSAGE_CONFIG,
-                    RESOLVE_ENV_FILE_OVER_DEFAULTS,
-                    true,
-                ),
-            ],
-            expectation_builder: build_resolve_expectation,
-        },
-    ]
-    .into_iter()
-    .flat_map(|data| build_cases_from_data(&data))
-    .collect()
+    SUBCOMMAND_CASE_DATA
+        .iter()
+        .flat_map(build_cases_from_data)
+        .collect()
 }
 
 const PR_CONFIG: &str = r#"[cmds.pr]
@@ -154,13 +166,13 @@ show_outdated = false
 
 const PR_ENV_CLI_OVER_ENV: EnvAssignments = &[
     ("VKCMDS_PR_REFERENCE", Some("env_ref")),
-    ("VKCMDS_PR_FILES", Some("env.txt")),
+    ("VKCMDS_PR_FILES", Some(r#"["env.txt"]"#)),
     ("VKCMDS_PR_SHOW_OUTDATED", Some("false")),
 ];
 
 const PR_ENV_ENV_OVER_FILE: EnvAssignments = &[
     ("VKCMDS_PR_REFERENCE", Some("env_ref")),
-    ("VKCMDS_PR_FILES", Some("env_one.rs,env_two.rs")),
+    ("VKCMDS_PR_FILES", Some(r#"["env_one.rs","env_two.rs"]"#)),
     ("VKCMDS_PR_SHOW_OUTDATED", Some("true")),
 ];
 

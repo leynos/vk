@@ -61,11 +61,15 @@ pub struct PrArgs {
     pub reference: Option<String>,
     /// Only show comments for these files
     #[arg(value_name = "FILE", num_args = 0..)]
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
     /// Include outdated review threads
     #[arg(short = 'o', long = "show-outdated")]
-    #[serde(default, alias = "include_outdated")]
+    #[serde(
+        default,
+        alias = "include_outdated",
+        skip_serializing_if = "crate::cli_args::is_false"
+    )]
     pub show_outdated: bool,
 }
 
@@ -109,6 +113,12 @@ pub struct ResolveArgs {
         help = "Reply text to post before resolving the comment"
     )]
     pub message: Option<String>,
+}
+
+/// Serde helper that skips serialising `false` so config and env can override.
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde skip_serializing_if requires &bool signature")]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[expect(
