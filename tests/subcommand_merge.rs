@@ -5,7 +5,7 @@
 
 #[path = "support/env.rs"]
 mod env_support;
-#[path = "support/merge_cases.rs"]
+#[path = "support/merge_cases/mod.rs"]
 mod merge_cases;
 #[path = "support/subcommand.rs"]
 mod sub_support;

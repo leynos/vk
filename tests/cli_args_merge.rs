@@ -1,6 +1,6 @@
 //! Behavioural coverage for CLI argument merging helpers.
 
-#[path = "support/merge_cases.rs"]
+#[path = "support/merge_cases/mod.rs"]
 mod merge_cases;
 #[path = "support/env.rs"]
 mod support;
@@ -31,7 +31,7 @@ fn apply_env(assignments: &[(&str, Option<&str>)]) {
     }
 }
 
-fn assert_cli_merge(case: MergeCase) {
+fn with_case_environment(case: MergeCase, assertions: impl FnOnce(MergeExpectation)) {
     let MergeCase {
         config,
         env,
@@ -47,7 +47,11 @@ fn assert_cli_merge(case: MergeCase) {
 
     apply_env(env);
 
-    match expectation {
+    assertions(expectation);
+}
+
+fn assert_cli_merge(case: MergeCase) {
+    with_case_environment(case, |expectation| match expectation {
         MergeExpectation::Pr {
             cli,
             expected_reference,
@@ -81,26 +85,11 @@ fn assert_cli_merge(case: MergeCase) {
             assert_eq!(merged.reference, expected_reference);
             assert_eq!(merged.message.as_deref(), expected_message);
         }
-    }
+    });
 }
 
 fn assert_cli_preserves(case: MergeCase) {
-    let MergeCase {
-        config,
-        env,
-        expectation,
-        enter_config_dir,
-        ..
-    } = case;
-
-    let keys = environment_keys(env);
-    let _guard = EnvGuard::new(&keys);
-    let (config_dir, _config_path) = setup_env_and_config(config);
-    let _dir = enter_config_dir.then(|| DirGuard::enter(config_dir.path()));
-
-    apply_env(env);
-
-    match expectation {
+    with_case_environment(case, |expectation| match expectation {
         MergeExpectation::Pr {
             cli,
             expected_reference,
@@ -143,7 +132,7 @@ fn assert_cli_preserves(case: MergeCase) {
             assert_eq!(merged.reference, expected_reference);
             assert_eq!(merged.message.as_deref(), expected_message);
         }
-    }
+    });
 }
 
 #[rstest]

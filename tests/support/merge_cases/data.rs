@@ -1,11 +1,6 @@
-//! Shared merge precedence fixtures for CLI and subcommand tests.
-//!
-//! Provides reusable scenario definitions describing how configuration,
-//! environment, and CLI inputs interact for each subcommand. Keeping the data
-//! here ensures behavioural tests assert the same expectations without
-//! duplicating setup logic.
-
-use vk::cli_args::{IssueArgs, PrArgs, ResolveArgs};
+use super::expectations::{
+    MergeExpectation, build_issue_expectation, build_pr_expectation, build_resolve_expectation,
+};
 
 type EnvAssignments = &'static [(&'static str, Option<&'static str>)];
 
@@ -31,31 +26,22 @@ pub enum MergeScenario {
 }
 
 #[derive(Clone, Debug)]
-pub enum MergeExpectation {
-    Pr {
-        cli: PrArgs,
-        expected_reference: Option<&'static str>,
-        expected_files: &'static [&'static str],
-        expected_show_outdated: bool,
-    },
-    Issue {
-        cli: IssueArgs,
-        expected_reference: Option<&'static str>,
-    },
-    Resolve {
-        cli: ResolveArgs,
-        expected_reference: &'static str,
-        expected_message: Option<&'static str>,
-    },
-}
-
-#[derive(Clone, Debug)]
 pub struct MergeCase {
+    /// Subcommand under test for this precedence scenario.
     pub subcommand: MergeSubcommand,
+    /// Concrete combination of CLI, environment, and config sources to evaluate.
     pub scenario: MergeScenario,
+    /// Configuration content written to `.vk.toml`.
     pub config: &'static str,
+    /// Environment variable assignments applied for the scenario.
     pub env: EnvAssignments,
+    /// Expected merge result for the subcommand/scenario pair.
     pub expectation: MergeExpectation,
+    /// When true the test enters the generated config directory before merging.
+    ///
+    /// This mirrors how callers execute the CLI from the repository root so any
+    /// relative CLI arguments (for example PR file paths) resolve against the
+    /// same directory as the configuration file.
     pub enter_config_dir: bool,
 }
 
@@ -71,66 +57,6 @@ fn build_cases_from_data(data: &SubcommandCaseData) -> Vec<MergeCase> {
             enter_config_dir,
         })
         .collect()
-}
-
-fn build_pr_expectation(scenario: MergeScenario) -> MergeExpectation {
-    match scenario {
-        MergeScenario::CliOverEnv => MergeExpectation::Pr {
-            cli: build_pr_args(Some("cli_ref"), &["cli.txt"], true),
-            expected_reference: Some("cli_ref"),
-            expected_files: &["cli.txt"],
-            expected_show_outdated: true,
-        },
-        MergeScenario::EnvOverFile => MergeExpectation::Pr {
-            cli: build_pr_args(None, &[], false),
-            expected_reference: Some("env_ref"),
-            expected_files: &[],
-            expected_show_outdated: false,
-        },
-        MergeScenario::FileOverDefaults => MergeExpectation::Pr {
-            cli: build_pr_args(None, &[], false),
-            expected_reference: Some("file_ref"),
-            expected_files: &[],
-            expected_show_outdated: false,
-        },
-    }
-}
-
-fn build_issue_expectation(scenario: MergeScenario) -> MergeExpectation {
-    match scenario {
-        MergeScenario::CliOverEnv => MergeExpectation::Issue {
-            cli: build_issue_args(Some("cli_ref")),
-            expected_reference: Some("cli_ref"),
-        },
-        MergeScenario::EnvOverFile => MergeExpectation::Issue {
-            cli: build_issue_args(None),
-            expected_reference: Some("env_ref"),
-        },
-        MergeScenario::FileOverDefaults => MergeExpectation::Issue {
-            cli: build_issue_args(None),
-            expected_reference: Some("file_ref"),
-        },
-    }
-}
-
-fn build_resolve_expectation(scenario: MergeScenario) -> MergeExpectation {
-    match scenario {
-        MergeScenario::CliOverEnv => MergeExpectation::Resolve {
-            cli: build_resolve_args("cli_ref", Some("cli message")),
-            expected_reference: "cli_ref",
-            expected_message: Some("cli message"),
-        },
-        MergeScenario::EnvOverFile => MergeExpectation::Resolve {
-            cli: build_resolve_args("cli_ref", None),
-            expected_reference: "cli_ref",
-            expected_message: Some("env message"),
-        },
-        MergeScenario::FileOverDefaults => MergeExpectation::Resolve {
-            cli: build_resolve_args("cli_ref", None),
-            expected_reference: "cli_ref",
-            expected_message: Some("file message"),
-        },
-    }
 }
 
 pub fn case(subcommand: MergeSubcommand, scenario: MergeScenario) -> MergeCase {
@@ -218,27 +144,6 @@ fn all_cases() -> Vec<MergeCase> {
     .into_iter()
     .flat_map(|data| build_cases_from_data(&data))
     .collect()
-}
-
-fn build_pr_args(reference: Option<&str>, files: &[&str], show_outdated: bool) -> PrArgs {
-    PrArgs {
-        reference: reference.map(str::to_owned),
-        files: files.iter().map(|value| String::from(*value)).collect(),
-        show_outdated,
-    }
-}
-
-fn build_issue_args(reference: Option<&str>) -> IssueArgs {
-    IssueArgs {
-        reference: reference.map(str::to_owned),
-    }
-}
-
-fn build_resolve_args(reference: &str, message: Option<&str>) -> ResolveArgs {
-    ResolveArgs {
-        reference: String::from(reference),
-        message: message.map(str::to_owned),
-    }
 }
 
 const PR_CONFIG: &str = r#"[cmds.pr]
