@@ -8,6 +8,7 @@ use std::sync::LazyLock;
 
 type EnvAssignments = &'static [(&'static str, Option<&'static str>)];
 
+/// Fixture metadata shared by every scenario of a merge subcommand.
 #[derive(Copy, Clone)]
 struct SubcommandCaseData {
     subcommand: MergeSubcommand,
@@ -35,11 +36,13 @@ pub enum MergeScenario {
     FileOverDefaults,
 }
 
-#[derive(Clone, Debug)]
 /// Merge scenario fixture consumed by CLI and subcommand tests.
 ///
 /// Captures the configuration, environment assignments, and expectations
 /// needed to drive precedence assertions in both suites.
+/// The CLI harness consults `requires_config_dir` to mirror how relative paths
+/// resolve when cases opt into entering the generated config directory.
+#[derive(Clone, Debug)]
 pub struct MergeCase {
     /// Subcommand under test for this precedence scenario.
     pub subcommand: MergeSubcommand,
