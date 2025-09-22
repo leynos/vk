@@ -1,10 +1,10 @@
 //! Data-driven merge precedence cases consumed by CLI and subcommand tests.
 //! Defines subcommands, scenarios, input sources (config/env), and how to set up
 //! each case so behavioural tests share a single source of truth.
-use once_cell::sync::Lazy;
 use super::expectations::{
     MergeExpectation, build_issue_expectation, build_pr_expectation, build_resolve_expectation,
 };
+use std::sync::LazyLock;
 
 type EnvAssignments = &'static [(&'static str, Option<&'static str>)];
 
@@ -32,6 +32,7 @@ pub enum MergeScenario {
 }
 
 #[derive(Clone, Debug)]
+/// Merge scenario fixture consumed by CLI and subcommand tests.
 pub struct MergeCase {
     /// Subcommand under test for this precedence scenario.
     pub subcommand: MergeSubcommand,
@@ -158,7 +159,7 @@ const SUBCOMMAND_CASE_DATA: [SubcommandCaseData; 3] = [
 ];
 
 fn all_cases() -> &'static [MergeCase] {
-    static ALL_CASES: Lazy<Vec<MergeCase>> = Lazy::new(|| {
+    static ALL_CASES: LazyLock<Vec<MergeCase>> = LazyLock::new(|| {
         SUBCOMMAND_CASE_DATA
             .iter()
             .flat_map(build_cases_from_data)

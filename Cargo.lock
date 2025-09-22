@@ -3236,7 +3236,6 @@ dependencies = [
  "libc",
  "markup5ever_rcdom",
  "mockall",
- "once_cell",
  "ortho_config",
  "predicates",
  "regex",
