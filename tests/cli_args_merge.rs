@@ -14,6 +14,10 @@ use serial_test::serial;
 use support::{DirGuard, EnvGuard, setup_env_and_config};
 use vk::test_utils::{remove_var, set_var};
 
+fn to_owned_vec(values: &[&'static str]) -> Vec<String> {
+    values.iter().map(|&s| s.to_owned()).collect()
+}
+
 fn environment_keys<'a>(env: &'a [(&'a str, Option<&'a str>)]) -> Vec<&'a str> {
     let mut keys = env.iter().map(|(key, _)| *key).collect::<Vec<_>>();
     keys.push("VK_CONFIG_PATH");
@@ -61,13 +65,7 @@ fn assert_cli_merge(case: MergeCase) {
         } => {
             let merged = cli.load_and_merge().expect("merge pr args");
             assert_eq!(merged.reference.as_deref(), expected_reference);
-            assert_eq!(
-                merged.files,
-                expected_files
-                    .iter()
-                    .map(|value| String::from(*value))
-                    .collect::<Vec<_>>(),
-            );
+            assert_eq!(merged.files, to_owned_vec(expected_files));
             assert_eq!(merged.show_outdated, expected_show_outdated);
         }
         MergeExpectation::Issue {
@@ -103,13 +101,7 @@ fn assert_cli_preserves(case: MergeCase) {
             assert_eq!(cli.files, snapshot.files);
             assert_eq!(cli.show_outdated, snapshot.show_outdated);
             assert_eq!(merged.reference.as_deref(), expected_reference);
-            assert_eq!(
-                merged.files,
-                expected_files
-                    .iter()
-                    .map(|value| String::from(*value))
-                    .collect::<Vec<_>>(),
-            );
+            assert_eq!(merged.files, to_owned_vec(expected_files));
             assert_eq!(merged.show_outdated, expected_show_outdated);
         }
         MergeExpectation::Issue {

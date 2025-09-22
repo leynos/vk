@@ -116,7 +116,10 @@ pub struct ResolveArgs {
 }
 
 /// Serde helper that skips serialising `false` so config and env can override.
-#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde skip_serializing_if requires &bool signature")]
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires &bool signature"
+)]
 fn is_false(value: &bool) -> bool {
     !*value
 }
