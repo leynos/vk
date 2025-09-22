@@ -57,7 +57,6 @@ use clap::{Parser, Subcommand};
 use ortho_config::{OrthoConfig, SubcmdConfigMerge};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::io::{ErrorKind, Write};
 use std::sync::LazyLock;
 #[cfg(feature = "unstable-rest-resolve")]
@@ -432,7 +431,7 @@ async fn main() -> Result<(), VkError> {
         .with_writer(std::io::stderr)
         .init();
     let cli = Cli::parse();
-    let mut global = GlobalArgs::load_from_iter(env::args_os().take(1))?;
+    let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
     global.merge(cli.global);
     let result = match cli.command {
         Commands::Pr(pr_cli) => {
