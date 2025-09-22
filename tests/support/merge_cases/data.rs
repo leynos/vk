@@ -15,7 +15,9 @@ struct SubcommandCaseData {
     expectation_builder: fn(MergeScenario) -> MergeExpectation,
 }
 
-/// Subcommands under test for precedence merging.
+/// Merge entrypoints exercised by the precedence suites.
+///
+/// Each variant mirrors a CLI subcommand whose configuration merging we verify.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MergeSubcommand {
     Pr,
@@ -23,7 +25,9 @@ pub enum MergeSubcommand {
     Resolve,
 }
 
-/// Precedence scenarios describing which source wins when values conflict.
+/// Source precedence exercised by each scenario.
+///
+/// Each variant spells out which input must override the others when values disagree.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MergeScenario {
     CliOverEnv,
@@ -33,6 +37,9 @@ pub enum MergeScenario {
 
 #[derive(Clone, Debug)]
 /// Merge scenario fixture consumed by CLI and subcommand tests.
+///
+/// Captures the configuration, environment assignments, and expectations
+/// needed to drive precedence assertions in both suites.
 pub struct MergeCase {
     /// Subcommand under test for this precedence scenario.
     pub subcommand: MergeSubcommand,
@@ -53,6 +60,8 @@ pub struct MergeCase {
 
 impl MergeCase {
     /// True when CLI tests must enter the generated config directory before merging.
+    ///
+    /// Mirrors the CLI's relative-path handling so expectations stay aligned with behaviour.
     pub fn requires_config_dir(&self) -> bool {
         self.enter_config_dir
     }
@@ -73,6 +82,9 @@ fn build_cases_from_data(data: &SubcommandCaseData) -> Vec<MergeCase> {
 }
 
 /// Return the unique `MergeCase` for a subcommand/scenario pair.
+///
+/// Cases are cached so repeated lookups reuse the allocation-backed slice and callers
+/// receive a clone.
 ///
 /// Panics if the pair is not defined in `SUBCOMMAND_CASE_DATA`.
 pub fn case(subcommand: MergeSubcommand, scenario: MergeScenario) -> MergeCase {
