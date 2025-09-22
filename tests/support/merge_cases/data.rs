@@ -1,6 +1,7 @@
 //! Data-driven merge precedence cases consumed by CLI and subcommand tests.
 //! Defines subcommands, scenarios, input sources (config/env), and how to set up
 //! each case so behavioural tests share a single source of truth.
+use once_cell::sync::Lazy;
 use super::expectations::{
     MergeExpectation, build_issue_expectation, build_pr_expectation, build_resolve_expectation,
 };
@@ -75,8 +76,9 @@ fn build_cases_from_data(data: &SubcommandCaseData) -> Vec<MergeCase> {
 /// Panics if the pair is not defined in `SUBCOMMAND_CASE_DATA`.
 pub fn case(subcommand: MergeSubcommand, scenario: MergeScenario) -> MergeCase {
     all_cases()
-        .into_iter()
+        .iter()
         .find(|case| case.subcommand == subcommand && case.scenario == scenario)
+        .cloned()
         .unwrap_or_else(|| panic!("missing merge case for {subcommand:?} and {scenario:?}"))
 }
 
@@ -155,11 +157,15 @@ const SUBCOMMAND_CASE_DATA: [SubcommandCaseData; 3] = [
     },
 ];
 
-fn all_cases() -> Vec<MergeCase> {
-    SUBCOMMAND_CASE_DATA
-        .iter()
-        .flat_map(build_cases_from_data)
-        .collect()
+fn all_cases() -> &'static [MergeCase] {
+    static ALL_CASES: Lazy<Vec<MergeCase>> = Lazy::new(|| {
+        SUBCOMMAND_CASE_DATA
+            .iter()
+            .flat_map(build_cases_from_data)
+            .collect()
+    });
+
+    ALL_CASES.as_slice()
 }
 
 const PR_CONFIG: &str = r#"[cmds.pr]

@@ -84,7 +84,7 @@ pub(super) fn build_resolve_expectation(scenario: MergeScenario) -> MergeExpecta
 fn build_pr_args(reference: Option<&str>, files: &[&str], show_outdated: bool) -> PrArgs {
     PrArgs {
         reference: reference.map(str::to_owned),
-        files: files.iter().map(|value| String::from(*value)).collect(),
+        files: files.iter().copied().map(str::to_owned).collect(),
         show_outdated,
     }
 }
