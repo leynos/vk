@@ -68,7 +68,7 @@ pub struct PrArgs {
     #[serde(
         default,
         alias = "include_outdated",
-        skip_serializing_if = "crate::cli_args::is_false"
+        skip_serializing_if = "self::is_false"
     )]
     pub show_outdated: bool,
 }

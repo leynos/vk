@@ -17,6 +17,10 @@ use rstest::rstest;
 use serial_test::serial;
 use sub_support::merge_with_sources;
 
+fn to_owned_vec(values: &[&str]) -> Vec<String> {
+    values.iter().map(|&value| value.to_owned()).collect()
+}
+
 fn assert_merge_case(case: MergeCase) {
     // merge_with_sources always enters the config directory; touch the flag so the data helper stays exercised.
     case.requires_config_dir();
@@ -37,13 +41,7 @@ fn assert_merge_case(case: MergeCase) {
         } => {
             let merged = merge_with_sources(config, env, &cli);
             assert_eq!(merged.reference.as_deref(), expected_reference);
-            assert_eq!(
-                merged.files,
-                expected_files
-                    .iter()
-                    .map(|value| String::from(*value))
-                    .collect::<Vec<_>>(),
-            );
+            assert_eq!(merged.files, to_owned_vec(expected_files));
             assert_eq!(merged.show_outdated, expected_show_outdated);
         }
         MergeExpectation::Issue {

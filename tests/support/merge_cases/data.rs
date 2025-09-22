@@ -14,6 +14,7 @@ struct SubcommandCaseData {
     expectation_builder: fn(MergeScenario) -> MergeExpectation,
 }
 
+/// Subcommands under test for precedence merging.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MergeSubcommand {
     Pr,
@@ -21,6 +22,7 @@ pub enum MergeSubcommand {
     Resolve,
 }
 
+/// Precedence scenarios describing which source wins when values conflict.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MergeScenario {
     CliOverEnv,
@@ -40,11 +42,10 @@ pub struct MergeCase {
     pub env: EnvAssignments,
     /// Expected merge result for the subcommand/scenario pair.
     pub expectation: MergeExpectation,
-    /// When true the test enters the generated config directory before merging.
+    /// When true, CLI-harness tests enter the generated config directory before merging.
     ///
-    /// This mirrors how callers execute the CLI from the repository root so any
-    /// relative CLI arguments (for example PR file paths) resolve against the
-    /// same directory as the configuration file.
+    /// This mirrors real CLI execution so relative CLI arguments resolve against the
+    /// configuration file’s directory. The subcommand harness always enters the config dir.
     pub enter_config_dir: bool,
 }
 
@@ -69,6 +70,9 @@ fn build_cases_from_data(data: &SubcommandCaseData) -> Vec<MergeCase> {
         .collect()
 }
 
+/// Return the unique `MergeCase` for a subcommand/scenario pair.
+///
+/// Panics if the pair is not defined in `SUBCOMMAND_CASE_DATA`.
 pub fn case(subcommand: MergeSubcommand, scenario: MergeScenario) -> MergeCase {
     all_cases()
         .into_iter()
