@@ -2,29 +2,22 @@
 
 #[path = "support/merge_cases/mod.rs"]
 mod merge_cases;
+#[path = "support/merge.rs"]
+mod merge_support;
 #[path = "support/env.rs"]
 mod support;
 
 use merge_cases::{
     MergeCase, MergeExpectation, MergeScenario, MergeSubcommand, case as merge_case,
 };
+use merge_support::{environment_keys, to_owned_vec};
 use ortho_config::SubcmdConfigMerge;
 use rstest::rstest;
+use serde_json::json;
 use serial_test::serial;
 use support::{DirGuard, EnvGuard, setup_env_and_config};
+use vk::cli_args::PrArgs;
 use vk::test_utils::{remove_var, set_var};
-
-fn to_owned_vec(values: &[&'static str]) -> Vec<String> {
-    values.iter().map(|&s| s.to_owned()).collect()
-}
-
-fn environment_keys<'a>(env: &'a [(&'a str, Option<&'a str>)]) -> Vec<&'a str> {
-    let mut keys = env.iter().map(|(key, _)| *key).collect::<Vec<_>>();
-    keys.push("VK_CONFIG_PATH");
-    keys.sort_unstable();
-    keys.dedup();
-    keys
-}
 
 fn apply_env(assignments: &[(&str, Option<&str>)]) {
     for (key, value) in assignments {
@@ -36,7 +29,7 @@ fn apply_env(assignments: &[(&str, Option<&str>)]) {
 }
 
 fn with_case_environment(case: MergeCase, assertions: impl FnOnce(MergeExpectation)) {
-    let should_enter_config_dir = case.requires_config_dir();
+    let enter_config_dir = case.requires_config_dir();
 
     let MergeCase {
         config,
@@ -48,11 +41,32 @@ fn with_case_environment(case: MergeCase, assertions: impl FnOnce(MergeExpectati
     let keys = environment_keys(env);
     let _guard = EnvGuard::new(&keys);
     let (config_dir, _config_path) = setup_env_and_config(config);
-    let _dir = should_enter_config_dir.then(|| DirGuard::enter(config_dir.path()));
+    let _dir = if enter_config_dir {
+        Some(DirGuard::enter(config_dir.path()))
+    } else {
+        None
+    };
 
     apply_env(env);
 
     assertions(expectation);
+}
+
+#[test]
+fn pr_args_serialisation_respects_show_outdated_flag() {
+    let base = PrArgs {
+        reference: Some(String::from("ref")),
+        ..PrArgs::default()
+    };
+
+    let false_value = serde_json::to_value(&base).expect("serialise pr args");
+    assert!(false_value.get("show_outdated").is_none());
+
+    let mut with_flag = base.clone();
+    with_flag.show_outdated = true;
+
+    let true_value = serde_json::to_value(&with_flag).expect("serialise pr args");
+    assert_eq!(true_value.get("show_outdated"), Some(&json!(true)));
 }
 
 fn assert_cli_merge(case: MergeCase) {

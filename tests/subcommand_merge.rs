@@ -7,23 +7,21 @@
 mod env_support;
 #[path = "support/merge_cases/mod.rs"]
 mod merge_cases;
+#[path = "support/merge.rs"]
+mod merge_support;
 #[path = "support/subcommand.rs"]
 mod sub_support;
 
 use merge_cases::{
     MergeCase, MergeExpectation, MergeScenario, MergeSubcommand, case as merge_case,
 };
+use merge_support::to_owned_vec;
 use rstest::rstest;
 use serial_test::serial;
 use sub_support::merge_with_sources;
 
-fn to_owned_vec(values: &[&str]) -> Vec<String> {
-    values.iter().map(|&value| value.to_owned()).collect()
-}
-
 fn assert_merge_case(case: MergeCase) {
-    // merge_with_sources always enters the config directory; touch the flag so the data helper stays exercised.
-    case.requires_config_dir();
+    let enter_config_dir = case.requires_config_dir();
 
     let MergeCase {
         config,
@@ -39,7 +37,7 @@ fn assert_merge_case(case: MergeCase) {
             expected_files,
             expected_show_outdated,
         } => {
-            let merged = merge_with_sources(config, env, &cli);
+            let merged = merge_with_sources(config, env, enter_config_dir, &cli);
             assert_eq!(merged.reference.as_deref(), expected_reference);
             assert_eq!(merged.files, to_owned_vec(expected_files));
             assert_eq!(merged.show_outdated, expected_show_outdated);
@@ -48,7 +46,7 @@ fn assert_merge_case(case: MergeCase) {
             cli,
             expected_reference,
         } => {
-            let merged = merge_with_sources(config, env, &cli);
+            let merged = merge_with_sources(config, env, enter_config_dir, &cli);
             assert_eq!(merged.reference.as_deref(), expected_reference);
         }
         MergeExpectation::Resolve {
@@ -56,7 +54,7 @@ fn assert_merge_case(case: MergeCase) {
             expected_reference,
             expected_message,
         } => {
-            let merged = merge_with_sources(config, env, &cli);
+            let merged = merge_with_sources(config, env, enter_config_dir, &cli);
             assert_eq!(merged.reference, expected_reference);
             assert_eq!(merged.message.as_deref(), expected_message);
         }

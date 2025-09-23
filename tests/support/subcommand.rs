@@ -4,20 +4,44 @@
 //! can exercise configuration, environment, and CLI precedence.
 
 use crate::env_support::{DirGuard, EnvGuard, setup_env_and_config};
+use crate::merge_support::environment_keys;
 use clap::CommandFactory;
 use ortho_config::SubcmdConfigMerge;
 use vk::test_utils::{remove_var, set_var};
 
 /// Merge CLI arguments against config and environment sources for tests.
-pub fn merge_with_sources<T>(config: &str, env: &[(&str, Option<&str>)], cli: &T) -> T
+///
+/// # Examples
+/// ```rust,ignore
+/// use vk::cli_args::PrArgs;
+/// use crate::sub_support::merge_with_sources;
+///
+/// let cli = PrArgs::default();
+/// let merged = merge_with_sources(
+///     "[cmds.pr]\nreference = \"ref\"",
+///     &[("VKCMDS_PR_REFERENCE", Some("env_ref"))],
+///     true,
+///     &cli,
+/// );
+/// assert_eq!(merged.reference.as_deref(), Some("env_ref"));
+/// ```
+pub fn merge_with_sources<T>(
+    config: &str,
+    env: &[(&str, Option<&str>)],
+    enter_config_dir: bool,
+    cli: &T,
+) -> T
 where
     T: SubcmdConfigMerge + ortho_config::OrthoConfig + serde::Serialize + Default + CommandFactory,
 {
-    let mut keys: Vec<&str> = env.iter().map(|(key, _)| *key).collect();
-    keys.push("VK_CONFIG_PATH");
+    let keys = environment_keys(env);
     let _guard = EnvGuard::new(&keys);
     let (config_dir, config_path) = setup_env_and_config(config);
-    let _dir = DirGuard::enter(config_dir.path());
+    let _dir = if enter_config_dir {
+        Some(DirGuard::enter(config_dir.path()))
+    } else {
+        None
+    };
 
     for (key, value) in env {
         match value {

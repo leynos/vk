@@ -68,7 +68,7 @@ pub struct PrArgs {
     #[serde(
         default,
         alias = "include_outdated",
-        skip_serializing_if = "self::is_false"
+        skip_serializing_if = "std::ops::Not::not"
     )]
     pub show_outdated: bool,
 }
@@ -115,15 +115,6 @@ pub struct ResolveArgs {
     pub message: Option<String>,
 }
 
-/// Serde helper that skips serialising `false` so config and env can override.
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "serde skip_serializing_if requires &bool signature"
-)]
-fn is_false(value: &bool) -> bool {
-    !*value
-}
-
 #[expect(
     clippy::derivable_impls,
     reason = "manual impl clarifies default empty reference"
@@ -134,5 +125,33 @@ impl Default for ResolveArgs {
             reference: String::new(),
             message: None,
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    //! Unit tests verifying CLI argument serialisation semantics for boolean flags.
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn omits_show_outdated_when_false() {
+        let args = PrArgs {
+            reference: Some(String::from("ref")),
+            show_outdated: false,
+            ..PrArgs::default()
+        };
+        let value = serde_json::to_value(&args).expect("serialise pr args");
+        assert!(value.get("show_outdated").is_none());
+    }
+
+    #[test]
+    fn includes_show_outdated_when_true() {
+        let args = PrArgs {
+            reference: Some(String::from("ref")),
+            show_outdated: true,
+            ..PrArgs::default()
+        };
+        let value = serde_json::to_value(&args).expect("serialise pr args");
+        assert_eq!(value.get("show_outdated"), Some(&json!(true)));
     }
 }
