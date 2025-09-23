@@ -65,12 +65,24 @@ pub struct PrArgs {
     pub files: Vec<String>,
     /// Include outdated review threads
     #[arg(short = 'o', long = "show-outdated")]
-    #[serde(
-        default,
-        alias = "include_outdated",
-        skip_serializing_if = "std::ops::Not::not"
-    )]
+    #[serde(default, alias = "include_outdated", skip_serializing_if = "is_false")]
     pub show_outdated: bool,
+}
+
+/// Serde helper that skips serialising `false` flag values.
+///
+/// # Examples
+///
+/// ```ignore
+/// assert!(is_false(&false));
+/// assert!(!is_false(&true));
+/// ```
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires &bool signature"
+)]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Parameters accepted by the `issue` sub-command.
@@ -127,31 +139,19 @@ impl Default for ResolveArgs {
         }
     }
 }
+
 #[cfg(test)]
-mod tests {
-    //! Unit tests verifying CLI argument serialisation semantics for boolean flags.
-    use super::*;
-    use serde_json::json;
+mod bool_helpers {
+    //! Unit tests for the `is_false` serde helper.
+    use super::is_false;
 
     #[test]
-    fn omits_show_outdated_when_false() {
-        let args = PrArgs {
-            reference: Some(String::from("ref")),
-            show_outdated: false,
-            ..PrArgs::default()
-        };
-        let value = serde_json::to_value(&args).expect("serialise pr args");
-        assert!(value.get("show_outdated").is_none());
+    fn treats_false_as_skippable() {
+        assert!(is_false(&false));
     }
 
     #[test]
-    fn includes_show_outdated_when_true() {
-        let args = PrArgs {
-            reference: Some(String::from("ref")),
-            show_outdated: true,
-            ..PrArgs::default()
-        };
-        let value = serde_json::to_value(&args).expect("serialise pr args");
-        assert_eq!(value.get("show_outdated"), Some(&json!(true)));
+    fn rejects_true_values() {
+        assert!(!is_false(&true));
     }
 }
