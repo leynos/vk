@@ -3,7 +3,7 @@
 //! Defines utilities that wrap CLI argument builders and merge logic so tests
 //! can exercise configuration, environment, and CLI precedence.
 
-use crate::env_support::{DirGuard, EnvGuard, setup_env_and_config};
+use crate::env_support::{EnvGuard, maybe_enter_dir, setup_env_and_config};
 use crate::merge_support::environment_keys;
 use clap::CommandFactory;
 use ortho_config::SubcmdConfigMerge;
@@ -37,11 +37,7 @@ where
     let keys = environment_keys(env);
     let _guard = EnvGuard::new(&keys);
     let (config_dir, config_path) = setup_env_and_config(config);
-    let _dir = if enter_config_dir {
-        Some(DirGuard::enter(config_dir.path()))
-    } else {
-        None
-    };
+    let _dir = maybe_enter_dir(enter_config_dir, config_dir.path());
 
     for (key, value) in env {
         match value {

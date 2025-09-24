@@ -71,6 +71,24 @@ impl Drop for DirGuard {
     }
 }
 
+/// Optionally enter `path`, returning a [`DirGuard`] when requested.
+///
+/// # Examples
+/// ```rust,ignore
+/// use crate::env_support::maybe_enter_dir;
+///
+/// let temp = tempfile::tempdir().expect("create temp dir");
+/// let guard = maybe_enter_dir(true, temp.path());
+/// assert!(guard.is_some());
+/// ```
+pub fn maybe_enter_dir(should_enter: bool, path: impl AsRef<Path>) -> Option<DirGuard> {
+    if should_enter {
+        Some(DirGuard::enter(path))
+    } else {
+        None
+    }
+}
+
 /// Write `content` to a temporary `.vk.toml` and return its directory and path.
 pub fn write_config(content: &str) -> (TempDir, PathBuf) {
     let dir = TempDir::new().expect("create config dir");

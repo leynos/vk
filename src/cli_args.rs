@@ -65,24 +65,13 @@ pub struct PrArgs {
     pub files: Vec<String>,
     /// Include outdated review threads
     #[arg(short = 'o', long = "show-outdated")]
-    #[serde(default, alias = "include_outdated", skip_serializing_if = "is_false")]
+    // `std::ops::Not::not` ensures false CLI defaults cannot override env or config precedence.
+    #[serde(
+        default,
+        alias = "include_outdated",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
     pub show_outdated: bool,
-}
-
-/// Serde helper that skips serialising `false` flag values.
-///
-/// # Examples
-///
-/// ```ignore
-/// assert!(is_false(&false));
-/// assert!(!is_false(&true));
-/// ```
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "serde skip_serializing_if requires &bool signature"
-)]
-fn is_false(value: &bool) -> bool {
-    !*value
 }
 
 /// Parameters accepted by the `issue` sub-command.
@@ -137,21 +126,5 @@ impl Default for ResolveArgs {
             reference: String::new(),
             message: None,
         }
-    }
-}
-
-#[cfg(test)]
-mod bool_helpers {
-    //! Unit tests for the `is_false` serde helper.
-    use super::is_false;
-
-    #[test]
-    fn treats_false_as_skippable() {
-        assert!(is_false(&false));
-    }
-
-    #[test]
-    fn rejects_true_values() {
-        assert!(!is_false(&true));
     }
 }

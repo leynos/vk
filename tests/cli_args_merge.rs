@@ -13,10 +13,8 @@ use merge_cases::{
 use merge_support::{environment_keys, to_owned_vec};
 use ortho_config::SubcmdConfigMerge;
 use rstest::rstest;
-use serde_json::json;
 use serial_test::serial;
-use support::{DirGuard, EnvGuard, setup_env_and_config};
-use vk::cli_args::PrArgs;
+use support::{EnvGuard, maybe_enter_dir, setup_env_and_config};
 use vk::test_utils::{remove_var, set_var};
 
 fn apply_env(assignments: &[(&str, Option<&str>)]) {
@@ -41,11 +39,7 @@ fn with_case_environment(case: MergeCase, assertions: impl FnOnce(MergeExpectati
     let keys = environment_keys(env);
     let _guard = EnvGuard::new(&keys);
     let (config_dir, _config_path) = setup_env_and_config(config);
-    let _dir = if enter_config_dir {
-        Some(DirGuard::enter(config_dir.path()))
-    } else {
-        None
-    };
+    let _dir = maybe_enter_dir(enter_config_dir, config_dir.path());
 
     apply_env(env);
 
@@ -53,20 +47,29 @@ fn with_case_environment(case: MergeCase, assertions: impl FnOnce(MergeExpectati
 }
 
 #[test]
-fn pr_args_serialisation_respects_show_outdated_flag() {
-    let base = PrArgs {
-        reference: Some(String::from("ref")),
-        ..PrArgs::default()
-    };
+#[serial]
+fn env_overrides_false_cli_show_outdated_flag() {
+    let case = merge_case(MergeSubcommand::Pr, MergeScenario::EnvOverFile);
+    with_case_environment(case, |expectation| match expectation {
+        MergeExpectation::Pr {
+            cli,
+            expected_show_outdated,
+            ..
+        } => {
+            assert!(
+                !cli.show_outdated,
+                "precondition: CLI defaults should leave show_outdated unset"
+            );
 
-    let false_value = serde_json::to_value(&base).expect("serialise pr args");
-    assert!(false_value.get("show_outdated").is_none());
-
-    let mut with_flag = base.clone();
-    with_flag.show_outdated = true;
-
-    let true_value = serde_json::to_value(&with_flag).expect("serialise pr args");
-    assert_eq!(true_value.get("show_outdated"), Some(&json!(true)));
+            let merged = cli.load_and_merge().expect("merge pr args");
+            assert!(
+                expected_show_outdated,
+                "env_over_file scenario should enable show_outdated"
+            );
+            assert_eq!(merged.show_outdated, expected_show_outdated);
+        }
+        other => panic!("expected PR merge expectation, found {other:?}"),
+    });
 }
 
 fn assert_cli_merge(case: MergeCase) {
