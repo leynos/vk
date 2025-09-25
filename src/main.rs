@@ -20,6 +20,7 @@
 //! logic.
 
 pub mod api;
+mod bool_predicates;
 mod boxed;
 mod cli_args;
 // configuration helpers have been folded into `ortho_config`

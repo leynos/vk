@@ -9,6 +9,12 @@ use ortho_config::SubcmdConfigMerge;
 
 /// Merge CLI arguments against config and environment sources for tests.
 ///
+/// Arguments:
+/// - `config`: TOML written to a temporary config file referenced by `VK_CONFIG_PATH`.
+/// - `env`: environment variable pairs; `Some` sets values and `None` removes them before merging.
+/// - `enter_config_dir`: when true, temporarily changes into the config directory for path-relative merges.
+/// - `cli`: CLI arguments providing highest-precedence overrides.
+///
 /// # Examples
 /// ```rust,ignore
 /// use vk::cli_args::PrArgs;
