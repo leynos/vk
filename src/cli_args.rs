@@ -8,6 +8,31 @@ use clap::Parser;
 use ortho_config::OrthoConfig;
 use serde::{Deserialize, Serialize};
 
+mod bool_predicates {
+    //! Serde predicates for boolean CLI flags.
+    use std::ops::Not as _;
+
+    /// Returns `true` when the provided flag is `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use vk::cli_args::bool_predicates;
+    ///
+    /// assert!(bool_predicates::not(&false));
+    /// assert!(!bool_predicates::not(&true));
+    /// ```
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde skip_serializing_if requires &bool signature"
+    )]
+    pub fn not(value: &bool) -> bool {
+        value.not()
+    }
+}
+
+use self::bool_predicates as bool;
+
 /// Global options that apply to every sub-command (e.g. `--repo`).
 #[derive(Parser, Deserialize, Serialize, Default, Debug, OrthoConfig, Clone)]
 #[ortho_config(prefix = "VK")]
@@ -57,12 +82,8 @@ pub struct PrArgs {
     pub files: Vec<String>,
     /// Include outdated review threads
     #[arg(short = 'o', long = "show-outdated")]
-    // `std::ops::Not::not` ensures false CLI defaults cannot override env or config precedence.
-    #[serde(
-        default,
-        alias = "include_outdated",
-        skip_serializing_if = "std::ops::Not::not"
-    )]
+    // `bool::not` ensures false CLI defaults cannot override env or config precedence.
+    #[serde(default, alias = "include_outdated", skip_serializing_if = "bool::not")]
     pub show_outdated: bool,
 }
 
