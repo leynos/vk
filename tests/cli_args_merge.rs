@@ -14,17 +14,7 @@ use merge_support::{environment_keys, to_owned_vec};
 use ortho_config::SubcmdConfigMerge;
 use rstest::rstest;
 use serial_test::serial;
-use support::{EnvGuard, maybe_enter_dir, setup_env_and_config};
-use vk::test_utils::{remove_var, set_var};
-
-fn apply_env(assignments: &[(&str, Option<&str>)]) {
-    for (key, value) in assignments {
-        match value {
-            Some(val) => set_var(key, val),
-            None => remove_var(key),
-        }
-    }
-}
+use support::{EnvGuard, apply_env, maybe_enter_dir, setup_env_and_config};
 
 fn with_case_environment(case: MergeCase, assertions: impl FnOnce(MergeExpectation)) {
     let enter_config_dir = case.requires_config_dir();

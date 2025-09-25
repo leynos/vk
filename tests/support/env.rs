@@ -12,6 +12,23 @@ use tempfile::TempDir;
 use vk::environment;
 use vk::test_utils::{remove_var, set_var};
 
+/// Apply a sequence of environment assignments, removing keys with `None`.
+///
+/// # Examples
+/// ```rust,ignore
+/// use crate::env_support::apply_env;
+///
+/// apply_env(&[("VK_TOKEN", Some("secret")), ("VK_REPO", None)]);
+/// ```
+pub fn apply_env(pairs: &[(&str, Option<&str>)]) {
+    for (key, value) in pairs {
+        match value {
+            Some(val) => set_var(key, val),
+            None => remove_var(key),
+        }
+    }
+}
+
 /// RAII guard that restores captured environment variables on drop.
 pub struct EnvGuard {
     entries: Vec<(OsString, Option<OsString>)>,

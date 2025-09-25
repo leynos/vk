@@ -6,7 +6,6 @@
 use crate::env_support::{EnvGuard, maybe_enter_dir, setup_env_and_config};
 use crate::merge_support::environment_keys;
 use ortho_config::SubcmdConfigMerge;
-use vk::test_utils::{remove_var, set_var};
 
 /// Merge CLI arguments against config and environment sources for tests.
 ///
@@ -39,18 +38,12 @@ where
     let (config_dir, config_path) = setup_env_and_config(config);
     let _dir = maybe_enter_dir(enter_config_dir, config_dir.path());
 
-    for (key, value) in env {
-        match value {
-            Some(val) => set_var(key, val),
-            None => remove_var(key),
-        }
-    }
+    crate::env_support::apply_env(env);
 
-    cli.load_and_merge().unwrap_or_else(|err| {
-        panic!(
-            "merge {} args with config {}: {err}",
-            std::any::type_name::<T>(),
-            config_path.display()
-        )
-    })
+    let context = format!(
+        "merge {} args with config {}",
+        std::any::type_name::<T>(),
+        config_path.display()
+    );
+    cli.load_and_merge().expect(&context)
 }
