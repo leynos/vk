@@ -2,29 +2,24 @@
 //!
 //! Confirms boolean fields omit default values so configuration sources can override CLI defaults.
 
+use rstest::rstest;
 use serde_json::json;
 use vk::PrArgs;
 
-#[test]
-fn omits_show_outdated_when_false() {
+#[rstest]
+#[case(false, false)]
+#[case(true, true)]
+fn serialises_show_outdated_field(#[case] flag: bool, #[case] present: bool) {
     let args = PrArgs {
         reference: Some(String::from("ref")),
-        show_outdated: false,
+        show_outdated: flag,
         ..PrArgs::default()
     };
 
     let value = serde_json::to_value(&args).expect("serialise pr args");
-    assert!(value.get("show_outdated").is_none());
-}
-
-#[test]
-fn includes_show_outdated_when_true() {
-    let args = PrArgs {
-        reference: Some(String::from("ref")),
-        show_outdated: true,
-        ..PrArgs::default()
-    };
-
-    let value = serde_json::to_value(&args).expect("serialise pr args");
-    assert_eq!(value.get("show_outdated"), Some(&json!(true)));
+    if present {
+        assert_eq!(value.get("show_outdated"), Some(&json!(true)));
+    } else {
+        assert!(value.get("show_outdated").is_none());
+    }
 }

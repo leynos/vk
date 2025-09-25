@@ -5,7 +5,6 @@
 
 use crate::env_support::{EnvGuard, maybe_enter_dir, setup_env_and_config};
 use crate::merge_support::environment_keys;
-use clap::CommandFactory;
 use ortho_config::SubcmdConfigMerge;
 use vk::test_utils::{remove_var, set_var};
 
@@ -32,7 +31,8 @@ pub fn merge_with_sources<T>(
     cli: &T,
 ) -> T
 where
-    T: SubcmdConfigMerge + ortho_config::OrthoConfig + serde::Serialize + Default + CommandFactory,
+    // SubcmdConfigMerge::load_and_merge requires Default on implementors.
+    T: SubcmdConfigMerge + ortho_config::OrthoConfig + serde::Serialize + Default,
 {
     let keys = environment_keys(env);
     let _guard = EnvGuard::new(&keys);
