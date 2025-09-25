@@ -30,8 +30,8 @@ pub fn merge_with_sources<T>(
     cli: &T,
 ) -> T
 where
-    // SubcmdConfigMerge::load_and_merge requires Default on implementors.
-    T: SubcmdConfigMerge + ortho_config::OrthoConfig + serde::Serialize + Default,
+    T: SubcmdConfigMerge + ortho_config::OrthoConfig + serde::Serialize,
+    T: Default,
 {
     let keys = environment_keys(env);
     let _guard = EnvGuard::new(&keys);
