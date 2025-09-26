@@ -21,12 +21,14 @@ use vk::test_utils::{remove_var, set_var};
 /// apply_env(&[("VK_TOKEN", Some("secret")), ("VK_REPO", None)]);
 /// ```
 pub fn apply_env(pairs: &[(&str, Option<&str>)]) {
-    for (key, value) in pairs {
-        match value {
-            Some(val) => set_var(key, val),
-            None => remove_var(key),
+    environment::with_lock(|| {
+        for (key, value) in pairs {
+            match value {
+                Some(val) => unsafe { env::set_var(key, val) },
+                None => unsafe { env::remove_var(key) },
+            }
         }
-    }
+    });
 }
 
 /// RAII guard that restores captured environment variables on drop.
@@ -120,6 +122,6 @@ pub fn write_config(content: &str) -> (TempDir, PathBuf) {
 /// invoking this helper so the variable is removed once the guard drops.
 pub fn setup_env_and_config(config_content: &str) -> (TempDir, PathBuf) {
     let (dir, path) = write_config(config_content);
-    set_var("VK_CONFIG_PATH", path.as_os_str());
+    environment::with_lock(|| unsafe { env::set_var("VK_CONFIG_PATH", path.as_os_str()) });
     (dir, path)
 }

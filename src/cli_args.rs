@@ -4,7 +4,6 @@
 //! `main.rs` focused on runtime logic.
 // Imports are referenced by derives; no suppression required.
 
-use crate::bool_predicates;
 use clap::Parser;
 use ortho_config::OrthoConfig;
 use serde::{Deserialize, Serialize};
@@ -33,10 +32,12 @@ impl GlobalArgs {
     ///
     /// CLI flags have higher priority than configuration sources.
     pub fn merge(&mut self, other: Self) {
-        self.repo = self.repo.take().or(other.repo);
-        self.transcript = self.transcript.take().or(other.transcript);
-        self.http_timeout = self.http_timeout.take().or(other.http_timeout);
-        self.connect_timeout = self.connect_timeout.take().or(other.connect_timeout);
+        self.repo = other.repo.or_else(|| self.repo.take());
+        self.transcript = other.transcript.or_else(|| self.transcript.take());
+        self.http_timeout = other.http_timeout.or_else(|| self.http_timeout.take());
+        self.connect_timeout = other
+            .connect_timeout
+            .or_else(|| self.connect_timeout.take());
     }
 }
 
@@ -58,11 +59,11 @@ pub struct PrArgs {
     pub files: Vec<String>,
     /// Include outdated review threads
     #[arg(short = 'o', long = "show-outdated")]
-    // `bool_predicates::not` ensures false CLI defaults cannot override env or config precedence.
+    // `crate::bool_predicates::not` ensures false CLI defaults cannot override env or config precedence.
     #[serde(
         default,
         alias = "include_outdated",
-        skip_serializing_if = "bool_predicates::not"
+        skip_serializing_if = "crate::bool_predicates::not"
     )]
     pub show_outdated: bool,
 }
