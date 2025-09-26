@@ -22,6 +22,7 @@
 #![warn(clippy::trivially_copy_pass_by_ref)]
 
 pub mod api;
+#[path = "bool_predicates_lib.rs"]
 mod bool_predicates;
 mod boxed;
 mod cli_args;
