@@ -32,18 +32,12 @@ impl GlobalArgs {
     ///
     /// CLI flags have higher priority than configuration sources.
     pub fn merge(&mut self, other: Self) {
-        if let Some(repo) = other.repo {
-            self.repo = Some(repo);
-        }
-        if let Some(transcript) = other.transcript {
-            self.transcript = Some(transcript);
-        }
-        if let Some(timeout) = other.http_timeout {
-            self.http_timeout = Some(timeout);
-        }
-        if let Some(timeout) = other.connect_timeout {
-            self.connect_timeout = Some(timeout);
-        }
+        self.repo = other.repo.or_else(|| self.repo.take());
+        self.transcript = other.transcript.or_else(|| self.transcript.take());
+        self.http_timeout = other.http_timeout.or_else(|| self.http_timeout.take());
+        self.connect_timeout = other
+            .connect_timeout
+            .or_else(|| self.connect_timeout.take());
     }
 }
 
@@ -65,10 +59,11 @@ pub struct PrArgs {
     pub files: Vec<String>,
     /// Include outdated review threads
     #[arg(short = 'o', long = "show-outdated")]
+    // `crate::bool_predicates::not` ensures false CLI defaults cannot override env or config precedence.
     #[serde(
         default,
         alias = "include_outdated",
-        skip_serializing_if = "self::is_false"
+        skip_serializing_if = "crate::bool_predicates::not"
     )]
     pub show_outdated: bool,
 }
@@ -113,15 +108,6 @@ pub struct ResolveArgs {
         help = "Reply text to post before resolving the comment"
     )]
     pub message: Option<String>,
-}
-
-/// Serde helper that skips serialising `false` so config and env can override.
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "serde skip_serializing_if requires &bool signature"
-)]
-fn is_false(value: &bool) -> bool {
-    !*value
 }
 
 #[expect(

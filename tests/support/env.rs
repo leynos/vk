@@ -12,6 +12,31 @@ use tempfile::TempDir;
 use vk::environment;
 use vk::test_utils::{remove_var, set_var};
 
+/// Apply a sequence of environment assignments, removing keys with `None`.
+///
+/// # Examples
+/// ```rust,ignore
+/// use crate::env_support::apply_env;
+///
+/// apply_env(&[("VK_TOKEN", Some("secret")), ("VK_REPO", None)]);
+/// ```
+pub fn apply_env(pairs: &[(&str, Option<&str>)]) {
+    environment::with_lock(|| {
+        for (key, value) in pairs {
+            match value {
+                Some(val) => {
+                    // SAFETY: the environment mutex serialises access to the std env calls.
+                    unsafe { env::set_var(key, val) }
+                }
+                None => {
+                    // SAFETY: the environment mutex serialises access to the std env calls.
+                    unsafe { env::remove_var(key) }
+                }
+            }
+        }
+    });
+}
+
 /// RAII guard that restores captured environment variables on drop.
 pub struct EnvGuard {
     entries: Vec<(OsString, Option<OsString>)>,
@@ -71,6 +96,24 @@ impl Drop for DirGuard {
     }
 }
 
+/// Optionally enter `path`, returning a [`DirGuard`] when requested.
+///
+/// # Examples
+/// ```rust,ignore
+/// use crate::env_support::maybe_enter_dir;
+///
+/// let temp = tempfile::tempdir().expect("create temp dir");
+/// let guard = maybe_enter_dir(true, temp.path());
+/// assert!(guard.is_some());
+/// ```
+pub fn maybe_enter_dir(should_enter: bool, path: impl AsRef<Path>) -> Option<DirGuard> {
+    if should_enter {
+        Some(DirGuard::enter(path))
+    } else {
+        None
+    }
+}
+
 /// Write `content` to a temporary `.vk.toml` and return its directory and path.
 pub fn write_config(content: &str) -> (TempDir, PathBuf) {
     let dir = TempDir::new().expect("create config dir");
@@ -85,6 +128,6 @@ pub fn write_config(content: &str) -> (TempDir, PathBuf) {
 /// invoking this helper so the variable is removed once the guard drops.
 pub fn setup_env_and_config(config_content: &str) -> (TempDir, PathBuf) {
     let (dir, path) = write_config(config_content);
-    set_var("VK_CONFIG_PATH", path.as_os_str());
+    environment::with_lock(|| unsafe { env::set_var("VK_CONFIG_PATH", path.as_os_str()) });
     (dir, path)
 }

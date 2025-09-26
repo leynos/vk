@@ -20,6 +20,8 @@
 //! logic.
 
 pub mod api;
+#[path = "bool_predicates_lib.rs"]
+mod bool_predicates;
 mod boxed;
 mod cli_args;
 // configuration helpers have been folded into `ortho_config`

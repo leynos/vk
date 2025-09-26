@@ -4,6 +4,8 @@
 //! invoke configuration merging helpers.
 
 pub mod banners;
+#[path = "bool_predicates_lib.rs"]
+pub mod bool_predicates;
 pub mod cli_args;
 pub mod environment;
 #[path = "test_utils_env.rs"]
