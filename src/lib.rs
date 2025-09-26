@@ -3,7 +3,10 @@
 //! Exposes the CLI argument structures so external tests can
 //! invoke configuration merging helpers.
 
+#![warn(clippy::trivially_copy_pass_by_ref)]
+
 pub mod banners;
+#[path = "bool_predicates_lib.rs"]
 pub mod bool_predicates;
 pub mod cli_args;
 pub mod environment;

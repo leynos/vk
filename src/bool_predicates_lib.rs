@@ -12,10 +12,6 @@
 /// assert!(bool_predicates::not(&false));
 /// assert!(!bool_predicates::not(&true));
 /// ```
-#[expect(
-    clippy::trivially_copy_pass_by_ref,
-    reason = "Serde skip_serializing_if requires &bool signature."
-)]
 #[must_use]
 pub fn not(value: &bool) -> bool {
     !*value
