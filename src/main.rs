@@ -19,6 +19,8 @@
 //! [`write_summary`] collate comments so consumers can reuse the framing
 //! logic.
 
+#![warn(clippy::trivially_copy_pass_by_ref)]
+
 pub mod api;
 mod bool_predicates;
 mod boxed;

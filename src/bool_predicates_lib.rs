@@ -12,7 +12,11 @@
 /// assert!(bool_predicates::not(&false));
 /// assert!(!bool_predicates::not(&true));
 /// ```
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "matches other module variant and keeps lint output clean"
+)]
 #[must_use]
-pub fn not(value: &bool) -> bool {
+pub(crate) fn not(value: &bool) -> bool {
     !*value
 }
