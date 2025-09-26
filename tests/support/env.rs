@@ -24,8 +24,14 @@ pub fn apply_env(pairs: &[(&str, Option<&str>)]) {
     environment::with_lock(|| {
         for (key, value) in pairs {
             match value {
-                Some(val) => unsafe { env::set_var(key, val) },
-                None => unsafe { env::remove_var(key) },
+                Some(val) => {
+                    // SAFETY: the environment mutex serialises access to the std env calls.
+                    unsafe { env::set_var(key, val) }
+                }
+                None => {
+                    // SAFETY: the environment mutex serialises access to the std env calls.
+                    unsafe { env::remove_var(key) }
+                }
             }
         }
     });

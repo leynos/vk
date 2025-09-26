@@ -32,12 +32,10 @@ impl GlobalArgs {
     ///
     /// CLI flags have higher priority than configuration sources.
     pub fn merge(&mut self, other: Self) {
-        self.repo = other.repo.or_else(|| self.repo.take());
-        self.transcript = other.transcript.or_else(|| self.transcript.take());
-        self.http_timeout = other.http_timeout.or_else(|| self.http_timeout.take());
-        self.connect_timeout = other
-            .connect_timeout
-            .or_else(|| self.connect_timeout.take());
+        self.repo = self.repo.take().or(other.repo);
+        self.transcript = self.transcript.take().or(other.transcript);
+        self.http_timeout = self.http_timeout.take().or(other.http_timeout);
+        self.connect_timeout = self.connect_timeout.take().or(other.connect_timeout);
     }
 }
 
