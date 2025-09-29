@@ -37,7 +37,7 @@ jobs:
           fi
           echo "Release tag $tag matches Cargo.toml version."
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@69f9c29d18a28b6bdf4b02dcd743ef416817ba18
+        uses: leynos/shared-actions/.github/actions/setup-rust@1479e2ffbbf1053bb0205357dfe965299b7493ed
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
