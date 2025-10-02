@@ -22,25 +22,29 @@ const LINE_FEED: char = 0x000A as char;
 /// let input = "<details><summary>hi</summary><p>hidden</p></details>";
 /// assert_eq!(collapse_details(input), "\u25B6 hi\n");
 /// ```
+fn normalize_line_endings(input: &str) -> Cow<'_, str> {
+    if !input.contains(CARRIAGE_RETURN) {
+        return Cow::Borrowed(input);
+    }
+
+    let mut owned = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == CARRIAGE_RETURN {
+            if matches!(chars.peek(), Some(&LINE_FEED)) {
+                continue;
+            }
+            owned.push(LINE_FEED);
+        } else {
+            owned.push(ch);
+        }
+    }
+    Cow::Owned(owned)
+}
+
 #[must_use]
 pub fn collapse_details(input: &str) -> String {
-    let normalised = if input.contains(CARRIAGE_RETURN) {
-        let mut owned = String::with_capacity(input.len());
-        let mut chars = input.chars().peekable();
-        while let Some(ch) = chars.next() {
-            if ch == CARRIAGE_RETURN {
-                if matches!(chars.peek(), Some(&LINE_FEED)) {
-                    continue;
-                }
-                owned.push(LINE_FEED);
-            } else {
-                owned.push(ch);
-            }
-        }
-        Cow::Owned(owned)
-    } else {
-        Cow::Borrowed(input)
-    };
+    let normalised = normalize_line_endings(input);
     let dom = parse_document(RcDom::default(), ParseOpts::default()).one(normalised.as_ref());
     let mut out = String::new();
     for child in dom.document.children.borrow().iter() {
