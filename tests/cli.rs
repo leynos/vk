@@ -10,10 +10,16 @@ use hyper::{Request, Response, StatusCode, body::Incoming};
 use insta::assert_snapshot;
 use rstest::rstest;
 use serde_json::json;
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
 
 mod utils;
-use utils::{start_mitm, vk_cmd};
+use utils::{ShutdownHandle as MitmShutdown, start_mitm, vk_cmd};
+
+type RequestHandler = Box<dyn FnMut(&Request<Incoming>) -> Response<Full<Bytes>> + Send>;
 
 /// Build a closure returning an empty `reviewThreads` payload.
 fn create_empty_review_handler()
@@ -244,7 +250,22 @@ async fn pr_summarises_multiple_files() {
 
 #[tokio::test]
 async fn pr_renders_coderabbit_comment_without_extra_spacing() {
+    let (addr, _handler, shutdown) = setup_mock_server_for_coderabbit_test().await;
+
+    let stdout = run_cli_and_capture_output(addr).await;
+    let plain = extract_coderabbit_comment_section(&stdout);
+
+    validate_no_triple_newlines(&plain);
+    validate_diff_lines_contiguous(&plain);
+
+    assert_snapshot!("pr_renders_coderabbit_comment", plain);
+    shutdown.shutdown().await;
+}
+
+async fn setup_mock_server_for_coderabbit_test()
+-> (SocketAddr, Arc<Mutex<RequestHandler>>, MitmShutdown) {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let handler: Arc<Mutex<RequestHandler>> = handler;
     let threads_body = include_str!("fixtures/review_threads_coderabbit.json").to_string();
     let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
     let last = reviews_body.clone();
@@ -257,8 +278,11 @@ async fn pr_renders_coderabbit_comment_without_extra_spacing() {
             .body(Full::from(body))
             .expect("build response")
     });
+    (addr, handler, shutdown)
+}
 
-    let stdout = tokio::task::spawn_blocking(move || {
+async fn run_cli_and_capture_output(addr: SocketAddr) -> String {
+    tokio::task::spawn_blocking(move || {
         let mut cmd = vk_cmd(addr);
         cmd.args(["pr", "https://github.com/leynos/netsuke/pull/177"]);
         let output = cmd.output().expect("run command");
@@ -271,8 +295,10 @@ async fn pr_renders_coderabbit_comment_without_extra_spacing() {
         String::from_utf8(output.stdout).expect("utf8")
     })
     .await
-    .expect("spawn blocking");
+    .expect("spawn blocking")
+}
 
+fn extract_coderabbit_comment_section(stdout: &str) -> String {
     let stdout = stdout.replace("\r\n", "\n");
     let lines: Vec<_> = stdout.lines().collect();
     let start = lines
@@ -287,13 +313,17 @@ async fn pr_renders_coderabbit_comment_without_extra_spacing() {
     let comment_section = lines
         .get(start..end)
         .map_or_else(String::new, |slice| slice.join("\n"));
+    strip_ansi_codes(&comment_section)
+}
 
-    let plain = strip_ansi_codes(&comment_section);
+fn validate_no_triple_newlines(plain: &str) {
     assert!(
         !plain.contains("\n\n\n"),
         "comment should not contain triple newlines:\n{plain}"
     );
+}
 
+fn validate_diff_lines_contiguous(plain: &str) {
     let diff_line_numbers: Vec<_> = plain
         .lines()
         .enumerate()
@@ -322,8 +352,4 @@ async fn pr_renders_coderabbit_comment_without_extra_spacing() {
             "diff lines should be contiguous:\n{plain}"
         );
     }
-
-    assert_snapshot!("pr_renders_coderabbit_comment", plain);
-
-    shutdown.shutdown().await;
 }
