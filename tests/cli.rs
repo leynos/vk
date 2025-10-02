@@ -44,6 +44,25 @@ fn create_empty_review_handler()
     }
 }
 
+fn strip_ansi_codes(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars();
+    while let Some(ch) = chars.next() {
+        if ch == (0x1b as char) {
+            if chars.next().is_some_and(|next| next == '[') {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 #[rstest]
 #[case(
     Vec::new(),
@@ -219,6 +238,92 @@ async fn pr_summarises_multiple_files() {
         });
     let summary = format!("Summary:\n{body}");
     assert_snapshot!("pr_summarises_multiple_files_summary", summary);
+
+    shutdown.shutdown().await;
+}
+
+#[tokio::test]
+async fn pr_renders_coderabbit_comment_without_extra_spacing() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let threads_body = include_str!("fixtures/review_threads_coderabbit.json").to_string();
+    let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
+    let last = reviews_body.clone();
+    let mut responses = vec![threads_body, reviews_body].into_iter();
+    *handler.lock().expect("lock handler") = Box::new(move |_req| {
+        let body = responses.next().unwrap_or_else(|| last.clone());
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::from(body))
+            .expect("build response")
+    });
+
+    let stdout = tokio::task::spawn_blocking(move || {
+        let mut cmd = vk_cmd(addr);
+        cmd.args(["pr", "https://github.com/leynos/netsuke/pull/177"]);
+        let output = cmd.output().expect("run command");
+        assert!(
+            output.status.success(),
+            "vk exited with {:?}. Stderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("utf8")
+    })
+    .await
+    .expect("spawn blocking");
+
+    let stdout = stdout.replace("\r\n", "\n");
+    let lines: Vec<_> = stdout.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| strip_ansi_codes(line).contains("coderabbitai wrote"))
+        .expect("comment start");
+    let tail = lines.get(start..).unwrap_or(&[]);
+    let end = tail
+        .iter()
+        .position(|line| line.starts_with("https://"))
+        .map_or(lines.len(), |idx| start + idx);
+    let comment_section = lines
+        .get(start..end)
+        .map_or_else(String::new, |slice| slice.join("\n"));
+
+    let plain = strip_ansi_codes(&comment_section);
+    assert!(
+        !plain.contains("\n\n\n"),
+        "comment should not contain triple newlines:\n{plain}"
+    );
+
+    let diff_line_numbers: Vec<_> = plain
+        .lines()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("-              printf")
+                || trimmed.starts_with("+              printf")
+            {
+                Some(idx)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert!(
+        diff_line_numbers.len() == 3,
+        "expected three diff lines:\n{plain}"
+    );
+    for window in diff_line_numbers.windows(2) {
+        let [first, second] = window else {
+            continue;
+        };
+        assert_eq!(
+            first + 1,
+            *second,
+            "diff lines should be contiguous:\n{plain}"
+        );
+    }
+
+    assert_snapshot!("pr_renders_coderabbit_comment", plain);
 
     shutdown.shutdown().await;
 }

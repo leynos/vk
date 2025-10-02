@@ -1,0 +1,23 @@
+---
+source: tests/cli.rs
+assertion_line: 329
+expression: plain
+---
+💬  coderabbitai wrote:
+_⚠️ Potential issue_ | _🟡 Minor_
+
+Consolidate the duplicate asset error annotation.
+
+Lines 316-317 split the error annotation across two printf commands, producing a malformed GitHub Actions error annotation.
+
+Apply this diff to consolidate the message:
+
+-              printf '%s' '::error title=Duplicate release asset::Asset name '                                                        
+-              printf '%s\n' "'${asset_name}' would be uploaded more than once"                                                        
++              printf '::error title=Duplicate release asset::Asset name '\''%s'\'' would be uploaded more than once\n' "${asset_name}"
+
+▶ 📝 Committable suggestion
+
+▶ 🤖 Prompt for AI Agents
+
+✅ Addressed in commit 70c0c7a

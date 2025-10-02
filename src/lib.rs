@@ -8,6 +8,7 @@ pub mod banners;
 pub mod bool_predicates;
 pub mod cli_args;
 pub mod environment;
+pub mod html;
 #[path = "test_utils_env.rs"]
 pub mod test_utils;
 

@@ -1,0 +1,49 @@
+_⚠️ Potential issue_ | _🟡 Minor_
+
+**Consolidate the duplicate asset error annotation.**
+
+Lines 316-317 split the error annotation across two `printf` commands, producing a malformed GitHub Actions error annotation.
+
+
+
+Apply this diff to consolidate the message:
+
+```diff
+-              printf '%s' '::error title=Duplicate release asset::Asset name '
+-              printf '%s\n' "'${asset_name}' would be uploaded more than once"
++              printf '::error title=Duplicate release asset::Asset name '\''%s'\'' would be uploaded more than once\n' "${asset_name}"
+```
+
+<!-- suggestion_start -->
+
+<details>
+<summary>📝 Committable suggestion</summary>
+
+> ‼️ **IMPORTANT**
+> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.
+
+```suggestion
+                printf '::error title=Duplicate release asset::Asset name '\''%s'\'' would be uploaded more than once\n' "${asset_name}"
+```
+
+</details>
+
+<!-- suggestion_end -->
+
+<details>
+<summary>🤖 Prompt for AI Agents</summary>
+
+```
+.github/workflows/release.yml around lines 316 to 317: the GitHub Actions error
+annotation is split across two printf calls which produces a malformed
+annotation; replace the two separate printf commands with a single printf that
+constructs the full '::error title=Duplicate release asset::Asset name
+'<asset_name>' would be uploaded more than once' message (including the trailing
+newline) so the annotation is emitted as one valid line.
+```
+
+</details>
+
+<!-- This is an auto-generated comment by CodeRabbit -->
+
+✅ Addressed in commit 70c0c7a

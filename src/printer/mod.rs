@@ -90,7 +90,23 @@ fn write_formattable<W: std::io::Write, T: Formattable>(
 ) -> anyhow::Result<()> {
     let suffix = item.suffix();
     write_author_line(&mut out, item.icon(), item.author_login(), &suffix)?;
-    let collapsed = collapse_details(item.body());
+    let mut collapsed = collapse_details(item.body());
+    if collapsed.contains("\n\n\n") {
+        let mut buf = String::with_capacity(collapsed.len());
+        let mut newline_count = 0;
+        for ch in collapsed.chars() {
+            if ch == '\n' {
+                newline_count += 1;
+                if newline_count <= 2 {
+                    buf.push(ch);
+                }
+            } else {
+                newline_count = 0;
+                buf.push(ch);
+            }
+        }
+        collapsed = buf;
+    }
     skin.write_text_on(&mut out, &collapsed)
         .map_err(anyhow::Error::from)?;
     writeln!(out)?;
@@ -238,6 +254,27 @@ mod tests {
 
     use crate::{ReviewComment, User};
 
+    const CODERABBIT_COMMENT: &str = include_str!("../../tests/fixtures/comment_coderabbit.txt");
+
+    fn strip_ansi_codes(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let mut chars = input.chars();
+        while let Some(ch) = chars.next() {
+            if ch == (0x1b as char) {
+                if chars.next().is_some_and(|next| next == '[') {
+                    for c in chars.by_ref() {
+                        if ('@'..='~').contains(&c) {
+                            break;
+                        }
+                    }
+                }
+            } else {
+                out.push(ch);
+            }
+        }
+        out
+    }
+
     #[test]
     fn print_reviews_formats_authors_and_states() {
         let reviews = [
@@ -334,6 +371,54 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("▶ sum"));
         assert!(!out.contains("hidden"));
+    }
+
+    #[test]
+    fn write_comment_body_renders_coderabbit_comment() {
+        let comment = ReviewComment {
+            body: CODERABBIT_COMMENT.into(),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        write_comment_body(&mut buf, &MadSkin::default(), &comment).expect("write comment");
+        let out = String::from_utf8(buf).expect("utf8");
+        let plain = strip_ansi_codes(&out);
+        assert!(
+            !plain.contains("\n\n\n"),
+            "output should not contain triple newlines:\n{plain}"
+        );
+        assert!(
+            plain.contains("▶ 📝 Committable suggestion"),
+            "collapsed suggestion summary missing:\n{plain}"
+        );
+        let diff_line_numbers: Vec<_> = plain
+            .lines()
+            .enumerate()
+            .filter_map(|(idx, line)| {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("-              printf")
+                    || trimmed.starts_with("+              printf")
+                {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(
+            diff_line_numbers.len() >= 3,
+            "expected diff lines in output\n{plain}"
+        );
+        for window in diff_line_numbers.windows(2) {
+            let [first, second] = window else {
+                continue;
+            };
+            assert_eq!(
+                first + 1,
+                *second,
+                "diff lines should be contiguous:\n{plain}"
+            );
+        }
     }
 
     #[test]

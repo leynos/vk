@@ -4,7 +4,10 @@ use html5ever::driver::ParseOpts;
 use html5ever::parse_document;
 use html5ever::tendril::TendrilSink as _;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use std::borrow::Cow;
 use std::default::Default;
+const CARRIAGE_RETURN: char = 0x000D as char;
+const LINE_FEED: char = 0x000A as char;
 
 /// Collapse root `<details>` blocks in the given text.
 ///
@@ -19,8 +22,26 @@ use std::default::Default;
 /// let input = "<details><summary>hi</summary><p>hidden</p></details>";
 /// assert_eq!(collapse_details(input), "\u25B6 hi\n");
 /// ```
+#[must_use]
 pub fn collapse_details(input: &str) -> String {
-    let dom = parse_document(RcDom::default(), ParseOpts::default()).one(input);
+    let normalised = if input.contains(CARRIAGE_RETURN) {
+        let mut owned = String::with_capacity(input.len());
+        let mut chars = input.chars().peekable();
+        while let Some(ch) = chars.next() {
+            if ch == CARRIAGE_RETURN {
+                if matches!(chars.peek(), Some(&LINE_FEED)) {
+                    continue;
+                }
+                owned.push(LINE_FEED);
+            } else {
+                owned.push(ch);
+            }
+        }
+        Cow::Owned(owned)
+    } else {
+        Cow::Borrowed(input)
+    };
+    let dom = parse_document(RcDom::default(), ParseOpts::default()).one(normalised.as_ref());
     let mut out = String::new();
     for child in dom.document.children.borrow().iter() {
         collapse_node(child, &mut out, false);
