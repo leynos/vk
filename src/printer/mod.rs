@@ -260,19 +260,25 @@ mod tests {
         let mut out = String::with_capacity(input.len());
         let mut chars = input.chars();
         while let Some(ch) = chars.next() {
-            if ch == (0x1b as char) {
-                if chars.next().is_some_and(|next| next == '[') {
-                    for c in chars.by_ref() {
-                        if ('@'..='~').contains(&c) {
-                            break;
-                        }
-                    }
-                }
+            if ch == (0x1b as char) && skip_ansi_sequence(&mut chars) {
+                // Sequence consumed by helper
             } else {
                 out.push(ch);
             }
         }
         out
+    }
+
+    fn skip_ansi_sequence(chars: &mut impl Iterator<Item = char>) -> bool {
+        if !chars.next().is_some_and(|next| next == '[') {
+            return false;
+        }
+        for c in chars {
+            if ('@'..='~').contains(&c) {
+                return true;
+            }
+        }
+        true
     }
 
     #[test]
