@@ -83,6 +83,28 @@ impl Formattable for PullRequestReview {
 /// let mut buf = Vec::new();
 /// write_formattable(&mut buf, &MadSkin::default(), &comment).unwrap();
 /// ```
+/// Collapse sequences of more than two newlines into at most two newlines.
+fn collapse_excessive_newlines(input: String) -> String {
+    if !input.contains("\n\n\n") {
+        return input;
+    }
+
+    let mut buf = String::with_capacity(input.len());
+    let mut newline_count = 0;
+    for ch in input.chars() {
+        if ch == '\n' {
+            newline_count += 1;
+            if newline_count <= 2 {
+                buf.push(ch);
+            }
+        } else {
+            newline_count = 0;
+            buf.push(ch);
+        }
+    }
+    buf
+}
+
 fn write_formattable<W: std::io::Write, T: Formattable>(
     mut out: W,
     skin: &MadSkin,
@@ -90,23 +112,8 @@ fn write_formattable<W: std::io::Write, T: Formattable>(
 ) -> anyhow::Result<()> {
     let suffix = item.suffix();
     write_author_line(&mut out, item.icon(), item.author_login(), &suffix)?;
-    let mut collapsed = collapse_details(item.body());
-    if collapsed.contains("\n\n\n") {
-        let mut buf = String::with_capacity(collapsed.len());
-        let mut newline_count = 0;
-        for ch in collapsed.chars() {
-            if ch == '\n' {
-                newline_count += 1;
-                if newline_count <= 2 {
-                    buf.push(ch);
-                }
-            } else {
-                newline_count = 0;
-                buf.push(ch);
-            }
-        }
-        collapsed = buf;
-    }
+    let collapsed = collapse_details(item.body());
+    let collapsed = collapse_excessive_newlines(collapsed);
     skin.write_text_on(&mut out, &collapsed)
         .map_err(anyhow::Error::from)?;
     writeln!(out)?;
@@ -270,8 +277,9 @@ mod tests {
     }
 
     fn skip_ansi_sequence(chars: &mut impl Iterator<Item = char>) -> bool {
-        if !chars.next().is_some_and(|next| next == '[') {
-            return false;
+        match chars.next() {
+            Some('[') => {}
+            _ => return false,
         }
         for c in chars {
             if ('@'..='~').contains(&c) {
