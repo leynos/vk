@@ -64,16 +64,13 @@ fn strip_ansi_codes(input: &str) -> String {
 }
 
 fn skip_ansi_sequence(chars: &mut impl Iterator<Item = char>) -> bool {
-    match chars.next() {
-        Some('[') => {}
-        _ => return false,
+    // Early return if not a CSI sequence
+    if !matches!(chars.next(), Some('[')) {
+        return false;
     }
-    for c in chars {
-        if ('@'..='~').contains(&c) {
-            return true;
-        }
-    }
-    true
+
+    // Consume until we find the terminator
+    chars.any(|c| ('@'..='~').contains(&c))
 }
 
 #[rstest]
