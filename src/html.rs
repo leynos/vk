@@ -6,8 +6,8 @@ use html5ever::tendril::TendrilSink as _;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use std::borrow::Cow;
 use std::default::Default;
-const CARRIAGE_RETURN: char = 0x000D as char;
-const LINE_FEED: char = 0x000A as char;
+const CARRIAGE_RETURN: char = '\r';
+const LINE_FEED: char = '\n';
 
 /// Collapse root `<details>` blocks in the given text.
 ///

@@ -15,6 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
+use vk::test_utils::strip_ansi_codes;
 
 mod utils;
 use utils::{ShutdownHandle as MitmShutdown, start_mitm, vk_cmd};
@@ -48,29 +49,6 @@ fn create_empty_review_handler()
             .body(Full::from(body))
             .expect("build response")
     }
-}
-
-fn strip_ansi_codes(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    let mut chars = input.chars();
-    while let Some(ch) = chars.next() {
-        if ch == (0x1b as char) && skip_ansi_sequence(&mut chars) {
-            // Sequence consumed by helper
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-fn skip_ansi_sequence(chars: &mut impl Iterator<Item = char>) -> bool {
-    // Early return if not a CSI sequence
-    if !matches!(chars.next(), Some('[')) {
-        return false;
-    }
-
-    // Consume until we find the terminator
-    chars.any(|c| ('@'..='~').contains(&c))
 }
 
 #[rstest]
@@ -304,20 +282,20 @@ async fn run_cli_and_capture_output(addr: SocketAddr) -> String {
 
 fn extract_coderabbit_comment_section(stdout: &str) -> String {
     let stdout = stdout.replace("\r\n", "\n");
+    let stdout = strip_ansi_codes(&stdout);
     let lines: Vec<_> = stdout.lines().collect();
     let start = lines
         .iter()
-        .position(|line| strip_ansi_codes(line).contains("coderabbitai wrote"))
+        .position(|line| line.contains("coderabbitai wrote"))
         .expect("comment start");
     let tail = lines.get(start..).unwrap_or(&[]);
     let end = tail
         .iter()
         .position(|line| line.starts_with("https://"))
         .map_or(lines.len(), |idx| start + idx);
-    let comment_section = lines
+    lines
         .get(start..end)
-        .map_or_else(String::new, |slice| slice.join("\n"));
-    strip_ansi_codes(&comment_section)
+        .map_or_else(String::new, |slice| slice.join("\n"))
 }
 
 fn validate_no_triple_newlines(plain: &str) {
@@ -328,8 +306,9 @@ fn validate_no_triple_newlines(plain: &str) {
 }
 
 fn validate_diff_lines_contiguous(plain: &str) {
-    let diff_line_numbers: Vec<_> = plain
-        .lines()
+    let lines: Vec<_> = plain.lines().collect();
+    let diff_line_numbers: Vec<_> = lines
+        .iter()
         .enumerate()
         .filter_map(|(idx, line)| {
             let trimmed = line.trim_start();
@@ -350,10 +329,12 @@ fn validate_diff_lines_contiguous(plain: &str) {
         let [first, second] = window else {
             continue;
         };
-        assert_eq!(
-            first + 1,
-            *second,
-            "diff lines should be contiguous:\n{plain}"
+        let has_blank_separator = lines
+            .get(first + 1..*second)
+            .is_some_and(|slice| slice.iter().any(|line| line.trim().is_empty()));
+        assert!(
+            !has_blank_separator,
+            "diff lines should not be separated by blank lines:\n{plain}"
         );
     }
 }

@@ -5,6 +5,7 @@
 
 use crate::api::{GraphQLClient, RetryConfig};
 use crate::environment;
+
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -14,6 +15,7 @@ use third_wheel::hyper::{
     service::{make_service_fn, service_fn},
 };
 use tokio::{task::JoinHandle, time::Duration};
+pub use vk::test_utils::strip_ansi_codes;
 
 /// Stub client and server handle for HTTP tests.
 pub struct TestClient {

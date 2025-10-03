@@ -259,35 +259,9 @@ mod tests {
     use chrono::Utc;
     use rstest::rstest;
 
-    use crate::{ReviewComment, User};
+    use crate::{ReviewComment, User, test_utils::strip_ansi_codes};
 
     const CODERABBIT_COMMENT: &str = include_str!("../../tests/fixtures/comment_coderabbit.txt");
-
-    fn strip_ansi_codes(input: &str) -> String {
-        let mut out = String::with_capacity(input.len());
-        let mut chars = input.chars();
-        while let Some(ch) = chars.next() {
-            if ch == (0x1b as char) && skip_ansi_sequence(&mut chars) {
-                // Sequence consumed by helper
-            } else {
-                out.push(ch);
-            }
-        }
-        out
-    }
-
-    fn skip_ansi_sequence(chars: &mut impl Iterator<Item = char>) -> bool {
-        match chars.next() {
-            Some('[') => {}
-            _ => return false,
-        }
-        for c in chars {
-            if ('@'..='~').contains(&c) {
-                return true;
-            }
-        }
-        true
-    }
 
     #[test]
     fn print_reviews_formats_authors_and_states() {

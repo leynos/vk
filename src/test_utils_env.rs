@@ -1,9 +1,38 @@
-//! Test environment helpers.
+//! Test utilities used across integration and unit tests.
 //!
-//! Provides functions for setting and removing environment variables in a
-//! thread-safe manner for tests.
+//! This module provides helpers for managing environment variables during
+//! tests and for normalising terminal output.
 
 use crate::environment;
+
+/// Remove ANSI escape sequences from a string.
+///
+/// # Examples
+///
+/// ```
+/// use vk::test_utils::strip_ansi_codes;
+/// let coloured = "\x1b[31mred\x1b[0m";
+/// assert_eq!(strip_ansi_codes(coloured), "red");
+/// ```
+#[must_use]
+pub fn strip_ansi_codes(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && skip_ansi_sequence(&mut chars) {
+            continue;
+        }
+        out.push(ch);
+    }
+    out
+}
+
+fn skip_ansi_sequence(chars: &mut impl Iterator<Item = char>) -> bool {
+    if !matches!(chars.next(), Some('[')) {
+        return false;
+    }
+    chars.any(|c| ('@'..='~').contains(&c))
+}
 
 /// Set an environment variable for testing.
 ///
