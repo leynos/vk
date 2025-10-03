@@ -1,0 +1,40 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "t1",
+              "isResolved": false,
+              "isOutdated": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "_⚠️ Potential issue_ | _🟡 Minor_\n\n**Consolidate the duplicate asset error annotation.**\n\nLines 316-317 split the error annotation across two `printf` commands, producing a malformed GitHub Actions error annotation.\n\n\n\nApply this diff to consolidate the message:\n\n```diff\n-              printf '%s' '::error title=Duplicate release asset::Asset name '\n-              printf '%s\\n' \"'${asset_name}' would be uploaded more than once\"\n+              printf '::error title=Duplicate release asset::Asset name '\\''%s'\\'' would be uploaded more than once\\n' \"${asset_name}\"\n```\n\n<!-- suggestion_start -->\n\n<details>\n<summary>📝 Committable suggestion</summary>\n\n> ‼️ **IMPORTANT**\n> Carefully review the code before committing. Ensure that it accurately replaces the highlighted code, contains no missing lines, and has no issues with indentation. Thoroughly test & benchmark the code to ensure it meets the requirements.\n\n```suggestion\n                printf '::error title=Duplicate release asset::Asset name '\\''%s'\\'' would be uploaded more than once\\n' \"${asset_name}\"\n```\n\n</details>\n\n<!-- suggestion_end -->\n\n<details>\n<summary>🤖 Prompt for AI Agents</summary>\n\n```\n.github/workflows/release.yml around lines 316 to 317: the GitHub Actions error\nannotation is split across two printf calls which produces a malformed\nannotation; replace the two separate printf commands with a single printf that\nconstructs the full '::error title=Duplicate release asset::Asset name\n'<asset_name>' would be uploaded more than once' message (including the trailing\nnewline) so the annotation is emitted as one valid line.\n```\n\n</details>\n\n<!-- This is an auto-generated comment by CodeRabbit -->\n\n✅ Addressed in commit 70c0c7a\n",
+                    "diffHunk": "@@ -1 +1 @@\n-old\n+new\n",
+                    "originalPosition": null,
+                    "position": null,
+                    "path": "release.sh",
+                    "url": "https://github.com/leynos/netsuke/pull/177#discussion_r2396284785",
+                    "author": {
+                      "login": "coderabbitai"
+                    }
+                  }
+                ],
+                "pageInfo": {
+                  "hasNextPage": false,
+                  "endCursor": null
+                }
+              }
+            }
+          ],
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": null
+          }
+        }
+      }
+    }
+  }
+}

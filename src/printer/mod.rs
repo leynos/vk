@@ -83,6 +83,28 @@ impl Formattable for PullRequestReview {
 /// let mut buf = Vec::new();
 /// write_formattable(&mut buf, &MadSkin::default(), &comment).unwrap();
 /// ```
+/// Collapse sequences of more than two newlines into at most two newlines.
+fn collapse_excessive_newlines(input: String) -> String {
+    if !input.contains("\n\n\n") {
+        return input;
+    }
+
+    let mut buf = String::with_capacity(input.len());
+    let mut newline_count = 0;
+    for ch in input.chars() {
+        if ch == '\n' {
+            newline_count += 1;
+            if newline_count <= 2 {
+                buf.push(ch);
+            }
+        } else {
+            newline_count = 0;
+            buf.push(ch);
+        }
+    }
+    buf
+}
+
 fn write_formattable<W: std::io::Write, T: Formattable>(
     mut out: W,
     skin: &MadSkin,
@@ -91,7 +113,9 @@ fn write_formattable<W: std::io::Write, T: Formattable>(
     let suffix = item.suffix();
     write_author_line(&mut out, item.icon(), item.author_login(), &suffix)?;
     let collapsed = collapse_details(item.body());
-    skin.write_text_on(&mut out, &collapsed)
+    let collapsed = collapse_excessive_newlines(collapsed);
+    let formatted = skin.text(&collapsed, None);
+    std::io::Write::write_fmt(&mut out, format_args!("{formatted}"))
         .map_err(anyhow::Error::from)?;
     writeln!(out)?;
     Ok(())
@@ -236,7 +260,14 @@ mod tests {
     use chrono::Utc;
     use rstest::rstest;
 
-    use crate::{ReviewComment, User};
+    use crate::{
+        ReviewComment, User,
+        test_utils::{
+            assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
+        },
+    };
+
+    const CODERABBIT_COMMENT: &str = include_str!("../../tests/fixtures/comment_coderabbit.txt");
 
     #[test]
     fn print_reviews_formats_authors_and_states() {
@@ -334,6 +365,36 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("▶ sum"));
         assert!(!out.contains("hidden"));
+    }
+
+    #[rstest]
+    #[case("", "")]
+    #[case("a", "a")]
+    #[case("a\nb", "a\nb")]
+    #[case("a\n\nb", "a\n\nb")]
+    #[case("a\n\n\nb", "a\n\nb")]
+    #[case("a\n\n\n\nb", "a\n\nb")]
+    #[case("a\n\n\nb\n\n\nc", "a\n\nb\n\nc")]
+    fn collapse_excessive_newlines_handles_edge_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(collapse_excessive_newlines(input.to_string()), expected);
+    }
+
+    #[test]
+    fn write_comment_body_renders_coderabbit_comment() {
+        let comment = ReviewComment {
+            body: CODERABBIT_COMMENT.into(),
+            ..Default::default()
+        };
+        let mut buf = Vec::new();
+        write_comment_body(&mut buf, &MadSkin::default(), &comment).expect("write comment");
+        let out = String::from_utf8(buf).expect("utf8");
+        let plain = strip_ansi_codes(&out);
+        assert_no_triple_newlines(&plain);
+        assert!(
+            plain.contains("▶ 📝 Committable suggestion"),
+            "collapsed suggestion summary missing:\n{plain}"
+        );
+        assert_diff_lines_not_blank_separated(&plain, "printf");
     }
 
     #[test]

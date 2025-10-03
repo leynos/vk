@@ -10,10 +10,19 @@ use hyper::{Request, Response, StatusCode, body::Incoming};
 use insta::assert_snapshot;
 use rstest::rstest;
 use serde_json::json;
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
+use vk::test_utils::{
+    assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
+};
 
 mod utils;
-use utils::{start_mitm, vk_cmd};
+use utils::{ShutdownHandle as MitmShutdown, start_mitm, vk_cmd};
+
+type RequestHandler = Box<dyn FnMut(&Request<Incoming>) -> Response<Full<Bytes>> + Send>;
 
 /// Build a closure returning an empty `reviewThreads` payload.
 fn create_empty_review_handler()
@@ -221,4 +230,72 @@ async fn pr_summarises_multiple_files() {
     assert_snapshot!("pr_summarises_multiple_files_summary", summary);
 
     shutdown.shutdown().await;
+}
+
+#[tokio::test]
+async fn pr_renders_coderabbit_comment_without_extra_spacing() {
+    let (addr, _handler, shutdown) = setup_mock_server_for_coderabbit_test().await;
+
+    let stdout = run_cli_and_capture_output(addr).await;
+    let plain = extract_coderabbit_comment_section(&stdout);
+
+    assert_no_triple_newlines(&plain);
+    assert_diff_lines_not_blank_separated(&plain, "printf");
+
+    assert_snapshot!("pr_renders_coderabbit_comment", plain);
+    shutdown.shutdown().await;
+}
+
+async fn setup_mock_server_for_coderabbit_test()
+-> (SocketAddr, Arc<Mutex<RequestHandler>>, MitmShutdown) {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let handler: Arc<Mutex<RequestHandler>> = handler;
+    let threads_body = include_str!("fixtures/review_threads_coderabbit.json").to_string();
+    let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
+    let last = reviews_body.clone();
+    let mut responses = vec![threads_body, reviews_body].into_iter();
+    *handler.lock().expect("lock handler") = Box::new(move |_req| {
+        let body = responses.next().unwrap_or_else(|| last.clone());
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::from(body))
+            .expect("build response")
+    });
+    (addr, handler, shutdown)
+}
+
+async fn run_cli_and_capture_output(addr: SocketAddr) -> String {
+    tokio::task::spawn_blocking(move || {
+        let mut cmd = vk_cmd(addr);
+        cmd.args(["pr", "https://github.com/leynos/netsuke/pull/177"]);
+        let output = cmd.output().expect("run command");
+        assert!(
+            output.status.success(),
+            "vk exited with {:?}. Stderr:\n{}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("utf8")
+    })
+    .await
+    .expect("spawn blocking")
+}
+
+fn extract_coderabbit_comment_section(stdout: &str) -> String {
+    let stdout = stdout.replace("\r\n", "\n");
+    let stdout = strip_ansi_codes(&stdout);
+    let lines: Vec<_> = stdout.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| line.contains("coderabbitai wrote"))
+        .expect("comment start");
+    let tail = lines.get(start..).unwrap_or(&[]);
+    let end = tail
+        .iter()
+        .position(|line| line.starts_with("https://"))
+        .map_or(lines.len(), |idx| start + idx);
+    lines
+        .get(start..end)
+        .map_or_else(String::new, |slice| slice.join("\n"))
 }
