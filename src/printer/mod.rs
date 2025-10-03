@@ -114,7 +114,8 @@ fn write_formattable<W: std::io::Write, T: Formattable>(
     write_author_line(&mut out, item.icon(), item.author_login(), &suffix)?;
     let collapsed = collapse_details(item.body());
     let collapsed = collapse_excessive_newlines(collapsed);
-    skin.write_text_on(&mut out, &collapsed)
+    let formatted = skin.text(&collapsed, None);
+    std::io::Write::write_fmt(&mut out, format_args!("{formatted}"))
         .map_err(anyhow::Error::from)?;
     writeln!(out)?;
     Ok(())
