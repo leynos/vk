@@ -261,7 +261,9 @@ mod tests {
 
     use crate::{
         ReviewComment, User,
-        test_utils::{assert_diff_lines_contiguous, assert_no_triple_newlines, strip_ansi_codes},
+        test_utils::{
+            assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
+        },
     };
 
     const CODERABBIT_COMMENT: &str = include_str!("../../tests/fixtures/comment_coderabbit.txt");
@@ -391,7 +393,7 @@ mod tests {
             plain.contains("▶ 📝 Committable suggestion"),
             "collapsed suggestion summary missing:\n{plain}"
         );
-        assert_diff_lines_contiguous(&plain, "printf");
+        assert_diff_lines_not_blank_separated(&plain, "printf");
     }
 
     #[test]

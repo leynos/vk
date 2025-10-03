@@ -26,6 +26,9 @@ pub fn assert_no_triple_newlines(text: &str) {
 
 /// Assert that diff lines matching `pattern` are not separated by blank lines.
 ///
+/// Non-blank lines may appear between matching diff lines; only blank line
+/// separators trigger a failure.
+///
 /// # Panics
 ///
 /// Panics if fewer than three matching diff lines are present or if blank
@@ -36,12 +39,12 @@ pub fn assert_no_triple_newlines(text: &str) {
 /// # Examples
 ///
 /// ```
-/// use vk::test_utils::assert_diff_lines_contiguous;
+/// use vk::test_utils::assert_diff_lines_not_blank_separated;
 ///
 /// let diff = "-              printf old\n+              printf new\n";
-/// assert_diff_lines_contiguous(diff, "printf");
+/// assert_diff_lines_not_blank_separated(diff, "printf");
 /// ```
-pub fn assert_diff_lines_contiguous(text: &str, pattern: &str) {
+pub fn assert_diff_lines_not_blank_separated(text: &str, pattern: &str) {
     let lines: Vec<_> = text.lines().collect();
     let diff_line_numbers: Vec<_> = lines
         .iter()

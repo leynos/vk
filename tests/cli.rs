@@ -15,7 +15,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
-use vk::test_utils::{assert_diff_lines_contiguous, assert_no_triple_newlines, strip_ansi_codes};
+use vk::test_utils::{
+    assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
+};
 
 mod utils;
 use utils::{ShutdownHandle as MitmShutdown, start_mitm, vk_cmd};
@@ -238,7 +240,7 @@ async fn pr_renders_coderabbit_comment_without_extra_spacing() {
     let plain = extract_coderabbit_comment_section(&stdout);
 
     assert_no_triple_newlines(&plain);
-    assert_diff_lines_contiguous(&plain, "printf");
+    assert_diff_lines_not_blank_separated(&plain, "printf");
 
     assert_snapshot!("pr_renders_coderabbit_comment", plain);
     shutdown.shutdown().await;
