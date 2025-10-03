@@ -5,6 +5,78 @@
 
 use crate::environment;
 
+/// Assert that the provided text does not contain three consecutive newlines.
+///
+/// # Panics
+///
+/// Panics if `text` contains three consecutive newline characters.
+/// # Examples
+///
+/// ```
+/// use vk::test_utils::assert_no_triple_newlines;
+///
+/// assert_no_triple_newlines("a\n\nb");
+/// ```
+pub fn assert_no_triple_newlines(text: &str) {
+    assert!(
+        !text.contains("\n\n\n"),
+        "output should not contain triple newlines:\n{text}"
+    );
+}
+
+/// Assert that diff lines matching `pattern` are not separated by blank lines.
+///
+/// # Panics
+///
+/// Panics if fewer than three matching diff lines are present or if blank
+/// lines appear between matches.
+/// The helper expects unified diff output where the interesting lines begin
+/// with either `-` or `+` followed by fourteen spaces and `pattern`.
+///
+/// # Examples
+///
+/// ```
+/// use vk::test_utils::assert_diff_lines_contiguous;
+///
+/// let diff = "-              printf old\n+              printf new\n";
+/// assert_diff_lines_contiguous(diff, "printf");
+/// ```
+pub fn assert_diff_lines_contiguous(text: &str, pattern: &str) {
+    let lines: Vec<_> = text.lines().collect();
+    let diff_line_numbers: Vec<_> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with(&format!("-              {pattern}"))
+                || trimmed.starts_with(&format!("+              {pattern}"))
+            {
+                Some(idx)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    assert!(
+        diff_line_numbers.len() >= 3,
+        "expected at least three diff lines containing '{pattern}':\n{text}"
+    );
+
+    for window in diff_line_numbers.windows(2) {
+        let [first, second] = window else {
+            continue;
+        };
+        let has_blank_separator = lines
+            .get(first + 1..*second)
+            .is_some_and(|slice| slice.iter().any(|line| line.trim().is_empty()));
+        assert!(
+            !has_blank_separator,
+            "diff lines containing '{pattern}' should not be separated by blank lines:\n{text}"
+        );
+    }
+}
+
 /// Remove ANSI escape sequences from a string.
 ///
 /// # Examples

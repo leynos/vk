@@ -259,7 +259,10 @@ mod tests {
     use chrono::Utc;
     use rstest::rstest;
 
-    use crate::{ReviewComment, User, test_utils::strip_ansi_codes};
+    use crate::{
+        ReviewComment, User,
+        test_utils::{assert_diff_lines_contiguous, assert_no_triple_newlines, strip_ansi_codes},
+    };
 
     const CODERABBIT_COMMENT: &str = include_str!("../../tests/fixtures/comment_coderabbit.txt");
 
@@ -361,6 +364,18 @@ mod tests {
         assert!(!out.contains("hidden"));
     }
 
+    #[rstest]
+    #[case("", "")]
+    #[case("a", "a")]
+    #[case("a\nb", "a\nb")]
+    #[case("a\n\nb", "a\n\nb")]
+    #[case("a\n\n\nb", "a\n\nb")]
+    #[case("a\n\n\n\nb", "a\n\nb")]
+    #[case("a\n\n\nb\n\n\nc", "a\n\nb\n\nc")]
+    fn collapse_excessive_newlines_handles_edge_cases(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(collapse_excessive_newlines(input.to_string()), expected);
+    }
+
     #[test]
     fn write_comment_body_renders_coderabbit_comment() {
         let comment = ReviewComment {
@@ -371,42 +386,12 @@ mod tests {
         write_comment_body(&mut buf, &MadSkin::default(), &comment).expect("write comment");
         let out = String::from_utf8(buf).expect("utf8");
         let plain = strip_ansi_codes(&out);
-        assert!(
-            !plain.contains("\n\n\n"),
-            "output should not contain triple newlines:\n{plain}"
-        );
+        assert_no_triple_newlines(&plain);
         assert!(
             plain.contains("▶ 📝 Committable suggestion"),
             "collapsed suggestion summary missing:\n{plain}"
         );
-        let diff_line_numbers: Vec<_> = plain
-            .lines()
-            .enumerate()
-            .filter_map(|(idx, line)| {
-                let trimmed = line.trim_start();
-                if trimmed.starts_with("-              printf")
-                    || trimmed.starts_with("+              printf")
-                {
-                    Some(idx)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        assert!(
-            diff_line_numbers.len() >= 3,
-            "expected diff lines in output\n{plain}"
-        );
-        for window in diff_line_numbers.windows(2) {
-            let [first, second] = window else {
-                continue;
-            };
-            assert_eq!(
-                first + 1,
-                *second,
-                "diff lines should be contiguous:\n{plain}"
-            );
-        }
+        assert_diff_lines_contiguous(&plain, "printf");
     }
 
     #[test]

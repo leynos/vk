@@ -118,6 +118,7 @@ fn collect_text(node: &Handle) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::borrow::Cow;
 
     #[test]
     fn collapse_replaces_root_details() {
@@ -159,5 +160,13 @@ mod tests {
             "<details><summary>two</summary>b</details>"
         );
         assert_eq!(collapse_details(input), "\u{25B6} one\n\u{25B6} two\n");
+    }
+
+    #[test]
+    fn normalize_line_endings_replaces_bare_carriage_returns() {
+        let input = "line1\rline2\r\nline3";
+        let normalised = normalize_line_endings(input);
+        assert_eq!(normalised.as_ref(), "line1\nline2\nline3");
+        assert!(matches!(normalised, Cow::Owned(_)));
     }
 }

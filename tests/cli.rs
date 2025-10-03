@@ -15,7 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
-use vk::test_utils::strip_ansi_codes;
+use vk::test_utils::{assert_diff_lines_contiguous, assert_no_triple_newlines, strip_ansi_codes};
 
 mod utils;
 use utils::{ShutdownHandle as MitmShutdown, start_mitm, vk_cmd};
@@ -237,8 +237,8 @@ async fn pr_renders_coderabbit_comment_without_extra_spacing() {
     let stdout = run_cli_and_capture_output(addr).await;
     let plain = extract_coderabbit_comment_section(&stdout);
 
-    validate_no_triple_newlines(&plain);
-    validate_diff_lines_contiguous(&plain);
+    assert_no_triple_newlines(&plain);
+    assert_diff_lines_contiguous(&plain, "printf");
 
     assert_snapshot!("pr_renders_coderabbit_comment", plain);
     shutdown.shutdown().await;
@@ -296,45 +296,4 @@ fn extract_coderabbit_comment_section(stdout: &str) -> String {
     lines
         .get(start..end)
         .map_or_else(String::new, |slice| slice.join("\n"))
-}
-
-fn validate_no_triple_newlines(plain: &str) {
-    assert!(
-        !plain.contains("\n\n\n"),
-        "comment should not contain triple newlines:\n{plain}"
-    );
-}
-
-fn validate_diff_lines_contiguous(plain: &str) {
-    let lines: Vec<_> = plain.lines().collect();
-    let diff_line_numbers: Vec<_> = lines
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, line)| {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("-              printf")
-                || trimmed.starts_with("+              printf")
-            {
-                Some(idx)
-            } else {
-                None
-            }
-        })
-        .collect();
-    assert!(
-        diff_line_numbers.len() == 3,
-        "expected three diff lines:\n{plain}"
-    );
-    for window in diff_line_numbers.windows(2) {
-        let [first, second] = window else {
-            continue;
-        };
-        let has_blank_separator = lines
-            .get(first + 1..*second)
-            .is_some_and(|slice| slice.iter().any(|line| line.trim().is_empty()));
-        assert!(
-            !has_blank_separator,
-            "diff lines should not be separated by blank lines:\n{plain}"
-        );
-    }
 }
