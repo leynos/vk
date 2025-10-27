@@ -51,7 +51,7 @@ jobs:
       - name: Build release binary
         run: cargo build --release
       - name: Upload release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ env.REPO_NAME }}
           path: target/release/${{ env.REPO_NAME }}
