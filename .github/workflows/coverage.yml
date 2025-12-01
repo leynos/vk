@@ -14,19 +14,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@69f9c29d18a28b6bdf4b02dcd743ef416817ba18
+        uses: leynos/shared-actions/.github/actions/setup-rust@4fc6da2b8789a6602a67d64fe82310d1479ea8d6
       - name: Format
         run: make check-fmt
       - name: Lint
         run: make lint
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@69f9c29d18a28b6bdf4b02dcd743ef416817ba18
+        uses: leynos/shared-actions/.github/actions/generate-coverage@4fc6da2b8789a6602a67d64fe82310d1479ea8d6
         with:
           output-path: lcov.info
           format: lcov
       - name: Upload coverage data to CodeScene
         if: ${{ env.CS_ACCESS_TOKEN != '' }}
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@69f9c29d18a28b6bdf4b02dcd743ef416817ba18
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@4fc6da2b8789a6602a67d64fe82310d1479ea8d6
         with:
           format: lcov
           access-token: ${{ env.CS_ACCESS_TOKEN }}
@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@69f9c29d18a28b6bdf4b02dcd743ef416817ba18
+        uses: leynos/shared-actions/.github/actions/setup-rust@4fc6da2b8789a6602a67d64fe82310d1479ea8d6
       - name: Install OpenSSL
         run: sudo apt-get update && sudo apt-get install -y openssl ca-certificates
       - name: Lint (feature-gated)
