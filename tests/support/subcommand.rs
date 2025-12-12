@@ -23,7 +23,7 @@ use ortho_config::SubcmdConfigMerge;
 /// let cli = PrArgs::default();
 /// let merged = merge_with_sources(
 ///     "[cmds.pr]\nreference = \"ref\"",
-///     &[("VKCMDS_PR_REFERENCE", Some("env_ref"))],
+///     &[("VK_CMDS_PR_REFERENCE", Some("env_ref"))],
 ///     true,
 ///     &cli,
 /// );

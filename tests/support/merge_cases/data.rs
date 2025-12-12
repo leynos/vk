@@ -191,32 +191,32 @@ show_outdated = false
 "#;
 
 const PR_ENV_CLI_OVER_ENV: EnvAssignments = &[
-    ("VKCMDS_PR_REFERENCE", Some("env_ref")),
-    ("VKCMDS_PR_FILES", Some(r#"["env.txt"]"#)),
-    ("VKCMDS_PR_SHOW_OUTDATED", Some("false")),
+    ("VK_CMDS_PR_REFERENCE", Some("env_ref")),
+    ("VK_CMDS_PR_FILES", Some(r#"["env.txt"]"#)),
+    ("VK_CMDS_PR_SHOW_OUTDATED", Some("false")),
 ];
 
 const PR_ENV_ENV_OVER_FILE: EnvAssignments = &[
-    ("VKCMDS_PR_REFERENCE", Some("env_ref")),
-    ("VKCMDS_PR_FILES", Some(r#"["env_one.rs","env_two.rs"]"#)),
-    ("VKCMDS_PR_SHOW_OUTDATED", Some("true")),
+    ("VK_CMDS_PR_REFERENCE", Some("env_ref")),
+    ("VK_CMDS_PR_FILES", Some(r#"["env_one.rs","env_two.rs"]"#)),
+    ("VK_CMDS_PR_SHOW_OUTDATED", Some("true")),
 ];
 
 const PR_ENV_FILE_OVER_DEFAULTS: EnvAssignments = &[
-    ("VKCMDS_PR_REFERENCE", None),
-    ("VKCMDS_PR_FILES", None),
-    ("VKCMDS_PR_SHOW_OUTDATED", None),
+    ("VK_CMDS_PR_REFERENCE", None),
+    ("VK_CMDS_PR_FILES", None),
+    ("VK_CMDS_PR_SHOW_OUTDATED", None),
 ];
 
 const ISSUE_CONFIG: &str = r#"[cmds.issue]
 reference = "file_ref"
 "#;
 
-const ISSUE_ENV_CLI_OVER_ENV: EnvAssignments = &[("VKCMDS_ISSUE_REFERENCE", Some("env_ref"))];
+const ISSUE_ENV_CLI_OVER_ENV: EnvAssignments = &[("VK_CMDS_ISSUE_REFERENCE", Some("env_ref"))];
 
-const ISSUE_ENV_ENV_OVER_FILE: EnvAssignments = &[("VKCMDS_ISSUE_REFERENCE", Some("env_ref"))];
+const ISSUE_ENV_ENV_OVER_FILE: EnvAssignments = &[("VK_CMDS_ISSUE_REFERENCE", Some("env_ref"))];
 
-const ISSUE_ENV_FILE_OVER_DEFAULTS: EnvAssignments = &[("VKCMDS_ISSUE_REFERENCE", None)];
+const ISSUE_ENV_FILE_OVER_DEFAULTS: EnvAssignments = &[("VK_CMDS_ISSUE_REFERENCE", None)];
 
 const RESOLVE_CONFIG_WITH_REFERENCE: &str = r#"[cmds.resolve]
 reference = "file_ref"
@@ -228,16 +228,16 @@ message = "file message"
 "#;
 
 const RESOLVE_ENV_CLI_OVER_ENV: EnvAssignments = &[
-    ("VKCMDS_RESOLVE_REFERENCE", Some("env_ref")),
-    ("VKCMDS_RESOLVE_MESSAGE", Some("env message")),
+    ("VK_CMDS_RESOLVE_REFERENCE", Some("env_ref")),
+    ("VK_CMDS_RESOLVE_MESSAGE", Some("env message")),
 ];
 
 const RESOLVE_ENV_ENV_OVER_FILE: EnvAssignments = &[
-    ("VKCMDS_RESOLVE_REFERENCE", None),
-    ("VKCMDS_RESOLVE_MESSAGE", Some("env message")),
+    ("VK_CMDS_RESOLVE_REFERENCE", None),
+    ("VK_CMDS_RESOLVE_MESSAGE", Some("env message")),
 ];
 
 const RESOLVE_ENV_FILE_OVER_DEFAULTS: EnvAssignments = &[
-    ("VKCMDS_RESOLVE_REFERENCE", None),
-    ("VKCMDS_RESOLVE_MESSAGE", None),
+    ("VK_CMDS_RESOLVE_REFERENCE", None),
+    ("VK_CMDS_RESOLVE_MESSAGE", None),
 ];

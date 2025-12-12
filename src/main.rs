@@ -160,7 +160,7 @@ pub enum VkError {
     #[error("io error: {0}")]
     Io(#[from] Box<std::io::Error>),
     #[error("configuration error: {0}")]
-    Config(#[from] Box<ortho_config::OrthoError>),
+    Config(#[from] std::sync::Arc<ortho_config::OrthoError>),
 }
 
 /// Implement `From<$source>` for `VkError` by boxing the source into `$variant`.
@@ -176,7 +176,12 @@ macro_rules! boxed_error_from {
 
 boxed_error_from!(reqwest::Error, Request);
 boxed_error_from!(std::io::Error, Io);
-boxed_error_from!(ortho_config::OrthoError, Config);
+
+impl From<ortho_config::OrthoError> for VkError {
+    fn from(source: ortho_config::OrthoError) -> Self {
+        Self::Config(std::sync::Arc::new(source))
+    }
+}
 
 static UTF8_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").expect("valid regex"));
