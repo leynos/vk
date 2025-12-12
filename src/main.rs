@@ -60,6 +60,7 @@ use ortho_config::{OrthoConfig, SubcmdConfigMerge};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::io::{ErrorKind, Write};
+use std::sync::Arc;
 use std::sync::LazyLock;
 #[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
@@ -106,6 +107,8 @@ struct Cli {
     #[command(flatten)]
     global: GlobalArgs,
 }
+
+type SharedConfigError = Arc<ortho_config::OrthoError>;
 
 /// Error type for the `vk` binary.
 ///
@@ -160,7 +163,7 @@ pub enum VkError {
     #[error("io error: {0}")]
     Io(#[from] Box<std::io::Error>),
     #[error("configuration error: {0}")]
-    Config(#[from] std::sync::Arc<ortho_config::OrthoError>),
+    Config(#[from] SharedConfigError),
 }
 
 /// Implement `From<$source>` for `VkError` by boxing the source into `$variant`.
@@ -179,7 +182,7 @@ boxed_error_from!(std::io::Error, Io);
 
 impl From<ortho_config::OrthoError> for VkError {
     fn from(source: ortho_config::OrthoError) -> Self {
-        Self::Config(std::sync::Arc::new(source))
+        Self::Config(Arc::new(source))
     }
 }
 
@@ -437,23 +440,32 @@ async fn main() -> Result<(), VkError> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)
         .init();
-    let cli = Cli::parse();
-    let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
-    global.merge(cli.global);
-    let result = match cli.command {
-        Commands::Pr(pr_cli) => {
-            let args = pr_cli.load_and_merge()?;
-            run_pr(args, &global).await
+    let Cli {
+        command,
+        global: global_cli,
+    } = Cli::parse();
+
+    let result: Result<(), VkError> = async {
+        let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
+        global.merge(global_cli);
+
+        match command {
+            Commands::Pr(pr_cli) => {
+                let args = pr_cli.load_and_merge()?;
+                run_pr(args, &global).await
+            }
+            Commands::Issue(issue_cli) => {
+                let args = issue_cli.load_and_merge()?;
+                run_issue(args, &global).await
+            }
+            Commands::Resolve(resolve_cli) => {
+                let args = resolve_cli.load_and_merge()?;
+                run_resolve(args, &global).await
+            }
         }
-        Commands::Issue(issue_cli) => {
-            let args = issue_cli.load_and_merge()?;
-            run_issue(args, &global).await
-        }
-        Commands::Resolve(resolve_cli) => {
-            let args = resolve_cli.load_and_merge()?;
-            run_resolve(args, &global).await
-        }
-    };
+    }
+    .await;
+
     if let Err(e) = result {
         eprintln!("Error: {e}");
         let code = match &e {
@@ -482,6 +494,8 @@ mod tests {
     use crate::test_utils::{remove_var, set_var};
     use chrono::Utc;
     use serial_test::serial;
+    use std::ffi::OsString;
+    use std::sync::Arc;
 
     #[test]
     fn cli_loads_repo_from_flag() {
@@ -535,6 +549,67 @@ mod tests {
         match old_lang {
             Some(v) => set_var("LANG", v),
             None => remove_var("LANG"),
+        }
+    }
+
+    fn assert_is_send_sync<T: Send + Sync>() {}
+
+    #[test]
+    fn vk_error_is_send_and_sync() {
+        assert_is_send_sync::<VkError>();
+    }
+
+    #[test]
+    #[serial]
+    fn vk_error_config_from_arc_preserves_allocation() {
+        let old_timeout = environment::var("VK_HTTP_TIMEOUT").ok();
+        remove_var("VK_HTTP_TIMEOUT");
+        set_var("VK_HTTP_TIMEOUT", "not-a-number");
+
+        let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
+            .expect_err("invalid VK_HTTP_TIMEOUT should fail");
+
+        let original = err.clone();
+        let converted: VkError = err.into();
+
+        match converted {
+            VkError::Config(stored) => assert!(
+                Arc::ptr_eq(&stored, &original),
+                "conversion from Arc should preserve the original allocation"
+            ),
+            other => panic!("expected VkError::Config, got {other:?}"),
+        }
+
+        match old_timeout {
+            Some(v) => set_var("VK_HTTP_TIMEOUT", v),
+            None => remove_var("VK_HTTP_TIMEOUT"),
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn vk_error_config_from_owned_ortho_error_wraps_in_arc() {
+        let old_timeout = environment::var("VK_HTTP_TIMEOUT").ok();
+        remove_var("VK_HTTP_TIMEOUT");
+        set_var("VK_HTTP_TIMEOUT", "not-a-number");
+
+        let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
+            .expect_err("invalid VK_HTTP_TIMEOUT should fail");
+        let err = Arc::try_unwrap(err).expect("unique ortho_config error Arc");
+
+        let converted: VkError = err.into();
+        match converted {
+            VkError::Config(stored) => assert_eq!(
+                Arc::strong_count(&stored),
+                1,
+                "owned OrthoError conversion should produce a single-owner Arc"
+            ),
+            other => panic!("expected VkError::Config, got {other:?}"),
+        }
+
+        match old_timeout {
+            Some(v) => set_var("VK_HTTP_TIMEOUT", v),
+            None => remove_var("VK_HTTP_TIMEOUT"),
         }
     }
 
