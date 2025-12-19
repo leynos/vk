@@ -16,8 +16,7 @@ pub struct PullRequestReview {
     pub body: String,
     /// Timestamp when the review was formally submitted.
     ///
-    /// This is `None` for draft or pending reviews that have not yet been
-    /// submitted through the GitHub UI.
+    /// This may be `None` when the timestamp is missing or unknown.
     pub submitted_at: Option<DateTime<Utc>>,
     pub state: String,
     pub author: Option<User>,
@@ -116,6 +115,24 @@ pub async fn fetch_reviews(
         .await
 }
 
+/// Determine whether `new` should replace `existing` when collating reviews.
+///
+/// Prefer reviews with a timestamp over those without. When both have
+/// timestamps, keep the later one. Tie-break on equal timestamps (or both
+/// `None`) by favouring the later item in input order.
+#[expect(
+    clippy::match_same_arms,
+    reason = "arms kept separate for readability of tie-breaking rules"
+)]
+fn is_dominated(new: &PullRequestReview, existing: &PullRequestReview) -> bool {
+    match (new.submitted_at, existing.submitted_at) {
+        (Some(new_ts), Some(old_ts)) => new_ts >= old_ts,
+        (Some(_), None) => true,
+        (None, Some(_)) => false,
+        (None, None) => true,
+    }
+}
+
 /// Select the most recent review from each author.
 ///
 /// Reviews without an author are returned individually rather than being
@@ -165,16 +182,7 @@ pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview>
                     e.insert(r);
                 }
                 Entry::Occupied(mut e) => {
-                    // Prefer reviews with a timestamp over those without.
-                    // When both have timestamps, keep the later one.
-                    // Tie-break on equal timestamps (or both None) by
-                    // favouring the later item in input order.
-                    let dominated = match (r.submitted_at, e.get().submitted_at) {
-                        (Some(new), Some(old)) => new >= old,
-                        (None, Some(_)) => false,
-                        (Some(_) | None, None) => true,
-                    };
-                    if dominated {
+                    if is_dominated(&r, e.get()) {
                         e.insert(r);
                     }
                 }
