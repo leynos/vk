@@ -14,7 +14,11 @@ use std::collections::{HashMap, hash_map::Entry};
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestReview {
     pub body: String,
-    pub submitted_at: DateTime<Utc>,
+    /// Timestamp when the review was formally submitted.
+    ///
+    /// This is `None` for draft or pending reviews that have not yet been
+    /// submitted through the GitHub UI.
+    pub submitted_at: Option<DateTime<Utc>>,
     pub state: String,
     pub author: Option<User>,
 }
@@ -135,13 +139,13 @@ pub async fn fetch_reviews(
 /// let reviews = vec![
 ///     PullRequestReview {
 ///         body: String::new(),
-///         submitted_at: Utc::now(),
+///         submitted_at: Some(Utc::now()),
 ///         state: "COMMENTED".into(),
 ///         author: None,
 ///     },
 ///     PullRequestReview {
 ///         body: String::new(),
-///         submitted_at: Utc::now(),
+///         submitted_at: Some(Utc::now()),
 ///         state: "COMMENTED".into(),
 ///         author: None,
 ///     },
@@ -161,9 +165,16 @@ pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview>
                     e.insert(r);
                 }
                 Entry::Occupied(mut e) => {
-                    // Tie-break on equal timestamps by favouring the later
-                    // item in input order.
-                    if r.submitted_at >= e.get().submitted_at {
+                    // Prefer reviews with a timestamp over those without.
+                    // When both have timestamps, keep the later one.
+                    // Tie-break on equal timestamps (or both None) by
+                    // favouring the later item in input order.
+                    let dominated = match (r.submitted_at, e.get().submitted_at) {
+                        (Some(new), Some(old)) => new >= old,
+                        (None, Some(_)) => false,
+                        (Some(_) | None, None) => true,
+                    };
+                    if dominated {
                         e.insert(r);
                     }
                 }
@@ -202,7 +213,7 @@ mod tests {
                 let ts = i as i64 + 1;
                 PullRequestReview {
                     body: String::new(),
-                    submitted_at: Utc.timestamp_opt(ts, 0).single().expect("timestamp"),
+                    submitted_at: Some(Utc.timestamp_opt(ts, 0).single().expect("timestamp")),
                     state: "COMMENTED".into(),
                     author: None,
                 }
@@ -215,14 +226,17 @@ mod tests {
 
     #[rstest]
     #[case(
-        Utc.timestamp_opt(10, 0).single().expect("ts"),
-        Utc.timestamp_opt(20, 0).single().expect("ts")
+        Some(Utc.timestamp_opt(10, 0).single().expect("ts")),
+        Some(Utc.timestamp_opt(20, 0).single().expect("ts"))
     )]
     #[case(
-        Utc.timestamp_opt(10, 0).single().expect("ts"),
-        Utc.timestamp_opt(10, 0).single().expect("ts")
+        Some(Utc.timestamp_opt(10, 0).single().expect("ts")),
+        Some(Utc.timestamp_opt(10, 0).single().expect("ts"))
     )]
-    fn keeps_latest_per_author(#[case] first_ts: DateTime<Utc>, #[case] second_ts: DateTime<Utc>) {
+    fn keeps_latest_per_author(
+        #[case] first_ts: Option<DateTime<Utc>>,
+        #[case] second_ts: Option<DateTime<Utc>>,
+    ) {
         let a1 = PullRequestReview {
             body: "first".into(),
             submitted_at: first_ts,
@@ -241,7 +255,7 @@ mod tests {
         };
         let b1 = PullRequestReview {
             body: String::new(),
-            submitted_at: Utc.timestamp_opt(30, 0).single().expect("ts"),
+            submitted_at: Some(Utc.timestamp_opt(30, 0).single().expect("ts")),
             state: "CHANGES_REQUESTED".into(),
             author: Some(User {
                 login: "bob".into(),
@@ -301,5 +315,79 @@ mod tests {
         assert!(reviews.is_empty());
         join.abort();
         let _ = join.await;
+    }
+
+    #[tokio::test]
+    async fn deserializes_null_submitted_at() {
+        let body = include_str!("../tests/fixtures/reviews_null_date.json");
+        let TestClient { client, join, .. } = start_server(vec![body.to_string()]);
+        let reviews = fetch_reviews(
+            &client,
+            &RepoInfo {
+                owner: "o".into(),
+                name: "n".into(),
+            },
+            1,
+        )
+        .await
+        .expect("should accept null submittedAt");
+        assert_eq!(reviews.len(), 2);
+        assert!(reviews.iter().any(|r| r.submitted_at.is_none()));
+        assert!(reviews.iter().any(|r| r.submitted_at.is_some()));
+        join.abort();
+        let _ = join.await;
+    }
+
+    #[test]
+    fn latest_reviews_prefers_timestamp_over_none() {
+        let ts = Utc.timestamp_opt(100, 0).single().expect("ts");
+        let with_ts = PullRequestReview {
+            body: "with timestamp".into(),
+            submitted_at: Some(ts),
+            state: "APPROVED".into(),
+            author: Some(User {
+                login: "alice".into(),
+            }),
+        };
+        let without_ts = PullRequestReview {
+            body: "without timestamp".into(),
+            submitted_at: None,
+            state: "PENDING".into(),
+            author: Some(User {
+                login: "alice".into(),
+            }),
+        };
+
+        // Regardless of order, the one with the timestamp should win.
+        let latest = latest_reviews(vec![with_ts.clone(), without_ts.clone()]);
+        assert_eq!(latest.len(), 1);
+        assert_eq!(latest.first().expect("one review").submitted_at, Some(ts));
+
+        let latest = latest_reviews(vec![without_ts, with_ts]);
+        assert_eq!(latest.len(), 1);
+        assert_eq!(latest.first().expect("one review").submitted_at, Some(ts));
+    }
+
+    #[test]
+    fn latest_reviews_both_none_takes_later_in_input() {
+        let first = PullRequestReview {
+            body: "first".into(),
+            submitted_at: None,
+            state: "PENDING".into(),
+            author: Some(User {
+                login: "alice".into(),
+            }),
+        };
+        let second = PullRequestReview {
+            body: "second".into(),
+            submitted_at: None,
+            state: "PENDING".into(),
+            author: Some(User {
+                login: "alice".into(),
+            }),
+        };
+        let latest = latest_reviews(vec![first, second]);
+        assert_eq!(latest.len(), 1);
+        assert_eq!(latest.first().expect("one review").body, "second");
     }
 }
