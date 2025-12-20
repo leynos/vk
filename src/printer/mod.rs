@@ -274,7 +274,7 @@ mod tests {
         let reviews = [
             PullRequestReview {
                 body: "Needs work".into(),
-                submitted_at: Utc::now(),
+                submitted_at: Some(Utc::now()),
                 state: "CHANGES_REQUESTED".into(),
                 author: Some(User {
                     login: "alice".into(),
@@ -282,7 +282,7 @@ mod tests {
             },
             PullRequestReview {
                 body: "Looks good".into(),
-                submitted_at: Utc::now(),
+                submitted_at: Some(Utc::now()),
                 state: "APPROVED".into(),
                 author: None,
             },
@@ -307,7 +307,7 @@ mod tests {
     ) {
         let review = PullRequestReview {
             body: "Nice".into(),
-            submitted_at: Utc::now(),
+            submitted_at: Some(Utc::now()),
             state: state.into(),
             author: login.map(|l| User { login: l.into() }),
         };
@@ -322,7 +322,7 @@ mod tests {
     fn write_review_collapses_details() {
         let review = PullRequestReview {
             body: "<details><summary>sum</summary>hidden</details>".into(),
-            submitted_at: Utc::now(),
+            submitted_at: Some(Utc::now()),
             state: "APPROVED".into(),
             author: None,
         };
@@ -411,7 +411,7 @@ mod tests {
 
         let review = PullRequestReview {
             body: "Nice".into(),
-            submitted_at: Utc::now(),
+            submitted_at: Some(Utc::now()),
             state: "APPROVED".into(),
             author: None,
         };

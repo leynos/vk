@@ -1,0 +1,25 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviews": {
+          "nodes": [
+            {
+              "body": "Draft review",
+              "state": "PENDING",
+              "submittedAt": null,
+              "author": { "login": "alice" }
+            },
+            {
+              "body": "Submitted review",
+              "state": "APPROVED",
+              "submittedAt": "2024-01-15T10:30:00Z",
+              "author": { "login": "bob" }
+            }
+          ],
+          "pageInfo": { "hasNextPage": false, "endCursor": null }
+        }
+      }
+    }
+  }
+}

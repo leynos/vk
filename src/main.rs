@@ -730,7 +730,7 @@ mod tests {
     fn review_body_collapses_details() {
         let review = PullRequestReview {
             body: "<details><summary>hello</summary>bye</details>".into(),
-            submitted_at: Utc::now(),
+            submitted_at: Some(Utc::now()),
             state: "APPROVED".into(),
             author: None,
         };
