@@ -10,7 +10,7 @@ use crate::html::collapse_details;
 use crate::reviews::PullRequestReview;
 use crate::{ReviewComment, ReviewThread};
 
-/// Write a comment permalink followed by a horizontal rule separator.
+/// Write a comment permalink followed by a horizontal rule separator (`\n---\n`).
 ///
 /// The separator ensures the URL is visually associated with the preceding
 /// comment when multiple threads are printed back-to-back.
