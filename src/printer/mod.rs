@@ -10,6 +10,10 @@ use crate::html::collapse_details;
 use crate::reviews::PullRequestReview;
 use crate::{ReviewComment, ReviewThread};
 
+/// Write a comment permalink followed by a horizontal rule separator.
+///
+/// The separator ensures the URL is visually associated with the preceding
+/// comment when multiple threads are printed back-to-back.
 fn write_comment_url_with_separator<W: std::io::Write>(
     out: &mut W,
     url: &str,

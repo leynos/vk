@@ -92,7 +92,7 @@ fn write_comment_body_formats_banner(#[case] login: Option<&str>, #[case] expect
     let out = String::from_utf8(buf).expect("utf8");
     assert!(out.contains(expected_login));
     assert!(out.contains("wrote"));
-    // Guard the banner icon
+    // Ensure the banner icon is included in the rendered output.
     assert!(out.contains("\u{1f4ac}"));
 }
 
@@ -168,16 +168,6 @@ fn write_thread_prints_separator_after_each_comment_url() {
 
 #[test]
 fn print_reviews_propagates_writer_errors() {
-    struct FailWriter;
-    impl std::io::Write for FailWriter {
-        fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::other("fail"))
-        }
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
     let review = PullRequestReview {
         body: "Nice".into(),
         submitted_at: Some(Utc::now()),
@@ -187,4 +177,34 @@ fn print_reviews_propagates_writer_errors() {
     let skin = MadSkin::default();
     let err = print_reviews(FailWriter, &skin, &[review]).expect_err("should fail");
     assert!(err.downcast_ref::<std::io::Error>().is_some());
+}
+
+#[test]
+fn write_thread_propagates_writer_errors() {
+    let thread = ReviewThread {
+        comments: CommentConnection {
+            nodes: vec![ReviewComment {
+                body: "First".into(),
+                url: "https://example.com#discussion_r1".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let skin = MadSkin::default();
+    let err = write_thread(FailWriter, &skin, &thread).expect_err("should fail");
+    assert!(err.downcast_ref::<std::io::Error>().is_some());
+}
+
+struct FailWriter;
+
+impl std::io::Write for FailWriter {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::other("fail"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
