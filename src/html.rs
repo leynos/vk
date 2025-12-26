@@ -20,7 +20,7 @@ const LINE_FEED: char = '\n';
 /// ```
 /// use vk::html::collapse_details;
 /// let input = "<details><summary>hi</summary><p>hidden</p></details>";
-/// assert_eq!(collapse_details(input), "\u25B6 hi\n");
+/// assert_eq!(collapse_details(input), "\u{25B6} hi\n");
 /// ```
 fn normalize_line_endings(input: &str) -> Cow<'_, str> {
     if !input.contains(CARRIAGE_RETURN) {

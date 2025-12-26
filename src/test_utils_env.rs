@@ -41,7 +41,7 @@ pub fn assert_no_triple_newlines(text: &str) {
 /// ```
 /// use vk::test_utils::assert_diff_lines_not_blank_separated;
 ///
-/// let diff = "-              printf old\n+              printf new\n";
+/// let diff = "-              printf old\n+              printf new\n+              printf newer\n";
 /// assert_diff_lines_not_blank_separated(diff, "printf");
 /// ```
 pub fn assert_diff_lines_not_blank_separated(text: &str, pattern: &str) {
