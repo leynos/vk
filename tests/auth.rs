@@ -105,3 +105,64 @@ async fn pr_handles_authorisation(
     );
     shutdown.shutdown().await;
 }
+
+#[tokio::test]
+async fn pr_reads_token_from_config_file() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let captured = Arc::new(Mutex::new(None));
+    let captured_clone = captured.clone();
+    let body = EMPTY_REVIEW_BODY;
+    *handler.lock().expect("lock handler") = Box::new(move |req: &Request<Incoming>| {
+        let auth = req
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        *captured_clone.lock().expect("store header") = auth;
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Full::from(body))
+            .expect("build response")
+    });
+
+    let config_dir = tempfile::tempdir().expect("create temp dir");
+    let config_path = config_dir.path().join("config.toml");
+    std::fs::write(&config_path, "github_token = \"dummy\"").expect("write config");
+
+    let addr_str = format!("http://{addr}");
+    let task = tokio::task::spawn_blocking(move || {
+        let mut cmd = Command::cargo_bin("vk").expect("binary");
+        cmd.env("GITHUB_GRAPHQL_URL", addr_str)
+            .env("VK_CONFIG_PATH", &config_path)
+            .env_remove("GITHUB_TOKEN")
+            .env("NO_COLOR", "1")
+            .env("CLICOLOR_FORCE", "0")
+            .env("RUST_LOG", "warn")
+            .args(["pr", "https://github.com/leynos/shared-actions/pull/42"]);
+        cmd.output().expect("run vk")
+    });
+    let output = timeout(Duration::from_secs(20), task)
+        .await
+        .expect("vk timed out")
+        .expect("spawn blocking");
+
+    assert!(
+        output.status.success(),
+        "vk exited with {:?}. Stderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("anonymous API access"),
+        "unexpected anonymous access warning: {stderr}"
+    );
+    let header = captured.lock().expect("read header").clone();
+    assert_eq!(
+        header.as_deref(),
+        Some("Bearer dummy"),
+        "authorisation header mismatch"
+    );
+    shutdown.shutdown().await;
+}

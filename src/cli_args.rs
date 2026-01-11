@@ -15,6 +15,9 @@ pub struct GlobalArgs {
     /// Repository used when passing only a pull request number
     #[arg(long)]
     pub repo: Option<String>,
+    /// GitHub token for authenticated API requests
+    #[arg(skip)]
+    pub github_token: Option<String>,
     /// Write HTTP transcript to this file for debugging
     #[arg(long)]
     pub transcript: Option<std::path::PathBuf>,
@@ -33,6 +36,7 @@ impl GlobalArgs {
     /// CLI flags have higher priority than configuration sources.
     pub fn merge(&mut self, other: Self) {
         self.repo = other.repo.or_else(|| self.repo.take());
+        self.github_token = other.github_token.or_else(|| self.github_token.take());
         self.transcript = other.transcript.or_else(|| self.transcript.take());
         self.http_timeout = other.http_timeout.or_else(|| self.http_timeout.take());
         self.connect_timeout = other

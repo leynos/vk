@@ -131,7 +131,7 @@ pub enum VkError {
     },
     #[error("invalid reference")]
     InvalidRef,
-    #[error("GITHUB_TOKEN not set")]
+    #[error("GitHub token not set")]
     MissingAuth,
     #[error("pull request number out of range")]
     InvalidNumber,
@@ -214,6 +214,20 @@ fn build_graphql_client(
     }
 }
 
+fn resolve_github_token(global: &GlobalArgs) -> String {
+    global
+        .github_token
+        .as_deref()
+        .filter(|token| !token.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            environment::var("GITHUB_TOKEN")
+                .ok()
+                .filter(|token| !token.is_empty())
+        })
+        .unwrap_or_default()
+}
+
 fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
     err.chain().any(|c| {
         c.downcast_ref::<std::io::Error>()
@@ -244,9 +258,9 @@ where
 fn setup_pr_output(args: &PrArgs, global: &GlobalArgs) -> Result<Option<PrContext>, VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number, comment) = parse_pr_thread_reference(reference, global.repo.as_deref())?;
-    let token = environment::var("GITHUB_TOKEN").unwrap_or_default();
+    let token = resolve_github_token(global);
     if token.is_empty() {
-        warn!("GITHUB_TOKEN not set, using anonymous API access");
+        warn!("GitHub token not set, using anonymous API access");
     }
     if !locale_is_utf8() {
         warn!("terminal locale is not UTF-8; emojis may not render correctly");
@@ -376,9 +390,9 @@ async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
 async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_issue_reference(reference, global.repo.as_deref())?;
-    let token = environment::var("GITHUB_TOKEN").unwrap_or_default();
+    let token = resolve_github_token(global);
     if token.is_empty() {
-        warn!("GITHUB_TOKEN not set, using anonymous API access");
+        warn!("GitHub token not set, using anonymous API access");
     }
     if !locale_is_utf8() {
         warn!("terminal locale is not UTF-8; emojis may not render correctly");
@@ -398,7 +412,7 @@ async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkErr
     let (repo, number, comment) =
         parse_pr_thread_reference(&args.reference, global.repo.as_deref())?;
     let comment_id = comment.ok_or(VkError::InvalidRef)?;
-    let token = environment::var("GITHUB_TOKEN").unwrap_or_default();
+    let token = resolve_github_token(global);
     if token.is_empty() {
         return Err(VkError::MissingAuth);
     }

@@ -9,10 +9,17 @@ Follow these steps to create one:
 3. Under **Select scopes**, enable `public_repo`. If you need to access private
    repositories, select the broader `repo` scope instead.
 4. Click **Generate token** and copy the value.
-5. Export the token as `GITHUB_TOKEN`:
+5. Export the token as `GITHUB_TOKEN` (or `VK_GITHUB_TOKEN`):
 
 ```bash
 export GITHUB_TOKEN=YOUR_TOKEN
+```
+
+   Alternatively, store it in `~/.config/vk/config.toml` (or a file referenced
+   by `VK_CONFIG_PATH`):
+
+```toml
+github_token = "YOUR_TOKEN"
 ```
 
 Once set you can run `vk` normally:
