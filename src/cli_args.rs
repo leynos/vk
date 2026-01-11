@@ -16,7 +16,7 @@ pub struct GlobalArgs {
     #[arg(long)]
     pub repo: Option<String>,
     /// GitHub token for authenticated API requests
-    #[arg(skip)]
+    #[arg(long, value_name = "TOKEN")]
     pub github_token: Option<String>,
     /// Write HTTP transcript to this file for debugging
     #[arg(long)]
