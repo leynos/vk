@@ -1,7 +1,7 @@
 //! REST helpers for replying to review comments.
 
 use super::CommentRef;
-use crate::{VkError, boxed::BoxedStr, environment};
+use crate::{VkError, boxed::BoxedStr};
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderName, HeaderValue, USER_AGENT};
 use reqwest::{StatusCode, Url};
 use serde_json::json;
@@ -9,6 +9,7 @@ use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tracing::warn;
+use vk::environment;
 
 /// Build an authenticated client with GitHub headers.
 ///

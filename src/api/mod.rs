@@ -14,8 +14,9 @@ use std::borrow::Cow;
 use tokio::time::{Duration, sleep};
 use tracing::warn;
 
+use crate::VkError;
 use crate::boxed::BoxedStr;
-use crate::{VkError, environment};
+use vk::environment;
 
 /// A GraphQL query string with type safety.
 #[derive(Debug, Clone)]

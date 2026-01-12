@@ -1,30 +1,16 @@
 //! Entry point for the `vk` command line tool.
 //!
-//! This module provides the main entry point and orchestrates the `vk` command
-//! line tool, which fetches unresolved review comments from GitHub's GraphQL
-//! API. Passing a pull request reference with a `#discussion_r<ID>` fragment
-//! prints only the matching thread starting from that comment. The unresolved
-//! filter remains in effect and any file filters are ignored. The core
-//! functionality is delegated to specialised modules:
-//! `review_threads` for fetching review data, `issues` for issue retrieval,
-//! `summary` for summarizing comments. Configuration defaults are merged using
-//! `ortho_config`. When a thread has multiple comments on the same diff, the diff
-//! is shown only once. Output is framed by a `code review` banner at the start
-//! and an `end of code review` banner at the end so calling processes can
-//! reliably detect boundaries. A `review comments` banner separates reviewer
-//! summaries from the comment threads. When no threads are present this
-//! banner is omitted. Banner helpers [`print_start_banner`],
-//! [`print_comments_banner`] and [`print_end_banner`] frame output while
-//! summary utilities [`print_summary`], [`summarize_files`], and
-//! [`write_summary`] collate comments so consumers can reuse the framing
-//! logic.
+//! This module defines CLI structure, error types, and the main entry point.
+//! Subcommand execution lives in dedicated modules for clarity.
 
 pub mod api;
 #[path = "bool_predicates_lib.rs"]
 mod bool_predicates;
 mod boxed;
 mod cli_args;
+mod commands;
 // configuration helpers have been folded into `ortho_config`
+mod auth;
 mod diff;
 mod graphql_queries;
 mod html;
@@ -40,41 +26,23 @@ mod test_utils;
 
 pub use crate::api::{GraphQLClient, paginate};
 pub use issues::{Issue, fetch_issue};
-use review_threads::thread_for_comment;
 pub use review_threads::{
     CommentConnection, FetchOptions, PageInfo, ReviewComment, ReviewThread, User,
     exclude_outdated_threads, fetch_review_threads_with_options, filter_outdated_threads,
     filter_threads_by_files,
 };
 
-use summary::{
-    print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
-};
-
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs, ResolveArgs};
-use crate::printer::{print_reviews, write_thread};
-use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_thread_reference};
-use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use clap::{Parser, Subcommand};
 use ortho_config::{OrthoConfig, SubcmdConfigMerge};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::io::{ErrorKind, Write};
 use std::sync::Arc;
 use std::sync::LazyLock;
-#[cfg(feature = "unstable-rest-resolve")]
-use std::time::Duration;
-use termimad::MadSkin;
 use thiserror::Error;
-use tracing::{error, warn};
-use vk::environment;
 
-struct PrContext {
-    repo: RepoInfo,
-    number: u64,
-    comment_id: Option<u64>,
-    client: GraphQLClient,
-}
+pub use auth::resolve_github_token;
+use commands::{run_issue, run_pr, run_resolve};
 
 #[derive(Subcommand, Deserialize, Serialize, Clone, Debug)]
 enum Commands {
@@ -186,272 +154,8 @@ impl From<ortho_config::OrthoError> for VkError {
     }
 }
 
-static UTF8_RE: LazyLock<Regex> =
+pub(crate) static UTF8_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").expect("valid regex"));
-
-/// Print a review thread to stdout.
-///
-/// This simply calls [`write_thread`] with a locked `stdout` handle.
-fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
-    write_thread(std::io::stdout().lock(), skin, thread)
-}
-
-/// Create a [`GraphQLClient`], falling back to no transcript on failure.
-///
-/// This attempts to initialize the client with the provided `transcript`.
-/// If the transcript cannot be created, it logs a warning and retries
-/// without one.
-fn build_graphql_client(
-    token: &str,
-    transcript: Option<&std::path::PathBuf>,
-) -> Result<GraphQLClient, VkError> {
-    match GraphQLClient::new(token, transcript.cloned()) {
-        Ok(c) => Ok(c),
-        Err(e) => {
-            warn!("failed to create transcript: {e}");
-            GraphQLClient::new(token, None).map_err(Into::into)
-        }
-    }
-}
-
-fn resolve_github_token(global: &GlobalArgs) -> String {
-    global
-        .github_token
-        .as_deref()
-        .filter(|token| !token.is_empty())
-        .map(str::to_owned)
-        .or_else(|| {
-            environment::var("VK_GITHUB_TOKEN")
-                .ok()
-                .filter(|token| !token.is_empty())
-        })
-        .or_else(|| {
-            environment::var("GITHUB_TOKEN")
-                .ok()
-                .filter(|token| !token.is_empty())
-        })
-        .unwrap_or_default()
-}
-
-fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
-    err.chain().any(|c| {
-        c.downcast_ref::<std::io::Error>()
-            .is_some_and(|io| io.kind() == ErrorKind::BrokenPipe)
-    })
-}
-
-fn is_broken_pipe_io(err: &std::io::Error) -> bool {
-    err.kind() == ErrorKind::BrokenPipe
-}
-
-fn handle_banner<F>(print: F, label: &str) -> bool
-where
-    F: FnOnce() -> std::io::Result<()>,
-{
-    if let Err(e) = print() {
-        if is_broken_pipe_io(&e) {
-            return true;
-        }
-        error!("error printing {label} banner: {e}");
-    }
-    false
-}
-
-/// Prepare PR context, validate environment and print the start banner.
-///
-/// Returns `Ok(None)` when standard output is closed before printing.
-fn setup_pr_output(args: &PrArgs, global: &GlobalArgs) -> Result<Option<PrContext>, VkError> {
-    let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
-    let (repo, number, comment) = parse_pr_thread_reference(reference, global.repo.as_deref())?;
-    let token = resolve_github_token(global);
-    if token.is_empty() {
-        warn!("GitHub token not set, using anonymous API access");
-    }
-    if !locale_is_utf8() {
-        warn!("terminal locale is not UTF-8; emojis may not render correctly");
-    }
-    if handle_banner(print_start_banner, "start") {
-        return Ok(None);
-    }
-    let client = build_graphql_client(&token, global.transcript.as_ref())?;
-    Ok(Some(PrContext {
-        repo,
-        number,
-        comment_id: comment,
-        client,
-    }))
-}
-
-/// Print an appropriate message when no threads match and append the end banner.
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "returns Result for interface symmetry"
-)]
-fn handle_empty_threads(files: &[String], comment: Option<u64>) -> Result<(), VkError> {
-    let msg = match (comment.is_some(), files.is_empty()) {
-        (true, _) => "No unresolved comments in the requested discussion.",
-        (false, true) => "No unresolved comments.",
-        (false, false) => "No unresolved comments for the specified files.",
-    };
-    if let Err(e) = writeln!(std::io::stdout().lock(), "{msg}") {
-        if is_broken_pipe_io(&e) {
-            return Ok(());
-        }
-        error!("error writing empty state: {e}");
-    }
-    if handle_banner(print_end_banner, "end") {
-        return Ok(());
-    }
-    Ok(())
-}
-
-/// Render the summary, reviews and threads, then print the closing banner.
-#[expect(clippy::unnecessary_wraps, reason = "future error cases may emerge")]
-fn generate_pr_output(
-    threads: Vec<ReviewThread>,
-    reviews: Vec<PullRequestReview>,
-) -> Result<(), VkError> {
-    let summary = summarize_files(&threads);
-    print_summary(&summary);
-
-    let skin = MadSkin::default();
-    let latest = latest_reviews(reviews);
-    {
-        let stdout = std::io::stdout();
-        let mut handle = stdout.lock();
-        if let Err(e) = print_reviews(&mut handle, &skin, &latest) {
-            if caused_by_broken_pipe(&e) {
-                return Ok(());
-            }
-            error!("error printing review: {e}");
-        }
-    } // drop handle before locking stdout again
-
-    // Stop if the comments banner cannot be written, usually indicating stdout
-    // has been closed, as printing threads would also fail.
-    if handle_banner(print_comments_banner, "comments") {
-        return Ok(());
-    }
-
-    for t in threads {
-        if let Err(e) = print_thread(&skin, &t) {
-            if caused_by_broken_pipe(&e) {
-                return Ok(());
-            }
-            error!("error printing thread: {e}");
-        }
-    }
-
-    if handle_banner(print_end_banner, "end") {
-        return Ok(());
-    }
-    Ok(())
-}
-
-async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let Some(PrContext {
-        repo,
-        number,
-        comment_id: comment,
-        client,
-    }) = setup_pr_output(&args, global)?
-    else {
-        return Ok(());
-    };
-
-    // When a discussion fragment is given, fetch ALL threads (resolved + unresolved)
-    // and filter to the specific thread. Otherwise, fetch only unresolved threads
-    // and apply file filters.
-    let include_resolved = comment.is_some();
-    let threads = fetch_review_threads_with_options(
-        &client,
-        &repo,
-        number,
-        FetchOptions {
-            include_resolved,
-            include_outdated: args.show_outdated,
-        },
-    )
-    .await
-    .map(|threads| {
-        if let Some(comment_id) = comment {
-            thread_for_comment(threads, comment_id)
-                .into_iter()
-                .collect()
-        } else {
-            filter_threads_by_files(threads, &args.files)
-        }
-    })?;
-
-    if threads.is_empty() {
-        handle_empty_threads(&args.files, comment)?;
-        return Ok(());
-    }
-
-    let reviews = fetch_reviews(&client, &repo, number).await?;
-    generate_pr_output(threads, reviews)
-}
-
-async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
-    let (repo, number) = parse_issue_reference(reference, global.repo.as_deref())?;
-    let token = resolve_github_token(global);
-    if token.is_empty() {
-        warn!("GitHub token not set, using anonymous API access");
-    }
-    if !locale_is_utf8() {
-        warn!("terminal locale is not UTF-8; emojis may not render correctly");
-    }
-
-    let client = build_graphql_client(&token, global.transcript.as_ref())?;
-    let issue = fetch_issue(&client, &repo, number).await?;
-
-    let skin = MadSkin::default();
-    println!("\x1b[1m{}\x1b[0m", issue.title);
-    skin.print_text(&issue.body);
-    println!();
-    Ok(())
-}
-
-async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkError> {
-    let (repo, number, comment) =
-        parse_pr_thread_reference(&args.reference, global.repo.as_deref())?;
-    let comment_id = comment.ok_or(VkError::InvalidRef)?;
-    let token = resolve_github_token(global);
-    if token.is_empty() {
-        return Err(VkError::MissingAuth);
-    }
-    #[cfg(feature = "unstable-rest-resolve")]
-    {
-        let http_timeout = Duration::from_secs(global.http_timeout.unwrap_or(10));
-        let connect_timeout = Duration::from_secs(global.connect_timeout.unwrap_or(5));
-        resolve::resolve_comment(
-            &token,
-            resolve::CommentRef {
-                repo: &repo,
-                pull_number: number,
-                comment_id,
-            },
-            args.message,
-            http_timeout,
-            connect_timeout,
-        )
-        .await
-    }
-    #[cfg(not(feature = "unstable-rest-resolve"))]
-    {
-        let _ = args.message;
-        resolve::resolve_comment(
-            &token,
-            resolve::CommentRef {
-                repo: &repo,
-                pull_number: number,
-                comment_id,
-            },
-        )
-        .await
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), VkError> {
@@ -497,14 +201,6 @@ async fn main() -> Result<(), VkError> {
     Ok(())
 }
 
-fn locale_is_utf8() -> bool {
-    environment::var("LC_ALL")
-        .or_else(|_| environment::var("LC_CTYPE"))
-        .or_else(|_| environment::var("LANG"))
-        .map(|v| UTF8_RE.is_match(&v))
-        .unwrap_or(false)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -515,163 +211,35 @@ mod tests {
     use serial_test::serial;
     use std::ffi::OsString;
     use std::sync::Arc;
+    use termimad::MadSkin;
+    use vk::environment;
 
     #[test]
     fn cli_loads_repo_from_flag() {
         let cli = Cli::try_parse_from(["vk", "--repo", "foo/bar", "pr", "1"]).expect("parse cli");
         assert_eq!(cli.global.repo.as_deref(), Some("foo/bar"));
     }
-
     #[test]
     fn cli_loads_github_token_from_flag() {
         let cli =
             Cli::try_parse_from(["vk", "--github-token", "token", "pr", "1"]).expect("parse cli");
         assert_eq!(cli.global.github_token.as_deref(), Some("token"));
     }
-
-    #[test]
-    #[serial]
-    fn detect_utf8_locale() {
-        let old_all = environment::var("LC_ALL").ok();
-        let old_ctype = environment::var("LC_CTYPE").ok();
-        let old_lang = environment::var("LANG").ok();
-
-        set_var("LC_ALL", "en_GB.UTF-8");
-        remove_var("LC_CTYPE");
-        remove_var("LANG");
-        assert!(locale_is_utf8());
-
-        set_var("LC_ALL", "en_GB.UTF8");
-        assert!(locale_is_utf8());
-
-        set_var("LC_ALL", "en_GB.utf8");
-        assert!(locale_is_utf8());
-
-        set_var("LC_ALL", "en_GB.UTF80");
-        assert!(!locale_is_utf8());
-
-        remove_var("LC_ALL");
-        set_var("LC_CTYPE", "en_GB.UTF-8");
-        assert!(locale_is_utf8());
-
-        set_var("LC_CTYPE", "C");
-        assert!(!locale_is_utf8());
-
-        remove_var("LC_CTYPE");
-        set_var("LANG", "en_GB.UTF-8");
-        assert!(locale_is_utf8());
-
-        set_var("LANG", "C");
-        assert!(!locale_is_utf8());
-
-        match old_all {
-            Some(v) => set_var("LC_ALL", v),
-            None => remove_var("LC_ALL"),
-        }
-        match old_ctype {
-            Some(v) => set_var("LC_CTYPE", v),
-            None => remove_var("LC_CTYPE"),
-        }
-        match old_lang {
-            Some(v) => set_var("LANG", v),
-            None => remove_var("LANG"),
-        }
-    }
-
-    fn with_token_env<F>(vk: Option<&str>, github: Option<&str>, op: F)
-    where
-        F: FnOnce(),
-    {
-        let old_vk = environment::var("VK_GITHUB_TOKEN").ok();
-        let old_github = environment::var("GITHUB_TOKEN").ok();
-
-        match vk {
-            Some(value) => set_var("VK_GITHUB_TOKEN", value),
-            None => remove_var("VK_GITHUB_TOKEN"),
-        }
-        match github {
-            Some(value) => set_var("GITHUB_TOKEN", value),
-            None => remove_var("GITHUB_TOKEN"),
-        }
-
-        op();
-
-        match old_vk {
-            Some(value) => set_var("VK_GITHUB_TOKEN", value),
-            None => remove_var("VK_GITHUB_TOKEN"),
-        }
-        match old_github {
-            Some(value) => set_var("GITHUB_TOKEN", value),
-            None => remove_var("GITHUB_TOKEN"),
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn resolve_github_token_prefers_global_value() {
-        with_token_env(Some("env-token"), Some("github-token"), || {
-            let global = GlobalArgs {
-                github_token: Some("cli-token".to_string()),
-                ..GlobalArgs::default()
-            };
-
-            assert_eq!(resolve_github_token(&global), "cli-token");
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn resolve_github_token_prefers_vk_environment() {
-        with_token_env(Some("vk-token"), Some("github-token"), || {
-            let global = GlobalArgs::default();
-
-            assert_eq!(resolve_github_token(&global), "vk-token");
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn resolve_github_token_falls_back_to_github_token_env() {
-        with_token_env(None, Some("github-token"), || {
-            let global = GlobalArgs::default();
-
-            assert_eq!(resolve_github_token(&global), "github-token");
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn resolve_github_token_ignores_empty_values() {
-        with_token_env(Some(""), Some("github-token"), || {
-            let global = GlobalArgs {
-                github_token: Some(String::new()),
-                ..GlobalArgs::default()
-            };
-
-            assert_eq!(resolve_github_token(&global), "github-token");
-        });
-    }
-
     fn assert_is_send_sync<T: Send + Sync>() {}
-
     #[test]
     fn vk_error_is_send_and_sync() {
         assert_is_send_sync::<VkError>();
     }
-
     #[test]
     #[serial]
     fn vk_error_config_from_arc_preserves_allocation() {
         let old_timeout = environment::var("VK_HTTP_TIMEOUT").ok();
         remove_var("VK_HTTP_TIMEOUT");
         set_var("VK_HTTP_TIMEOUT", "not-a-number");
-
         let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
             .expect_err("invalid VK_HTTP_TIMEOUT should fail");
-
         let original = err.clone();
         let converted: VkError = err.into();
-
         match converted {
             VkError::Config(stored) => assert!(
                 Arc::ptr_eq(&stored, &original),
@@ -679,24 +247,20 @@ mod tests {
             ),
             other => panic!("expected VkError::Config, got {other:?}"),
         }
-
         match old_timeout {
             Some(v) => set_var("VK_HTTP_TIMEOUT", v),
             None => remove_var("VK_HTTP_TIMEOUT"),
         }
     }
-
     #[test]
     #[serial]
     fn vk_error_config_from_owned_ortho_error_wraps_in_arc() {
         let old_timeout = environment::var("VK_HTTP_TIMEOUT").ok();
         remove_var("VK_HTTP_TIMEOUT");
         set_var("VK_HTTP_TIMEOUT", "not-a-number");
-
         let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
             .expect_err("invalid VK_HTTP_TIMEOUT should fail");
         let err = Arc::try_unwrap(err).expect("unique ortho_config error Arc");
-
         let converted: VkError = err.into();
         match converted {
             VkError::Config(stored) => assert_eq!(
@@ -706,18 +270,15 @@ mod tests {
             ),
             other => panic!("expected VkError::Config, got {other:?}"),
         }
-
         match old_timeout {
             Some(v) => set_var("VK_HTTP_TIMEOUT", v),
             None => remove_var("VK_HTTP_TIMEOUT"),
         }
     }
-
     #[test]
     fn cli_requires_subcommand() {
         assert!(Cli::try_parse_from(["vk"]).is_err());
     }
-
     #[test]
     fn pr_subcommand_parses() {
         let cli = Cli::try_parse_from(["vk", "pr", "123"]).expect("parse cli");
@@ -729,7 +290,6 @@ mod tests {
             _ => panic!("wrong variant"),
         }
     }
-
     #[test]
     fn pr_subcommand_parses_files() {
         let cli =
@@ -742,7 +302,6 @@ mod tests {
             _ => panic!("wrong variant"),
         }
     }
-
     #[test]
     fn issue_subcommand_parses() {
         let cli = Cli::try_parse_from(["vk", "issue", "123"]).expect("parse cli");
@@ -751,7 +310,6 @@ mod tests {
             _ => panic!("wrong variant"),
         }
     }
-
     #[test]
     fn resolve_subcommand_parses() {
         let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1"]).expect("parse cli");
@@ -763,7 +321,6 @@ mod tests {
             _ => panic!("wrong variant"),
         }
     }
-
     #[test]
     fn resolve_subcommand_parses_message() {
         let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1", "-m", "done"])
@@ -776,14 +333,12 @@ mod tests {
             _ => panic!("wrong variant"),
         }
     }
-
     #[test]
     fn version_flag_displays_version() {
         let err = Cli::try_parse_from(["vk", "--version"]).expect_err("display version");
         assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
         assert!(err.to_string().contains(env!("CARGO_PKG_VERSION")));
     }
-
     #[test]
     fn write_thread_emits_diff_once() {
         let diff = "@@ -1 +1 @@\n-old\n+new\n";
@@ -811,7 +366,6 @@ mod tests {
         assert_eq!(out.matches("|-old").count(), 1);
         assert_eq!(out.matches("wrote:").count(), 2);
     }
-
     #[test]
     fn comment_body_collapses_details() {
         let comment = ReviewComment {
@@ -825,7 +379,6 @@ mod tests {
         assert!(out.contains("\u{25B6} note"));
         assert!(!out.contains("hidden"));
     }
-
     #[test]
     fn review_body_collapses_details() {
         let review = PullRequestReview {
@@ -840,18 +393,5 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf8");
         assert!(out.contains("\u{25B6} hello"));
         assert!(!out.contains("bye"));
-    }
-
-    #[test]
-    fn handle_banner_returns_true_on_broken_pipe() {
-        let broken_pipe =
-            || -> std::io::Result<()> { Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)) };
-        assert!(super::handle_banner(broken_pipe, "start"));
-    }
-
-    #[test]
-    fn handle_banner_logs_and_returns_false_on_other_errors() {
-        let other_err = || -> std::io::Result<()> { Err(std::io::Error::other("boom")) };
-        assert!(!super::handle_banner(other_err, "end"));
     }
 }

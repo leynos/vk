@@ -4,7 +4,7 @@
 //! stub GraphQL server for integration tests.
 
 use crate::api::{GraphQLClient, RetryConfig};
-use crate::environment;
+use vk::environment;
 
 use std::sync::{
     Arc,
