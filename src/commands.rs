@@ -5,6 +5,7 @@
 
 use crate::auth::resolve_github_token;
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs, ResolveArgs};
+use crate::environment;
 use crate::printer::{print_reviews, write_thread};
 use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_thread_reference};
 use crate::review_threads::thread_for_comment;
@@ -19,7 +20,6 @@ use crate::{
 use std::io::{ErrorKind, Write};
 use termimad::MadSkin;
 use tracing::{error, warn};
-use vk::environment;
 
 #[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
