@@ -1,16 +1,32 @@
 //! Authentication helpers for GitHub token resolution.
 //!
-//! Token resolution prefers explicit configuration (CLI/config file), then
-//! `VK_GITHUB_TOKEN`, and finally `GITHUB_TOKEN`. Empty values are ignored.
+//! Token resolution prefers the CLI flag, then `VK_GITHUB_TOKEN`, then
+//! `GITHUB_TOKEN`, and finally configuration file values. Empty values are
+//! ignored.
 
-use crate::cli_args::GlobalArgs;
 use vk::environment;
 
-pub fn resolve_github_token(global: &GlobalArgs) -> String {
-    global
-        .github_token
-        .as_deref()
-        .filter(|token| !token.is_empty())
+/// Resolve the GitHub token from CLI, environment, and configuration inputs.
+///
+/// Precedence is:
+/// - CLI flag
+/// - `VK_GITHUB_TOKEN`
+/// - `GITHUB_TOKEN`
+/// - configuration file
+///
+/// Empty values are ignored. Returns an empty `String` when no source provides
+/// a token.
+///
+/// # Examples
+/// ```
+/// use crate::resolve_github_token;
+///
+/// let token = resolve_github_token(Some("cli-token"), None);
+/// assert_eq!(token, "cli-token");
+/// ```
+pub fn resolve_github_token(cli_token: Option<&str>, config_token: Option<&str>) -> String {
+    let cli_token = cli_token.filter(|token| !token.is_empty());
+    cli_token
         .map(str::to_owned)
         .or_else(|| {
             environment::var("VK_GITHUB_TOKEN")
@@ -22,24 +38,48 @@ pub fn resolve_github_token(global: &GlobalArgs) -> String {
                 .ok()
                 .filter(|token| !token.is_empty())
         })
+        .or_else(|| {
+            config_token
+                .filter(|token| !token.is_empty())
+                .map(str::to_owned)
+        })
         .unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::resolve_github_token;
-    use crate::cli_args::GlobalArgs;
     use crate::test_utils::{remove_var, set_var};
+    use rstest::{fixture, rstest};
     use serial_test::serial;
     use vk::environment;
 
-    fn with_token_env<F>(vk: Option<&str>, github: Option<&str>, op: F)
-    where
-        F: FnOnce(),
-    {
+    struct TokenEnvGuard {
+        old_vk: Option<String>,
+        old_github: Option<String>,
+    }
+
+    impl Drop for TokenEnvGuard {
+        fn drop(&mut self) {
+            match self.old_vk.take() {
+                Some(value) => set_var("VK_GITHUB_TOKEN", value),
+                None => remove_var("VK_GITHUB_TOKEN"),
+            }
+            match self.old_github.take() {
+                Some(value) => set_var("GITHUB_TOKEN", value),
+                None => remove_var("GITHUB_TOKEN"),
+            }
+        }
+    }
+
+    #[fixture]
+    fn token_env() -> TokenEnvGuard {
         let old_vk = environment::var("VK_GITHUB_TOKEN").ok();
         let old_github = environment::var("GITHUB_TOKEN").ok();
+        TokenEnvGuard { old_vk, old_github }
+    }
 
+    fn apply_token_env(vk: Option<&str>, github: Option<&str>) {
         match vk {
             Some(value) => set_var("VK_GITHUB_TOKEN", value),
             None => remove_var("VK_GITHUB_TOKEN"),
@@ -48,62 +88,38 @@ mod tests {
             Some(value) => set_var("GITHUB_TOKEN", value),
             None => remove_var("GITHUB_TOKEN"),
         }
-
-        op();
-
-        match old_vk {
-            Some(value) => set_var("VK_GITHUB_TOKEN", value),
-            None => remove_var("VK_GITHUB_TOKEN"),
-        }
-        match old_github {
-            Some(value) => set_var("GITHUB_TOKEN", value),
-            None => remove_var("GITHUB_TOKEN"),
-        }
     }
 
-    #[test]
+    #[rstest]
+    #[case(
+        Some("cli-token"),
+        Some("vk-token"),
+        Some("github-token"),
+        Some("config-token"),
+        "cli-token"
+    )]
+    #[case(
+        None,
+        Some("vk-token"),
+        Some("github-token"),
+        Some("config-token"),
+        "vk-token"
+    )]
+    #[case(None, None, Some("github-token"), Some("config-token"), "github-token")]
+    #[case(None, None, None, Some("config-token"), "config-token")]
+    #[case(Some(""), Some(""), Some("github-token"), Some(""), "github-token")]
     #[serial]
-    fn resolve_github_token_prefers_global_value() {
-        with_token_env(Some("env-token"), Some("github-token"), || {
-            let global = GlobalArgs {
-                github_token: Some("cli-token".to_string()),
-                ..GlobalArgs::default()
-            };
-
-            assert_eq!(resolve_github_token(&global), "cli-token");
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn resolve_github_token_prefers_vk_environment() {
-        with_token_env(Some("vk-token"), Some("github-token"), || {
-            let global = GlobalArgs::default();
-
-            assert_eq!(resolve_github_token(&global), "vk-token");
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn resolve_github_token_falls_back_to_github_token_env() {
-        with_token_env(None, Some("github-token"), || {
-            let global = GlobalArgs::default();
-
-            assert_eq!(resolve_github_token(&global), "github-token");
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn resolve_github_token_ignores_empty_values() {
-        with_token_env(Some(""), Some("github-token"), || {
-            let global = GlobalArgs {
-                github_token: Some(String::new()),
-                ..GlobalArgs::default()
-            };
-
-            assert_eq!(resolve_github_token(&global), "github-token");
-        });
+    fn resolve_github_token_cases(
+        #[case] cli_token: Option<&str>,
+        #[case] vk_env: Option<&'static str>,
+        #[case] github_env: Option<&'static str>,
+        #[case] config_token: Option<&str>,
+        #[case] expected: &str,
+        token_env: TokenEnvGuard,
+    ) {
+        let _ = token_env;
+        apply_token_env(vk_env, github_env);
+        let config = config_token.map(str::to_string);
+        assert_eq!(resolve_github_token(cli_token, config.as_deref()), expected);
     }
 }

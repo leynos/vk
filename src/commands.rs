@@ -24,7 +24,7 @@ use vk::environment;
 #[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
 
-pub struct PrContext {
+struct PrContext {
     repo: RepoInfo,
     number: u64,
     comment_id: Option<u64>,
@@ -56,6 +56,15 @@ fn build_graphql_client(
     }
 }
 
+fn warn_on_missing_token_and_locale(token: &str) {
+    if token.is_empty() {
+        warn!("GitHub token not set, using anonymous API access");
+    }
+    if !locale_is_utf8() {
+        warn!("terminal locale is not UTF-8; emojis may not render correctly");
+    }
+}
+
 fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
     err.chain().any(|c| {
         c.downcast_ref::<std::io::Error>()
@@ -80,19 +89,43 @@ where
     false
 }
 
+fn print_reviews_block(skin: &MadSkin, reviews: Vec<PullRequestReview>) -> bool {
+    let latest = latest_reviews(reviews);
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    if let Err(e) = print_reviews(&mut handle, skin, &latest) {
+        if caused_by_broken_pipe(&e) {
+            return true;
+        }
+        error!("error printing review: {e}");
+    }
+    false
+}
+
+fn print_threads_block(skin: &MadSkin, threads: Vec<ReviewThread>) -> bool {
+    for thread in threads {
+        if let Err(e) = print_thread(skin, &thread) {
+            if caused_by_broken_pipe(&e) {
+                return true;
+            }
+            error!("error printing thread: {e}");
+        }
+    }
+    false
+}
+
 /// Prepare PR context, validate environment and print the start banner.
 ///
 /// Returns `Ok(None)` when standard output is closed before printing.
-fn setup_pr_output(args: &PrArgs, global: &GlobalArgs) -> Result<Option<PrContext>, VkError> {
+fn setup_pr_output(
+    args: &PrArgs,
+    global: &GlobalArgs,
+    cli_token: Option<&str>,
+) -> Result<Option<PrContext>, VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number, comment) = parse_pr_thread_reference(reference, global.repo.as_deref())?;
-    let token = resolve_github_token(global);
-    if token.is_empty() {
-        warn!("GitHub token not set, using anonymous API access");
-    }
-    if !locale_is_utf8() {
-        warn!("terminal locale is not UTF-8; emojis may not render correctly");
-    }
+    let token = resolve_github_token(cli_token, global.github_token.as_deref());
+    warn_on_missing_token_and_locale(&token);
     if handle_banner(print_start_banner, "start") {
         return Ok(None);
     }
@@ -129,55 +162,39 @@ fn handle_empty_threads(files: &[String], comment: Option<u64>) -> Result<(), Vk
 }
 
 /// Render the summary, reviews and threads, then print the closing banner.
-#[expect(clippy::unnecessary_wraps, reason = "future error cases may emerge")]
-fn generate_pr_output(
-    threads: Vec<ReviewThread>,
-    reviews: Vec<PullRequestReview>,
-) -> Result<(), VkError> {
+fn generate_pr_output(threads: Vec<ReviewThread>, reviews: Vec<PullRequestReview>) {
     let summary = summarize_files(&threads);
     print_summary(&summary);
 
     let skin = MadSkin::default();
-    let latest = latest_reviews(reviews);
-    {
-        let stdout = std::io::stdout();
-        let mut handle = stdout.lock();
-        if let Err(e) = print_reviews(&mut handle, &skin, &latest) {
-            if caused_by_broken_pipe(&e) {
-                return Ok(());
-            }
-            error!("error printing review: {e}");
-        }
-    } // drop handle before locking stdout again
+    if print_reviews_block(&skin, reviews) {
+        return;
+    }
 
     // Stop if the comments banner cannot be written, usually indicating stdout
     // has been closed, as printing threads would also fail.
     if handle_banner(print_comments_banner, "comments") {
-        return Ok(());
+        return;
     }
 
-    for t in threads {
-        if let Err(e) = print_thread(&skin, &t) {
-            if caused_by_broken_pipe(&e) {
-                return Ok(());
-            }
-            error!("error printing thread: {e}");
-        }
+    if print_threads_block(&skin, threads) {
+        return;
     }
 
-    if handle_banner(print_end_banner, "end") {
-        return Ok(());
-    }
-    Ok(())
+    let _ = handle_banner(print_end_banner, "end");
 }
 
-pub async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
+pub async fn run_pr(
+    args: PrArgs,
+    global: &GlobalArgs,
+    cli_token: Option<&str>,
+) -> Result<(), VkError> {
     let Some(PrContext {
         repo,
         number,
         comment_id: comment,
         client,
-    }) = setup_pr_output(&args, global)?
+    }) = setup_pr_output(&args, global, cli_token)?
     else {
         return Ok(());
     };
@@ -212,19 +229,19 @@ pub async fn run_pr(args: PrArgs, global: &GlobalArgs) -> Result<(), VkError> {
     }
 
     let reviews = fetch_reviews(&client, &repo, number).await?;
-    generate_pr_output(threads, reviews)
+    generate_pr_output(threads, reviews);
+    Ok(())
 }
 
-pub async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkError> {
+pub async fn run_issue(
+    args: IssueArgs,
+    global: &GlobalArgs,
+    cli_token: Option<&str>,
+) -> Result<(), VkError> {
     let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
     let (repo, number) = parse_issue_reference(reference, global.repo.as_deref())?;
-    let token = resolve_github_token(global);
-    if token.is_empty() {
-        warn!("GitHub token not set, using anonymous API access");
-    }
-    if !locale_is_utf8() {
-        warn!("terminal locale is not UTF-8; emojis may not render correctly");
-    }
+    let token = resolve_github_token(cli_token, global.github_token.as_deref());
+    warn_on_missing_token_and_locale(&token);
 
     let client = build_graphql_client(&token, global.transcript.as_ref())?;
     let issue = fetch_issue(&client, &repo, number).await?;
@@ -236,11 +253,15 @@ pub async fn run_issue(args: IssueArgs, global: &GlobalArgs) -> Result<(), VkErr
     Ok(())
 }
 
-pub async fn run_resolve(args: ResolveArgs, global: &GlobalArgs) -> Result<(), VkError> {
+pub async fn run_resolve(
+    args: ResolveArgs,
+    global: &GlobalArgs,
+    cli_token: Option<&str>,
+) -> Result<(), VkError> {
     let (repo, number, comment) =
         parse_pr_thread_reference(&args.reference, global.repo.as_deref())?;
     let comment_id = comment.ok_or(VkError::InvalidRef)?;
-    let token = resolve_github_token(global);
+    let token = resolve_github_token(cli_token, global.github_token.as_deref());
     if token.is_empty() {
         return Err(VkError::MissingAuth);
     }
@@ -285,72 +306,4 @@ fn locale_is_utf8() -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::handle_banner;
-    use super::locale_is_utf8;
-    use crate::test_utils::{remove_var, set_var};
-    use serial_test::serial;
-    use vk::environment;
-
-    #[test]
-    #[serial]
-    fn detect_utf8_locale() {
-        let old_all = environment::var("LC_ALL").ok();
-        let old_ctype = environment::var("LC_CTYPE").ok();
-        let old_lang = environment::var("LANG").ok();
-
-        set_var("LC_ALL", "en_GB.UTF-8");
-        remove_var("LC_CTYPE");
-        remove_var("LANG");
-        assert!(locale_is_utf8());
-
-        set_var("LC_ALL", "en_GB.UTF8");
-        assert!(locale_is_utf8());
-
-        set_var("LC_ALL", "en_GB.utf8");
-        assert!(locale_is_utf8());
-
-        set_var("LC_ALL", "en_GB.UTF80");
-        assert!(!locale_is_utf8());
-
-        remove_var("LC_ALL");
-        set_var("LC_CTYPE", "en_GB.UTF-8");
-        assert!(locale_is_utf8());
-
-        set_var("LC_CTYPE", "C");
-        assert!(!locale_is_utf8());
-
-        remove_var("LC_CTYPE");
-        set_var("LANG", "en_GB.UTF-8");
-        assert!(locale_is_utf8());
-
-        set_var("LANG", "C");
-        assert!(!locale_is_utf8());
-
-        match old_all {
-            Some(v) => set_var("LC_ALL", v),
-            None => remove_var("LC_ALL"),
-        }
-        match old_ctype {
-            Some(v) => set_var("LC_CTYPE", v),
-            None => remove_var("LC_CTYPE"),
-        }
-        match old_lang {
-            Some(v) => set_var("LANG", v),
-            None => remove_var("LANG"),
-        }
-    }
-
-    #[test]
-    fn handle_banner_returns_true_on_broken_pipe() {
-        let broken_pipe =
-            || -> std::io::Result<()> { Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)) };
-        assert!(handle_banner(broken_pipe, "start"));
-    }
-
-    #[test]
-    fn handle_banner_logs_and_returns_false_on_other_errors() {
-        let other_err = || -> std::io::Result<()> { Err(std::io::Error::other("boom")) };
-        assert!(!handle_banner(other_err, "end"));
-    }
-}
+mod tests;

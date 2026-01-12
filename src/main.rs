@@ -170,20 +170,21 @@ async fn main() -> Result<(), VkError> {
 
     let result: Result<(), VkError> = async {
         let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
+        let cli_token = global_cli.github_token.clone();
         global.merge(global_cli);
 
         match command {
             Commands::Pr(pr_cli) => {
                 let args = pr_cli.load_and_merge()?;
-                run_pr(args, &global).await
+                run_pr(args, &global, cli_token.as_deref()).await
             }
             Commands::Issue(issue_cli) => {
                 let args = issue_cli.load_and_merge()?;
-                run_issue(args, &global).await
+                run_issue(args, &global, cli_token.as_deref()).await
             }
             Commands::Resolve(resolve_cli) => {
                 let args = resolve_cli.load_and_merge()?;
-                run_resolve(args, &global).await
+                run_resolve(args, &global, cli_token.as_deref()).await
             }
         }
     }

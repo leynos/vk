@@ -1,8 +1,8 @@
 //! Authentication tests for GitHub token sources.
 //!
 //! Verifies that vk includes the `Authorization` header when a token is
-//! supplied via configuration files, environment variables, or CLI arguments,
-//! and warns when no token is available.
+//! supplied via configuration files, `VK_GITHUB_TOKEN`, `GITHUB_TOKEN`, or
+//! CLI arguments, and warns when no token is available.
 
 use assert_cmd::prelude::*;
 use http_body_util::Full;
@@ -52,6 +52,36 @@ enum VkCommand {
     Issue,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum TokenSource {
+    Config,
+    VkEnv,
+    Cli,
+}
+
+impl TokenSource {
+    fn config_contents(self) -> &'static str {
+        match self {
+            Self::Config => "github_token = \"dummy\"",
+            _ => "",
+        }
+    }
+
+    fn configure(self, cmd: &mut Command) {
+        cmd.env_remove("GITHUB_TOKEN").env_remove("VK_GITHUB_TOKEN");
+        match self {
+            Self::Config => {}
+            Self::VkEnv => {
+                cmd.env("VK_GITHUB_TOKEN", "dummy");
+            }
+            Self::Cli => {
+                cmd.env("VK_GITHUB_TOKEN", "env-token")
+                    .args(["--github-token", "dummy"]);
+            }
+        }
+    }
+}
+
 impl VkCommand {
     fn args(self) -> &'static [&'static str] {
         match self {
@@ -74,6 +104,7 @@ impl VkCommand {
 async fn run_vk_capture_header<F>(
     args: &[&str],
     body: &'static str,
+    config_contents: &str,
     configure_cmd: F,
 ) -> (std::process::Output, Option<String>)
 where
@@ -99,7 +130,7 @@ where
 
     let config_dir = tempfile::tempdir().expect("create temp dir");
     let config_path = config_dir.path().join("config.toml");
-    std::fs::write(&config_path, "").expect("write empty config");
+    std::fs::write(&config_path, config_contents).expect("write config");
 
     let addr_str = format!("http://{addr}");
     let task = tokio::task::spawn_blocking(move || {
@@ -125,12 +156,19 @@ where
 
 async fn run_vk_command_capture_header<F>(
     cmd: VkCommand,
+    config_contents: &str,
     configure_cmd: F,
 ) -> (std::process::Output, Option<String>)
 where
     F: FnOnce(&mut Command, &std::path::Path) + Send + 'static,
 {
-    run_vk_capture_header(cmd.args(), cmd.response_body(), configure_cmd).await
+    run_vk_capture_header(
+        cmd.args(),
+        cmd.response_body(),
+        config_contents,
+        configure_cmd,
+    )
+    .await
 }
 
 fn assert_token_captured(
@@ -169,87 +207,43 @@ async fn pr_handles_authorisation(
     #[case] expected_header: Option<&str>,
     #[case] expect_warning: bool,
 ) {
-    let (output, header) =
-        run_vk_command_capture_header(VkCommand::Pr, move |cmd, _config_path| {
-            cmd.env_remove("VK_GITHUB_TOKEN");
-            if has_token {
-                cmd.env("GITHUB_TOKEN", "dummy");
-            } else {
-                cmd.env_remove("GITHUB_TOKEN");
-            }
-        })
-        .await;
+    let (output, header) = run_vk_command_capture_header(VkCommand::Pr, "", move |cmd, _| {
+        cmd.env_remove("VK_GITHUB_TOKEN");
+        if has_token {
+            cmd.env("GITHUB_TOKEN", "dummy");
+        } else {
+            cmd.env_remove("GITHUB_TOKEN");
+        }
+    })
+    .await;
 
     assert_token_captured(&output, header.as_deref(), expected_header, expect_warning);
 }
 
+#[rstest]
+#[case(VkCommand::Pr, TokenSource::Config)]
+#[case(VkCommand::Pr, TokenSource::VkEnv)]
+#[case(VkCommand::Pr, TokenSource::Cli)]
+#[case(VkCommand::Issue, TokenSource::Cli)]
 #[tokio::test]
-async fn pr_reads_token_from_config_file() {
-    let config_dir = tempfile::tempdir().expect("create temp dir");
-    let config_path = config_dir.path().join("config.toml");
-    std::fs::write(&config_path, "github_token = \"dummy\"").expect("write config");
-
+async fn vk_reads_token_from_sources(#[case] command: VkCommand, #[case] source: TokenSource) {
     let (output, header) =
-        run_vk_command_capture_header(VkCommand::Pr, move |cmd, _default_config_path| {
-            cmd.env_remove("VK_CONFIG_PATH")
-                .env("VK_CONFIG_PATH", &config_path)
-                .env_remove("GITHUB_TOKEN")
-                .env_remove("VK_GITHUB_TOKEN");
+        run_vk_command_capture_header(command, source.config_contents(), move |cmd, _| {
+            source.configure(cmd);
         })
         .await;
-
-    assert_token_captured(&output, header.as_deref(), Some("Bearer dummy"), false);
-}
-
-#[tokio::test]
-async fn pr_reads_token_from_vk_environment() {
-    let (output, header) = run_vk_command_capture_header(VkCommand::Pr, |cmd, config_path| {
-        cmd.env("VK_GITHUB_TOKEN", "dummy")
-            .env_remove("GITHUB_TOKEN")
-            .env_remove("VK_CONFIG_PATH")
-            .env("VK_CONFIG_PATH", config_path);
-    })
-    .await;
-
-    assert_token_captured(&output, header.as_deref(), Some("Bearer dummy"), false);
-}
-
-#[tokio::test]
-async fn pr_reads_token_from_cli() {
-    let (output, header) = run_vk_command_capture_header(VkCommand::Pr, |cmd, config_path| {
-        cmd.env("VK_GITHUB_TOKEN", "env-token")
-            .env_remove("GITHUB_TOKEN")
-            .env_remove("VK_CONFIG_PATH")
-            .env("VK_CONFIG_PATH", config_path)
-            .args(["--github-token", "dummy"]);
-    })
-    .await;
 
     assert_token_captured(&output, header.as_deref(), Some("Bearer dummy"), false);
 }
 
 #[tokio::test]
 async fn issue_warns_without_token() {
-    let (output, header) = run_vk_command_capture_header(VkCommand::Issue, |cmd, _config_path| {
+    let (output, header) = run_vk_command_capture_header(VkCommand::Issue, "", |cmd, _| {
         cmd.env_remove("GITHUB_TOKEN").env_remove("VK_GITHUB_TOKEN");
     })
     .await;
 
     assert_token_captured(&output, header.as_deref(), None, true);
-}
-
-#[tokio::test]
-async fn issue_reads_token_from_cli() {
-    let (output, header) = run_vk_command_capture_header(VkCommand::Issue, |cmd, config_path| {
-        cmd.env("VK_GITHUB_TOKEN", "env-token")
-            .env_remove("GITHUB_TOKEN")
-            .env_remove("VK_CONFIG_PATH")
-            .env("VK_CONFIG_PATH", config_path)
-            .args(["--github-token", "dummy"]);
-    })
-    .await;
-
-    assert_token_captured(&output, header.as_deref(), Some("Bearer dummy"), false);
 }
 
 #[test]
