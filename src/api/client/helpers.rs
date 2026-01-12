@@ -1,6 +1,6 @@
 //! Helper utilities for GraphQL request handling.
 
-use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, USER_AGENT};
+use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 use tracing::warn;
 
@@ -12,6 +12,7 @@ pub(super) const BODY_SNIPPET_LEN: usize = 500;
 pub(super) const REQUEST_SNIPPET_LEN: usize = 1024;
 pub(super) const VALUE_SNIPPET_LEN: usize = 200;
 
+/// Trim `text` to `max` characters, appending `...` when truncated.
 pub(super) fn snippet(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
         text.to_string()
@@ -69,6 +70,10 @@ pub(super) fn payload_snippet(payload: &Value) -> String {
     snippet(&json, REQUEST_SNIPPET_LEN)
 }
 
+/// Extract the operation name from a GraphQL query string.
+///
+/// Returns `None` when the input does not begin with a recognised operation
+/// prefix or when no name is present.
 pub(super) fn operation_name(query: &str) -> Option<&str> {
     let trimmed = query.trim_start();
     for prefix in ["query", "mutation", "subscription"] {
@@ -93,6 +98,7 @@ pub(super) fn operation_name(query: &str) -> Option<&str> {
     None
 }
 
+/// Convert GraphQL errors into a single `VkError` message.
 pub(super) fn handle_graphql_errors(errors: Vec<GraphQLError>) -> VkError {
     let msg = errors
         .into_iter()
@@ -102,14 +108,13 @@ pub(super) fn handle_graphql_errors(errors: Vec<GraphQLError>) -> VkError {
     VkError::ApiErrors(msg.boxed())
 }
 
+/// Build standard GraphQL headers with an optional authorization token.
 pub(super) fn build_headers(token: &Token) -> Result<HeaderMap, VkError> {
     let mut headers = HeaderMap::new();
-    headers.insert(USER_AGENT, "vk".parse().expect("static string"));
+    headers.insert(USER_AGENT, HeaderValue::from_static("vk"));
     headers.insert(
         ACCEPT,
-        "application/vnd.github+json"
-            .parse()
-            .expect("static string"),
+        HeaderValue::from_static("application/vnd.github+json"),
     );
     if !token.is_empty() {
         let value =
@@ -126,9 +131,21 @@ pub(super) fn build_headers(token: &Token) -> Result<HeaderMap, VkError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{operation_name, payload_snippet};
+    use super::{
+        GraphQLError, Token, build_headers, handle_graphql_errors, operation_name, payload_snippet,
+        snippet,
+    };
+    use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
     use rstest::rstest;
     use serde_json::json;
+
+    #[rstest]
+    #[case("", 3, "")]
+    #[case("abc", 3, "abc")]
+    #[case("abcd", 3, "abc...")]
+    fn snippet_cases(#[case] text: &str, #[case] max: usize, #[case] expected: &str) {
+        assert_eq!(snippet(text, max), expected);
+    }
 
     #[rstest]
     #[case("query RetryOp { __typename }", Some("RetryOp"))]
@@ -162,5 +179,36 @@ mod tests {
         assert!(!snip.contains("creds-000"));
         assert!(!snip.contains("private-456"));
         assert!(snip.contains("<redacted>"));
+    }
+
+    #[test]
+    fn handle_graphql_errors_joins_messages() {
+        let err = handle_graphql_errors(vec![
+            GraphQLError {
+                message: "one".to_string(),
+            },
+            GraphQLError {
+                message: "two".to_string(),
+            },
+        ]);
+        assert_eq!(err.to_string(), "API errors: one, two");
+    }
+
+    #[test]
+    fn build_headers_includes_base_headers_without_token() {
+        let headers = build_headers(&Token::new("")).expect("headers");
+        assert!(headers.contains_key(USER_AGENT));
+        assert!(headers.contains_key(ACCEPT));
+        assert!(!headers.contains_key(AUTHORIZATION));
+    }
+
+    #[test]
+    fn build_headers_adds_authorization_with_token() {
+        let headers = build_headers(&Token::new("token")).expect("headers");
+        let auth = headers
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .expect("authorization header");
+        assert_eq!(auth, "Bearer token");
     }
 }

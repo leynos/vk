@@ -75,7 +75,7 @@ fn warn_on_missing_token_and_locale(token: &str) {
 fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
     err.chain().any(|c| {
         c.downcast_ref::<std::io::Error>()
-            .is_some_and(|io| io.kind() == ErrorKind::BrokenPipe)
+            .is_some_and(is_broken_pipe_io)
     })
 }
 
@@ -84,7 +84,7 @@ fn is_broken_pipe_io(err: &std::io::Error) -> bool {
 }
 
 fn is_broken_pipe_vk(err: &VkError) -> bool {
-    matches!(err, VkError::Io(inner) if inner.kind() == ErrorKind::BrokenPipe)
+    matches!(err, VkError::Io(inner) if is_broken_pipe_io(inner))
 }
 
 fn handle_banner<F>(print: F, label: &str) -> bool
@@ -313,11 +313,12 @@ pub async fn run_resolve(
 }
 
 fn locale_is_utf8() -> bool {
-    environment::var("LC_ALL")
-        .or_else(|_| environment::var("LC_CTYPE"))
-        .or_else(|_| environment::var("LANG"))
-        .map(|v| crate::UTF8_RE.is_match(&v))
-        .unwrap_or(false)
+    for key in ["LC_ALL", "LC_CTYPE", "LANG"] {
+        if let Ok(value) = environment::var(key) {
+            return crate::UTF8_RE.is_match(&value);
+        }
+    }
+    false
 }
 
 #[cfg(test)]
