@@ -126,3 +126,37 @@ impl Default for ResolveArgs {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::GlobalArgs;
+
+    #[test]
+    fn merge_prefers_cli_github_token() {
+        let mut config = GlobalArgs {
+            github_token: Some("config-token".to_string()),
+            ..GlobalArgs::default()
+        };
+        let cli = GlobalArgs {
+            github_token: Some("cli-token".to_string()),
+            ..GlobalArgs::default()
+        };
+
+        config.merge(cli);
+
+        assert_eq!(config.github_token.as_deref(), Some("cli-token"));
+    }
+
+    #[test]
+    fn merge_keeps_config_github_token_when_cli_missing() {
+        let mut config = GlobalArgs {
+            github_token: Some("config-token".to_string()),
+            ..GlobalArgs::default()
+        };
+        let cli = GlobalArgs::default();
+
+        config.merge(cli);
+
+        assert_eq!(config.github_token.as_deref(), Some("config-token"));
+    }
+}

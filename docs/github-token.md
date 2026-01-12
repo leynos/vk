@@ -22,7 +22,8 @@ export GITHUB_TOKEN=YOUR_TOKEN
 github_token = "YOUR_TOKEN"
 ```
 
-   You can also pass it directly with `--github-token` when running `vk`.
+   The token can also be passed directly with `--github-token` when running
+   `vk`.
 
 Once set you can run `vk` normally:
 
