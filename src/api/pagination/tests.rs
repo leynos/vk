@@ -69,11 +69,7 @@ fn next_cursor_ok_cases(
         end_cursor,
     };
     let next = info.next_cursor().expect("cursor");
-    match (next, expected) {
-        (None, None) => {}
-        (Some(got), Some(want)) => assert_eq!(got, want),
-        other => panic!("unexpected case: {other:?}"),
-    }
+    assert_eq!(next, expected);
 }
 
 #[test]

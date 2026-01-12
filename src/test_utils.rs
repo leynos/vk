@@ -16,7 +16,8 @@ use third_wheel::hyper::{
 };
 use tokio::{task::JoinHandle, time::Duration};
 pub use vk::test_utils::{
-    assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
+    apply_optional_env, assert_diff_lines_not_blank_separated, assert_no_triple_newlines,
+    restore_optional_env, strip_ansi_codes,
 };
 
 /// Stub client and server handle for HTTP tests.

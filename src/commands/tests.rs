@@ -2,7 +2,7 @@
 
 use super::handle_banner;
 use super::locale_is_utf8;
-use crate::test_utils::{remove_var, set_var};
+use crate::test_utils::{apply_optional_env, restore_optional_env};
 use rstest::{fixture, rstest};
 use serial_test::serial;
 use vk::environment;
@@ -15,18 +15,9 @@ struct LocaleEnvGuard {
 
 impl Drop for LocaleEnvGuard {
     fn drop(&mut self) {
-        match self.lc_all.take() {
-            Some(value) => set_var("LC_ALL", value),
-            None => remove_var("LC_ALL"),
-        }
-        match self.lc_ctype.take() {
-            Some(value) => set_var("LC_CTYPE", value),
-            None => remove_var("LC_CTYPE"),
-        }
-        match self.lang.take() {
-            Some(value) => set_var("LANG", value),
-            None => remove_var("LANG"),
-        }
+        restore_optional_env("LC_ALL", self.lc_all.take());
+        restore_optional_env("LC_CTYPE", self.lc_ctype.take());
+        restore_optional_env("LANG", self.lang.take());
     }
 }
 
@@ -40,18 +31,9 @@ fn locale_env() -> LocaleEnvGuard {
 }
 
 fn apply_locale(lc_all: Option<&str>, lc_ctype: Option<&str>, lang: Option<&str>) {
-    match lc_all {
-        Some(value) => set_var("LC_ALL", value),
-        None => remove_var("LC_ALL"),
-    }
-    match lc_ctype {
-        Some(value) => set_var("LC_CTYPE", value),
-        None => remove_var("LC_CTYPE"),
-    }
-    match lang {
-        Some(value) => set_var("LANG", value),
-        None => remove_var("LANG"),
-    }
+    apply_optional_env("LC_ALL", lc_all);
+    apply_optional_env("LC_CTYPE", lc_ctype);
+    apply_optional_env("LANG", lang);
 }
 
 #[rstest]

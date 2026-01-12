@@ -7,6 +7,7 @@
 use assert_cmd::prelude::*;
 use http_body_util::Full;
 use hyper::{Request, Response, StatusCode, body::Incoming, header};
+use predicates::str::contains;
 use rstest::rstest;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -136,7 +137,6 @@ where
     let task = tokio::task::spawn_blocking(move || {
         let mut cmd = Command::cargo_bin("vk").expect("binary");
         cmd.env("GITHUB_GRAPHQL_URL", addr_str)
-            .env_remove("VK_CONFIG_PATH")
             .env("VK_CONFIG_PATH", &config_path)
             .env("NO_COLOR", "1")
             .env("CLICOLOR_FORCE", "0")
@@ -263,5 +263,5 @@ fn resolve_requires_token() {
     cmd.assert()
         .failure()
         .code(2)
-        .stderr(predicates::str::contains("GitHub token not set"));
+        .stderr(contains("GitHub token not set"));
 }

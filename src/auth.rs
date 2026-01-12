@@ -19,7 +19,7 @@ use vk::environment;
 ///
 /// # Examples
 /// ```
-/// use crate::resolve_github_token;
+/// use vk::resolve_github_token;
 ///
 /// let token = resolve_github_token(Some("cli-token"), None);
 /// assert_eq!(token, "cli-token");
@@ -49,7 +49,7 @@ pub fn resolve_github_token(cli_token: Option<&str>, config_token: Option<&str>)
 #[cfg(test)]
 mod tests {
     use super::resolve_github_token;
-    use crate::test_utils::{remove_var, set_var};
+    use crate::test_utils::{apply_optional_env, restore_optional_env};
     use rstest::{fixture, rstest};
     use serial_test::serial;
     use vk::environment;
@@ -61,14 +61,8 @@ mod tests {
 
     impl Drop for TokenEnvGuard {
         fn drop(&mut self) {
-            match self.old_vk.take() {
-                Some(value) => set_var("VK_GITHUB_TOKEN", value),
-                None => remove_var("VK_GITHUB_TOKEN"),
-            }
-            match self.old_github.take() {
-                Some(value) => set_var("GITHUB_TOKEN", value),
-                None => remove_var("GITHUB_TOKEN"),
-            }
+            restore_optional_env("VK_GITHUB_TOKEN", self.old_vk.take());
+            restore_optional_env("GITHUB_TOKEN", self.old_github.take());
         }
     }
 
@@ -80,14 +74,8 @@ mod tests {
     }
 
     fn apply_token_env(vk: Option<&str>, github: Option<&str>) {
-        match vk {
-            Some(value) => set_var("VK_GITHUB_TOKEN", value),
-            None => remove_var("VK_GITHUB_TOKEN"),
-        }
-        match github {
-            Some(value) => set_var("GITHUB_TOKEN", value),
-            None => remove_var("GITHUB_TOKEN"),
-        }
+        apply_optional_env("VK_GITHUB_TOKEN", vk);
+        apply_optional_env("GITHUB_TOKEN", github);
     }
 
     #[rstest]

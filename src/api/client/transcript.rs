@@ -19,17 +19,19 @@ impl GraphQLClient {
             use std::io::Write as _;
             match t.lock() {
                 Ok(mut f) => {
-                    if let Err(e) = writeln!(
-                        f,
-                        "{}",
-                        serde_json::to_string(&json!({
-                            "operation": operation,
-                            "status": resp.status,
-                            "request": payload,
-                            "response": snippet(&resp.body, BODY_SNIPPET_LEN)
-                        }))
-                        .expect("serializing GraphQL transcript"),
-                    ) {
+                    let entry = match serde_json::to_string(&json!({
+                        "operation": operation,
+                        "status": resp.status,
+                        "request": payload,
+                        "response": snippet(&resp.body, BODY_SNIPPET_LEN)
+                    })) {
+                        Ok(entry) => entry,
+                        Err(e) => {
+                            warn!("failed to serialize transcript for op={operation}: {e}");
+                            return;
+                        }
+                    };
+                    if let Err(e) = writeln!(f, "{entry}") {
                         warn!("failed to write transcript for op={operation}: {e}");
                         return;
                     }

@@ -123,3 +123,19 @@ pub fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, val
 pub fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
     environment::remove_var(key);
 }
+
+/// Apply an optional environment value, clearing it when `None`.
+pub fn apply_optional_env<K: AsRef<std::ffi::OsStr>>(key: K, value: Option<&str>) {
+    match value {
+        Some(v) => set_var(key, v),
+        None => remove_var(key),
+    }
+}
+
+/// Restore an optional environment value captured earlier.
+pub fn restore_optional_env<K: AsRef<std::ffi::OsStr>>(key: K, value: Option<String>) {
+    match value {
+        Some(v) => set_var(key, v),
+        None => remove_var(key),
+    }
+}

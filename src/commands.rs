@@ -34,8 +34,8 @@ struct PrContext {
 /// Print a review thread to stdout.
 ///
 /// This simply calls [`write_thread`] with a locked `stdout` handle.
-fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> anyhow::Result<()> {
-    write_thread(std::io::stdout().lock(), skin, thread)
+fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> Result<(), VkError> {
+    write_thread(std::io::stdout().lock(), skin, thread).map_err(|err| map_printer_error(&err))
 }
 
 /// Create a [`GraphQLClient`], falling back to no transcript on failure.
@@ -51,9 +51,16 @@ fn build_graphql_client(
         Ok(c) => Ok(c),
         Err(e) => {
             warn!("failed to create transcript: {e}");
-            GraphQLClient::new(token, None).map_err(Into::into)
+            GraphQLClient::new(token, None)
         }
     }
+}
+
+fn map_printer_error(err: &anyhow::Error) -> VkError {
+    if let Some(io) = err.downcast_ref::<std::io::Error>() {
+        return VkError::Io(Box::new(std::io::Error::new(io.kind(), io.to_string())));
+    }
+    VkError::Io(Box::new(std::io::Error::other(err.to_string())))
 }
 
 fn warn_on_missing_token_and_locale(token: &str) {
@@ -74,6 +81,10 @@ fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
 
 fn is_broken_pipe_io(err: &std::io::Error) -> bool {
     err.kind() == ErrorKind::BrokenPipe
+}
+
+fn is_broken_pipe_vk(err: &VkError) -> bool {
+    matches!(err, VkError::Io(inner) if inner.kind() == ErrorKind::BrokenPipe)
 }
 
 fn handle_banner<F>(print: F, label: &str) -> bool
@@ -105,7 +116,7 @@ fn print_reviews_block(skin: &MadSkin, reviews: Vec<PullRequestReview>) -> bool 
 fn print_threads_block(skin: &MadSkin, threads: Vec<ReviewThread>) -> bool {
     for thread in threads {
         if let Err(e) = print_thread(skin, &thread) {
-            if caused_by_broken_pipe(&e) {
+            if is_broken_pipe_vk(&e) {
                 return true;
             }
             error!("error printing thread: {e}");
@@ -247,7 +258,7 @@ pub async fn run_issue(
     let issue = fetch_issue(&client, &repo, number).await?;
 
     let skin = MadSkin::default();
-    println!("\x1b[1m{}\x1b[0m", issue.title);
+    skin.print_text(&format!("**{}**", issue.title));
     skin.print_text(&issue.body);
     println!();
     Ok(())

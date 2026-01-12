@@ -12,7 +12,7 @@ Follow these steps to create one:
 5. Export the token as `VK_GITHUB_TOKEN` (or `GITHUB_TOKEN`):
 
 ```bash
-export GITHUB_TOKEN=YOUR_TOKEN
+export VK_GITHUB_TOKEN=YOUR_TOKEN
 ```
 
    Alternatively, store it in `~/.config/vk/config.toml` (or a file referenced

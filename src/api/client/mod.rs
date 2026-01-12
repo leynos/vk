@@ -9,7 +9,7 @@ use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde_json::{Map, Value, json};
 use std::borrow::Cow;
-use tokio::time::{Duration, sleep};
+use tokio::time::sleep;
 use tracing::warn;
 
 use crate::VkError;
@@ -54,11 +54,12 @@ impl GraphQLClient {
     ///
     /// # Errors
     ///
-    /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
+    /// Returns a [`VkError`] if the transcript file cannot be opened or the
+    /// authorization header cannot be constructed.
     pub fn new(
         token: impl Into<Token>,
         transcript: Option<std::path::PathBuf>,
-    ) -> Result<Self, std::io::Error> {
+    ) -> Result<Self, VkError> {
         let token = token.into();
         let endpoint = environment::var("GITHUB_GRAPHQL_URL")
             .map(Endpoint::new)
@@ -73,12 +74,13 @@ impl GraphQLClient {
     ///
     /// # Errors
     ///
-    /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
+    /// Returns a [`VkError`] if the transcript file cannot be opened or the
+    /// authorization header cannot be constructed.
     pub fn with_endpoint(
         token: impl Into<Token>,
         endpoint: impl Into<Endpoint>,
         transcript: Option<std::path::PathBuf>,
-    ) -> Result<Self, std::io::Error> {
+    ) -> Result<Self, VkError> {
         Self::with_endpoint_retry(token, endpoint, transcript, RetryConfig::default())
     }
 
@@ -86,25 +88,27 @@ impl GraphQLClient {
     ///
     /// # Errors
     ///
-    /// Returns an [`std::io::Error`] if the transcript file cannot be opened.
+    /// Returns a [`VkError`] if the transcript file cannot be opened or the
+    /// authorization header cannot be constructed.
     pub fn with_endpoint_retry(
         token: impl Into<Token>,
         endpoint: impl Into<Endpoint>,
         transcript: Option<std::path::PathBuf>,
         retry: RetryConfig,
-    ) -> Result<Self, std::io::Error> {
+    ) -> Result<Self, VkError> {
         let token = token.into();
         let endpoint = endpoint.into();
-        let transcript = match transcript {
-            Some(p) => match std::fs::File::create(p) {
-                Ok(file) => Some(std::sync::Mutex::new(std::io::BufWriter::new(file))),
-                Err(e) => return Err(e),
-            },
-            None => None,
-        };
+        let transcript = transcript
+            .map(|p| {
+                std::fs::File::create(p)
+                    .map(|file| std::sync::Mutex::new(std::io::BufWriter::new(file)))
+            })
+            .transpose()
+            .map_err(|e| VkError::Io(Box::new(e)))?;
+        let headers = build_headers(&token)?;
         Ok(Self {
             client: reqwest::Client::new(),
-            headers: build_headers(&token),
+            headers,
             endpoint,
             transcript,
             retry,
@@ -137,7 +141,7 @@ impl GraphQLClient {
             .post(self.endpoint.as_str())
             .headers(self.headers.clone())
             .json(payload)
-            .timeout(Duration::from_secs(30))
+            .timeout(self.retry.request_timeout)
             .send()
             .await
             .map_err(|e| VkError::RequestContext {
@@ -157,14 +161,19 @@ impl GraphQLClient {
                 body: body.clone(),
             };
             self.log_transcript(payload, operation, &resp);
-            let e = status_err.expect("status error for non-success status");
+            let source: Box<dyn std::error::Error + Send + Sync> = match status_err {
+                Some(e) => Box::new(e),
+                None => Box::new(std::io::Error::other(format!(
+                    "unexpected status {status_u16} without reqwest error"
+                ))),
+            };
             return Err(VkError::RequestContext {
                 context: format!(
                     "HTTP status {status_u16} | body snippet: {}",
                     snippet(&body, BODY_SNIPPET_LEN)
                 )
                 .boxed(),
-                source: e.into(),
+                source,
             });
         }
         Ok(HttpResponse {
@@ -207,11 +216,13 @@ impl GraphQLClient {
         match serde_path_to_error::deserialize::<_, T>(value.clone()) {
             Ok(v) => Ok(v),
             Err(e) => {
-                let snippet = snippet(
-                    &serde_json::to_string_pretty(&value)
-                        .expect("serializing JSON snippet for error"),
-                    VALUE_SNIPPET_LEN,
-                );
+                let snippet = match serde_json::to_string_pretty(&value) {
+                    Ok(json) => snippet(&json, VALUE_SNIPPET_LEN),
+                    Err(e) => {
+                        warn!("Failed to serialise error snippet: {e}");
+                        "<failed to serialise error snippet>".to_string()
+                    }
+                };
                 let path = e.path().to_string();
                 let inner = e.into_inner();
                 Err(VkError::BadResponseSerde {
@@ -368,9 +379,8 @@ impl GraphQLClient {
         let mut items = Vec::new();
         let mut cursor = start_cursor;
         loop {
-            let vars = vars.clone();
             let data = self
-                .fetch_page::<Page, _>(query.clone(), cursor.take(), vars)
+                .fetch_page::<Page, _>(query.clone(), cursor.take(), &vars)
                 .await?;
             let (mut page, info) = map(data)?;
             items.append(&mut page);

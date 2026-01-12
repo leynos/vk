@@ -91,7 +91,7 @@ pub(super) fn handle_graphql_errors(errors: Vec<GraphQLError>) -> VkError {
     VkError::ApiErrors(msg.boxed())
 }
 
-pub(super) fn build_headers(token: &Token) -> HeaderMap {
+pub(super) fn build_headers(token: &Token) -> Result<HeaderMap, VkError> {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, "vk".parse().expect("static string"));
     headers.insert(
@@ -101,14 +101,16 @@ pub(super) fn build_headers(token: &Token) -> HeaderMap {
             .expect("static string"),
     );
     if !token.is_empty() {
-        headers.insert(
-            AUTHORIZATION,
+        let value =
             format!("Bearer {}", token.as_str())
                 .parse()
-                .expect("valid header"),
-        );
+                .map_err(|e| VkError::RequestContext {
+                    context: "parse Authorization header".to_string().boxed(),
+                    source: Box::new(e),
+                })?;
+        headers.insert(AUTHORIZATION, value);
     }
-    headers
+    Ok(headers)
 }
 
 #[cfg(test)]
