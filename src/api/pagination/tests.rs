@@ -3,33 +3,39 @@
 use super::paginate;
 use crate::{PageInfo, VkError};
 use rstest::rstest;
-use std::cell::RefCell;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
 
 #[tokio::test]
 async fn paginate_discards_items_on_error() {
-    let seen = RefCell::new(Vec::new());
+    let seen = Arc::new(AtomicUsize::new(0));
 
-    let result: Result<Vec<i32>, VkError> = paginate(|cursor| {
-        let seen = &seen;
-        async move {
-            if cursor.is_none() {
-                seen.borrow_mut().push(1);
-                Ok((
-                    vec![1],
-                    PageInfo {
-                        has_next_page: true,
-                        end_cursor: Some("next".to_string()),
-                    },
-                ))
-            } else {
-                Err(VkError::ApiErrors("boom".into()))
+    let result: Result<Vec<i32>, VkError> = paginate({
+        let seen = Arc::clone(&seen);
+        move |cursor| {
+            let seen = Arc::clone(&seen);
+            async move {
+                if cursor.is_none() {
+                    seen.fetch_add(1, Ordering::SeqCst);
+                    Ok((
+                        vec![1],
+                        PageInfo {
+                            has_next_page: true,
+                            end_cursor: Some("next".to_string()),
+                        },
+                    ))
+                } else {
+                    Err(VkError::ApiErrors("boom".into()))
+                }
             }
         }
     })
     .await;
 
     assert!(result.is_err());
-    assert_eq!(seen.borrow().as_slice(), &[1]);
+    assert_eq!(seen.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

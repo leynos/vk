@@ -83,6 +83,9 @@ pub fn should_retry(err: &VkError) -> bool {
     }
 }
 
+/// Determine whether a deserialization error looks transient.
+///
+/// HTML bodies or 5xx/429 responses are treated as retryable.
 fn is_transient_serde_error(status: u16, snippet: &str) -> bool {
     status >= 500 || status == 429 || snippet.trim_start().starts_with('<')
 }
@@ -91,45 +94,55 @@ fn is_transient_serde_error(status: u16, snippet: &str) -> bool {
 mod tests {
     use super::{is_transient_serde_error, should_retry};
     use crate::VkError;
+    use rstest::rstest;
 
-    #[test]
-    fn should_retry_request_and_empty_response() {
-        let err = VkError::RequestContext {
+    #[rstest]
+    #[case(
+        VkError::RequestContext {
             context: "ctx".into(),
             source: Box::new(std::io::Error::other("boom")),
-        };
-        assert!(should_retry(&err));
-
-        let err = VkError::EmptyResponse {
+        },
+        true
+    )]
+    #[case(
+        VkError::EmptyResponse {
             status: 500,
             operation: "op".into(),
             snippet: "body".into(),
-        };
-        assert!(should_retry(&err));
-    }
-
-    #[test]
-    fn should_retry_handles_bad_response_serde() {
-        let err = VkError::BadResponseSerde {
+        },
+        true
+    )]
+    #[case(
+        VkError::BadResponseSerde {
             status: 429,
             message: "bad".into(),
             snippet: "<html>oops</html>".into(),
-        };
-        assert!(should_retry(&err));
-
-        let err = VkError::BadResponseSerde {
+        },
+        true
+    )]
+    #[case(
+        VkError::BadResponseSerde {
             status: 400,
             message: "bad".into(),
             snippet: "{\"error\":\"nope\"}".into(),
-        };
-        assert!(!should_retry(&err));
+        },
+        false
+    )]
+    #[case(VkError::ApiErrors("boom".into()), false)]
+    fn should_retry_cases(#[case] err: VkError, #[case] expected: bool) {
+        assert_eq!(should_retry(&err), expected);
     }
 
-    #[test]
-    fn is_transient_serde_error_detects_html_or_status() {
-        assert!(is_transient_serde_error(500, "{}"));
-        assert!(is_transient_serde_error(429, "{}"));
-        assert!(is_transient_serde_error(400, "<html>"));
-        assert!(!is_transient_serde_error(400, "{\"error\":\"nope\"}"));
+    #[rstest]
+    #[case(500, "{}", true)]
+    #[case(429, "{}", true)]
+    #[case(400, "<html>", true)]
+    #[case(400, "{\"error\":\"nope\"}", false)]
+    fn is_transient_serde_error_cases(
+        #[case] status: u16,
+        #[case] snippet: &str,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(is_transient_serde_error(status, snippet), expected);
     }
 }

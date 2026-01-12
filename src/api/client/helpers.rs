@@ -33,6 +33,7 @@ fn redact_sensitive(value: &mut Value) {
                         | "authorization"
                         | "password"
                         | "secret"
+                        | "access_token"
                         | "api_key"
                         | "apikey"
                         | "bearer"
@@ -147,6 +148,7 @@ mod tests {
                     "password": "p",
                     "api_key": "api-key-123"
                 },
+                "access_token": "access-789",
                 "private_key": "private-456"
             }
         });
@@ -154,6 +156,7 @@ mod tests {
         assert!(!snip.contains("secret"));
         assert!(!snip.contains(":\"p\""));
         assert!(!snip.contains("api-key-123"));
+        assert!(!snip.contains("access-789"));
         assert!(!snip.contains("private-456"));
         assert!(snip.contains("<redacted>"));
     }

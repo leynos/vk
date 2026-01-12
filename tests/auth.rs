@@ -229,6 +229,9 @@ async fn pr_handles_authorisation(
 #[case(VkCommand::Pr, TokenSource::VkEnv)]
 #[case(VkCommand::Pr, TokenSource::GithubEnv)]
 #[case(VkCommand::Pr, TokenSource::Cli)]
+#[case(VkCommand::Issue, TokenSource::Config)]
+#[case(VkCommand::Issue, TokenSource::VkEnv)]
+#[case(VkCommand::Issue, TokenSource::GithubEnv)]
 #[case(VkCommand::Issue, TokenSource::Cli)]
 #[tokio::test]
 async fn vk_reads_token_from_sources(#[case] command: VkCommand, #[case] source: TokenSource) {

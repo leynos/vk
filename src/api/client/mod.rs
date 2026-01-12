@@ -1,13 +1,15 @@
 //! GraphQL client implementation and request orchestration.
 
 mod helpers;
+mod http;
+mod pagination;
 mod transcript;
 mod types;
 
 use backon::Retryable;
 use reqwest::header::HeaderMap;
 use serde::de::DeserializeOwned;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::borrow::Cow;
 use tokio::time::sleep;
 use tracing::warn;
@@ -20,6 +22,7 @@ use self::helpers::{
     BODY_SNIPPET_LEN, VALUE_SNIPPET_LEN, build_headers, handle_graphql_errors, operation_name,
     payload_snippet, snippet,
 };
+use self::http::HttpResponse;
 use self::types::GraphQLResponse;
 use super::retry::{RetryConfig, build_retry_builder, should_retry};
 
@@ -27,14 +30,6 @@ pub use self::types::{Endpoint, Query, Token};
 
 #[cfg(test)]
 mod tests;
-
-#[derive(Debug)]
-struct HttpResponse {
-    status: u16,
-    body: String,
-}
-
-const MAX_PAGES: usize = 1000;
 
 /// Client for communicating with the GitHub GraphQL API.
 ///
@@ -239,10 +234,6 @@ impl GraphQLClient {
     ///
     /// Returns a [`VkError`] if the request fails or the response cannot be
     /// deserialized.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the configured backoff exceeds `u64::MAX` milliseconds.
     pub async fn run_query<V, T>(&self, query: impl Into<Query>, variables: V) -> Result<T, VkError>
     where
         V: serde::Serialize,
@@ -320,84 +311,5 @@ impl GraphQLClient {
             obj.insert("cursor".into(), Value::String(c.into_owned()));
         }
         self.run_query(query, variables).await
-    }
-
-    /// Fetch and concatenate all pages from a cursor-based connection.
-    ///
-    /// `query` and `vars` define the base request. The `map` closure
-    /// extracts the items and pagination info from each page's response.
-    ///
-    /// Pagination stops after 1000 pages to avoid infinite loops when cursors
-    /// repeat or the API misbehaves.
-    ///
-    /// # Examples
-    /// Borrowed and owned cursors both avoid allocations until needed.
-    ///
-    /// ```no_run
-    /// use std::borrow::Cow;
-    /// use serde_json::Map;
-    /// use vk::{api::GraphQLClient, PageInfo, VkError};
-    ///
-    /// # async fn run(client: GraphQLClient) -> Result<(), VkError> {
-    /// let vars = Map::new();
-    /// client
-    ///     .paginate_all::<(), _, serde_json::Value>(
-    ///         "query",
-    ///         vars.clone(),
-    ///         Some(Cow::Borrowed("c1")),
-    ///         |_page| Ok((Vec::new(), PageInfo::default())),
-    ///     )
-    ///     .await?;
-    /// let owned = String::from("c2");
-    /// client
-    ///     .paginate_all::<(), _, serde_json::Value>(
-    ///         "query",
-    ///         vars,
-    ///         Some(Cow::Owned(owned)),
-    ///         |_page| Ok((Vec::new(), PageInfo::default())),
-    ///     )
-    ///     .await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Propagates any [`VkError`] returned by the underlying request or mapper
-    /// closure.
-    pub async fn paginate_all<Item, Mapper, Page>(
-        &self,
-        query: impl Into<Query>,
-        vars: Map<String, Value>,
-        start_cursor: Option<Cow<'_, str>>,
-        mut map: Mapper,
-    ) -> Result<Vec<Item>, VkError>
-    where
-        Mapper: FnMut(Page) -> Result<(Vec<Item>, crate::PageInfo), VkError>,
-        Page: DeserializeOwned,
-    {
-        let query = query.into();
-        let mut items = Vec::new();
-        let mut cursor = start_cursor;
-        let mut pages_seen = 0usize;
-        loop {
-            pages_seen += 1;
-            if pages_seen > MAX_PAGES {
-                return Err(VkError::BadResponse(
-                    format!("pagination exceeded max pages {MAX_PAGES}").boxed(),
-                ));
-            }
-            let data = self
-                .fetch_page::<Page, _>(query.clone(), cursor.take(), &vars)
-                .await?;
-            let (mut page, info) = map(data)?;
-            items.append(&mut page);
-            if let Some(next) = info.next_cursor()? {
-                cursor = Some(Cow::Owned(next.to_string()));
-            } else {
-                break;
-            }
-        }
-        Ok(items)
     }
 }

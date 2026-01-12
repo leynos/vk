@@ -35,7 +35,7 @@ struct PrContext {
 ///
 /// This simply calls [`write_thread`] with a locked `stdout` handle.
 fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> Result<(), VkError> {
-    write_thread(std::io::stdout().lock(), skin, thread).map_err(|err| map_printer_error(&err))
+    write_thread(std::io::stdout().lock(), skin, thread).map_err(map_printer_error)
 }
 
 /// Create a [`GraphQLClient`], falling back to no transcript on failure.
@@ -56,11 +56,11 @@ fn build_graphql_client(
     }
 }
 
-fn map_printer_error(err: &anyhow::Error) -> VkError {
+fn map_printer_error(err: anyhow::Error) -> VkError {
     if let Some(io) = err.downcast_ref::<std::io::Error>() {
-        return VkError::Io(Box::new(std::io::Error::new(io.kind(), io.to_string())));
+        return VkError::Io(Box::new(std::io::Error::new(io.kind(), err)));
     }
-    VkError::Io(Box::new(std::io::Error::other(err.to_string())))
+    VkError::Io(Box::new(std::io::Error::other(err)))
 }
 
 fn warn_on_missing_token_and_locale(token: &str) {
