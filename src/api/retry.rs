@@ -28,6 +28,22 @@ impl Default for RetryConfig {
     }
 }
 
+/// Build an exponential backoff retry builder from the given configuration.
+///
+/// The builder uses the configured attempt count and base delay, and applies
+/// jitter when enabled.
+///
+/// # Examples
+/// ```ignore
+/// use vk::api::RetryConfig;
+/// use vk::api::retry::build_retry_builder;
+///
+/// let config = RetryConfig {
+///     attempts: 3,
+///     ..RetryConfig::default()
+/// };
+/// let _builder = build_retry_builder(config);
+/// ```
 pub fn build_retry_builder(config: RetryConfig) -> ExponentialBuilder {
     let builder = ExponentialBuilder::default()
         .with_min_delay(config.base_delay)
@@ -39,6 +55,22 @@ pub fn build_retry_builder(config: RetryConfig) -> ExponentialBuilder {
     }
 }
 
+/// Decide whether a request should be retried based on the error.
+///
+/// Network errors, empty responses, and transient deserialisation failures
+/// are treated as retryable.
+///
+/// # Examples
+/// ```ignore
+/// use vk::VkError;
+/// use vk::api::retry::should_retry;
+///
+/// let err = VkError::RequestContext {
+///     context: "ctx".into(),
+///     source: Box::new(std::io::Error::other("boom")),
+/// };
+/// assert!(should_retry(&err));
+/// ```
 pub fn should_retry(err: &VkError) -> bool {
     match err {
         VkError::RequestContext { .. } | VkError::Request(_) | VkError::EmptyResponse { .. } => {

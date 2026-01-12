@@ -57,6 +57,7 @@ enum VkCommand {
 enum TokenSource {
     Config,
     VkEnv,
+    GithubEnv,
     Cli,
 }
 
@@ -74,6 +75,9 @@ impl TokenSource {
             Self::Config => {}
             Self::VkEnv => {
                 cmd.env("VK_GITHUB_TOKEN", "dummy");
+            }
+            Self::GithubEnv => {
+                cmd.env("GITHUB_TOKEN", "dummy");
             }
             Self::Cli => {
                 cmd.env("VK_GITHUB_TOKEN", "env-token")
@@ -223,6 +227,7 @@ async fn pr_handles_authorisation(
 #[rstest]
 #[case(VkCommand::Pr, TokenSource::Config)]
 #[case(VkCommand::Pr, TokenSource::VkEnv)]
+#[case(VkCommand::Pr, TokenSource::GithubEnv)]
 #[case(VkCommand::Pr, TokenSource::Cli)]
 #[case(VkCommand::Issue, TokenSource::Cli)]
 #[tokio::test]

@@ -29,7 +29,16 @@ fn redact_sensitive(value: &mut Value) {
             for (k, v) in map.iter_mut() {
                 if matches!(
                     k.to_ascii_lowercase().as_str(),
-                    "token" | "authorization" | "password" | "secret"
+                    "token"
+                        | "authorization"
+                        | "password"
+                        | "secret"
+                        | "api_key"
+                        | "apikey"
+                        | "bearer"
+                        | "auth"
+                        | "credential"
+                        | "private_key"
                 ) {
                     *v = Value::String("<redacted>".into());
                 } else {
@@ -121,6 +130,8 @@ mod tests {
 
     #[rstest]
     #[case("query RetryOp { __typename }", Some("RetryOp"))]
+    #[case("mutation UpdateThing { __typename }", Some("UpdateThing"))]
+    #[case("subscription OnEvent { __typename }", Some("OnEvent"))]
     #[case("queryFoo { __typename }", None)]
     fn operation_name_cases(#[case] query: &str, #[case] expected: Option<&str>) {
         assert_eq!(operation_name(query), expected);
@@ -132,12 +143,18 @@ mod tests {
             "query": "query { viewer { login } }",
             "variables": {
                 "token": "secret",
-                "nested": { "password": "p" }
+                "nested": {
+                    "password": "p",
+                    "api_key": "api-key-123"
+                },
+                "private_key": "private-456"
             }
         });
         let snip = payload_snippet(&payload);
         assert!(!snip.contains("secret"));
         assert!(!snip.contains(":\"p\""));
+        assert!(!snip.contains("api-key-123"));
+        assert!(!snip.contains("private-456"));
         assert!(snip.contains("<redacted>"));
     }
 }

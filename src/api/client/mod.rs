@@ -34,6 +34,8 @@ struct HttpResponse {
     body: String,
 }
 
+const MAX_PAGES: usize = 1000;
+
 /// Client for communicating with the GitHub GraphQL API.
 ///
 /// The client handles authentication headers and optional request
@@ -155,12 +157,12 @@ impl GraphQLClient {
             context: make_ctx(Some(status_u16)),
             source: e.into(),
         })?;
+        let resp = HttpResponse {
+            status: status_u16,
+            body,
+        };
+        self.log_transcript(payload, operation, &resp);
         if !(200..300).contains(&status_u16) {
-            let resp = HttpResponse {
-                status: status_u16,
-                body: body.clone(),
-            };
-            self.log_transcript(payload, operation, &resp);
             let source: Box<dyn std::error::Error + Send + Sync> = match status_err {
                 Some(e) => Box::new(e),
                 None => Box::new(std::io::Error::other(format!(
@@ -170,16 +172,13 @@ impl GraphQLClient {
             return Err(VkError::RequestContext {
                 context: format!(
                     "HTTP status {status_u16} | body snippet: {}",
-                    snippet(&body, BODY_SNIPPET_LEN)
+                    snippet(&resp.body, BODY_SNIPPET_LEN)
                 )
                 .boxed(),
                 source,
             });
         }
-        Ok(HttpResponse {
-            status: status_u16,
-            body,
-        })
+        Ok(resp)
     }
 
     /// Parse a GraphQL response body into the desired type.
@@ -259,7 +258,6 @@ impl GraphQLClient {
         let builder = build_retry_builder(self.retry);
         (|| async {
             let resp = self.execute_single_request(&payload, &operation).await?;
-            self.log_transcript(&payload, &operation, &resp);
             Self::process_graphql_response::<T>(&resp, &operation)
         })
         .retry(builder)
@@ -329,6 +327,9 @@ impl GraphQLClient {
     /// `query` and `vars` define the base request. The `map` closure
     /// extracts the items and pagination info from each page's response.
     ///
+    /// Pagination stops after 1000 pages to avoid infinite loops when cursors
+    /// repeat or the API misbehaves.
+    ///
     /// # Examples
     /// Borrowed and owned cursors both avoid allocations until needed.
     ///
@@ -378,7 +379,14 @@ impl GraphQLClient {
         let query = query.into();
         let mut items = Vec::new();
         let mut cursor = start_cursor;
+        let mut pages_seen = 0usize;
         loop {
+            pages_seen += 1;
+            if pages_seen > MAX_PAGES {
+                return Err(VkError::BadResponse(
+                    format!("pagination exceeded max pages {MAX_PAGES}").boxed(),
+                ));
+            }
             let data = self
                 .fetch_page::<Page, _>(query.clone(), cursor.take(), &vars)
                 .await?;

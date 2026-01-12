@@ -58,6 +58,7 @@ async fn paginate_missing_cursor_errors() {
 
 #[rstest]
 #[case(false, None, None)]
+#[case(false, Some(String::from("extra")), None)]
 #[case(true, Some(String::from("abc")), Some("abc"))]
 fn next_cursor_ok_cases(
     #[case] has_next_page: bool,

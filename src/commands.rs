@@ -295,7 +295,11 @@ pub async fn run_resolve(
     }
     #[cfg(not(feature = "unstable-rest-resolve"))]
     {
-        let _ = args.message;
+        #[expect(
+            unused_variables,
+            reason = "message is only used with unstable-rest-resolve enabled"
+        )]
+        let message = args.message;
         resolve::resolve_comment(
             &token,
             resolve::CommentRef {
