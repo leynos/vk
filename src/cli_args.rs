@@ -15,6 +15,9 @@ pub struct GlobalArgs {
     /// Repository used when passing only a pull request number
     #[arg(long)]
     pub repo: Option<String>,
+    /// GitHub token for authenticated API requests
+    #[arg(long, value_name = "TOKEN")]
+    pub github_token: Option<String>,
     /// Write HTTP transcript to this file for debugging
     #[arg(long)]
     pub transcript: Option<std::path::PathBuf>,
@@ -33,6 +36,7 @@ impl GlobalArgs {
     /// CLI flags have higher priority than configuration sources.
     pub fn merge(&mut self, other: Self) {
         self.repo = other.repo.or_else(|| self.repo.take());
+        self.github_token = other.github_token.or_else(|| self.github_token.take());
         self.transcript = other.transcript.or_else(|| self.transcript.take());
         self.http_timeout = other.http_timeout.or_else(|| self.http_timeout.take());
         self.connect_timeout = other
@@ -120,5 +124,39 @@ impl Default for ResolveArgs {
             reference: String::new(),
             message: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GlobalArgs;
+
+    #[test]
+    fn merge_prefers_cli_github_token() {
+        let mut config = GlobalArgs {
+            github_token: Some("config-token".to_string()),
+            ..GlobalArgs::default()
+        };
+        let cli = GlobalArgs {
+            github_token: Some("cli-token".to_string()),
+            ..GlobalArgs::default()
+        };
+
+        config.merge(cli);
+
+        assert_eq!(config.github_token.as_deref(), Some("cli-token"));
+    }
+
+    #[test]
+    fn merge_keeps_config_github_token_when_cli_missing() {
+        let mut config = GlobalArgs {
+            github_token: Some("config-token".to_string()),
+            ..GlobalArgs::default()
+        };
+        let cli = GlobalArgs::default();
+
+        config.merge(cli);
+
+        assert_eq!(config.github_token.as_deref(), Some("config-token"));
     }
 }

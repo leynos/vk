@@ -60,8 +60,10 @@ Failing that, it falls back to the configured repository (`--repo` or
 `VK_REPO`). Set this value to `owner/repo` with or without a `.git` suffix. If
 neither source is available, `vk` will refuse to run with only a number.
 
-`vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN` to authenticate. If it's
-not set, you'll get a warning and anonymous requests may be rate limited.
+`vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN`, `VK_GITHUB_TOKEN`, pass
+`--github-token`, or add `github_token` to `~/.config/vk/config.toml` (or the
+path provided via `VK_CONFIG_PATH`) to authenticate. If no token is set, you'll
+get a warning and anonymous requests may be rate limited.
 
 The token only needs read access. Select the `public_repo` scope (or `repo` for
 private repositories). See [docs/github-token.md](docs/github-token.md) for a

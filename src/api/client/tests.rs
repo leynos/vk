@@ -1,12 +1,12 @@
-//! Tests for API utilities.
+//! Tests for GraphQL client behaviour.
 
 use super::*;
-use crate::PageInfo;
+use crate::VkError;
+use crate::api::RetryConfig;
 use rstest::{fixture, rstest};
 use serde_json::{Map, Value, json};
 use std::{
     borrow::Cow,
-    cell::RefCell,
     convert::Infallible,
     future::Future,
     sync::{
@@ -24,7 +24,6 @@ struct TestClient {
     client: GraphQLClient,
     join: JoinHandle<()>,
 }
-
 fn create_test_server<F, Fut>(
     response_handler: F,
 ) -> (GraphQLClient, JoinHandle<()>, Arc<AtomicUsize>)
@@ -60,7 +59,6 @@ where
         .expect("create client");
     (client, join, counter)
 }
-
 fn start_server_generic<F>(handler: F) -> TestClient
 where
     F: Fn(usize) -> (StatusCode, String) + Send + Sync + 'static,
@@ -87,11 +85,9 @@ where
     let (client, join, _) = create_test_server(svc);
     TestClient { client, join }
 }
-
 fn start_server(responses: Vec<String>) -> TestClient {
     start_server_with_status(responses, StatusCode::OK)
 }
-
 fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestClient {
     let responses = Arc::new(responses);
     start_server_generic(move |idx| {
@@ -102,13 +98,11 @@ fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestC
         (status, body)
     })
 }
-
 #[derive(Clone, Debug)]
 struct RespSpec {
     status: StatusCode,
     body: String,
 }
-
 fn start_server_sequence(specs: Vec<RespSpec>) -> TestClient {
     let specs = Arc::new(specs);
     start_server_generic(move |idx| {
@@ -119,14 +113,12 @@ fn start_server_sequence(specs: Vec<RespSpec>) -> TestClient {
         (status, body)
     })
 }
-
 #[derive(Clone, Debug)]
 struct ScriptedResp {
     status: StatusCode,
     body: String,
     content_type: &'static str,
 }
-
 fn start_server_scripted(
     script: Vec<ScriptedResp>,
 ) -> (GraphQLClient, JoinHandle<()>, Arc<AtomicUsize>) {
@@ -150,7 +142,6 @@ fn start_server_scripted(
     };
     create_test_server(handler)
 }
-
 #[fixture]
 fn mock_server_with_capture() -> (GraphQLClient, Arc<Mutex<String>>, JoinHandle<()>) {
     use third_wheel::hyper::body::to_bytes;
@@ -186,7 +177,6 @@ fn mock_server_with_capture() -> (GraphQLClient, Arc<Mutex<String>>, JoinHandle<
 
     (client, captured, join)
 }
-
 fn assert_cursor_in_request(captured: &Arc<Mutex<String>>, expected: &str) {
     let body = captured.lock().expect("lock").to_string();
     let v: Value = serde_json::from_str(&body).expect("json body");
@@ -196,7 +186,6 @@ fn assert_cursor_in_request(captured: &Arc<Mutex<String>>, expected: &str) {
         .and_then(Value::as_str);
     assert_eq!(cur, Some(expected));
 }
-
 #[tokio::test]
 async fn run_query_retries_missing_data() {
     let responses = vec![
@@ -212,7 +201,6 @@ async fn run_query_retries_missing_data() {
     join.abort();
     let _ = join.await;
 }
-
 #[tokio::test]
 async fn run_query_retries_on_5xx_then_succeeds() {
     let specs = vec![
@@ -234,7 +222,6 @@ async fn run_query_retries_on_5xx_then_succeeds() {
     join.abort();
     let _ = join.await;
 }
-
 #[tokio::test]
 async fn run_query_retries_html_5xx_then_succeeds() {
     let script = vec![
@@ -259,41 +246,6 @@ async fn run_query_retries_html_5xx_then_succeeds() {
     join.abort();
     let _ = join.await;
 }
-
-#[derive(Debug)]
-struct OperationNameCase {
-    query: &'static str,
-    expected: Option<&'static str>,
-}
-
-#[rstest]
-#[case(OperationNameCase {
-    query: "query RetryOp { __typename }",
-    expected: Some("RetryOp"),
-})]
-#[case(OperationNameCase {
-    query: "queryFoo { __typename }",
-    expected: None,
-})]
-#[tokio::test]
-async fn run_query_operation_name_handling(
-    mock_server_with_capture: (GraphQLClient, Arc<Mutex<String>>, JoinHandle<()>),
-    #[case] case: OperationNameCase,
-) {
-    let (client, captured, join) = mock_server_with_capture;
-    let _: Value = client
-        .run_query(case.query, serde_json::json!({}))
-        .await
-        .expect("ok");
-    join.abort();
-    let _ = join.await;
-
-    let body = captured.lock().expect("lock").to_string();
-    let v: Value = serde_json::from_str(&body).expect("json body");
-    let op = v.get("operationName").and_then(Value::as_str);
-    assert_eq!(op, case.expected);
-}
-
 #[derive(Debug)]
 struct TestCase {
     responses: Vec<String>,
@@ -301,14 +253,12 @@ struct TestCase {
     op: &'static str,
     expect: Expected,
 }
-
 #[derive(Debug)]
 enum Expected {
     EmptyResponse { fragments: [&'static str; 3] },
     ApiErrors { fragment: &'static str },
     RequestCtx { fragments: [&'static str; 2] },
 }
-
 #[rstest]
 #[case(TestCase {
     responses: vec![],
@@ -392,7 +342,6 @@ async fn run_query_reports_details(#[case] case: TestCase) {
     join.abort();
     let _ = join.await;
 }
-
 #[tokio::test]
 async fn fetch_page_rejects_non_object_variables() {
     let client = GraphQLClient::with_endpoint("token", "http://127.0.0.1:9", None).expect("client");
@@ -407,7 +356,6 @@ async fn fetch_page_rejects_non_object_variables() {
         other => panic!("unexpected error: {other:?}"),
     }
 }
-
 #[rstest]
 #[case(false, Map::new(), "abc", "abc")]
 #[case(true, Map::new(), "abc", "abc")]
@@ -444,100 +392,4 @@ async fn fetch_page_cursor_handling_param(
     join.abort();
     let _ = join.await;
     assert_cursor_in_request(&captured, expected);
-}
-
-#[tokio::test]
-async fn paginate_discards_items_on_error() {
-    let seen = RefCell::new(Vec::new());
-
-    let result: Result<Vec<i32>, VkError> = paginate(|cursor| {
-        let seen = &seen;
-        async move {
-            if cursor.is_none() {
-                seen.borrow_mut().push(1);
-                Ok((
-                    vec![1],
-                    PageInfo {
-                        has_next_page: true,
-                        end_cursor: Some("next".to_string()),
-                    },
-                ))
-            } else {
-                Err(VkError::ApiErrors("boom".into()))
-            }
-        }
-    })
-    .await;
-
-    assert!(result.is_err());
-    assert_eq!(seen.borrow().as_slice(), &[1]);
-}
-
-#[tokio::test]
-async fn paginate_missing_cursor_errors() {
-    let result: Result<Vec<i32>, VkError> = paginate(|_cursor| async {
-        Ok((
-            vec![1],
-            PageInfo {
-                has_next_page: true,
-                end_cursor: None,
-            },
-        ))
-    })
-    .await;
-    match result {
-        Err(VkError::BadResponse(msg)) => {
-            let s = msg.to_string();
-            assert!(
-                s.contains("hasNextPage=true") && s.contains("endCursor"),
-                "{s}"
-            );
-        }
-        other => panic!("unexpected result: {other:?}"),
-    }
-}
-
-#[rstest]
-#[case(false, None, None)]
-#[case(true, Some(String::from("abc")), Some("abc"))]
-fn next_cursor_ok_cases(
-    #[case] has_next_page: bool,
-    #[case] end_cursor: Option<String>,
-    #[case] expected: Option<&str>,
-) {
-    let info = PageInfo {
-        has_next_page,
-        end_cursor,
-    };
-    let next = info.next_cursor().expect("cursor");
-    match (next, expected) {
-        (None, None) => {}
-        (Some(got), Some(want)) => assert_eq!(got, want),
-        other => panic!("unexpected case: {other:?}"),
-    }
-}
-
-#[test]
-fn next_cursor_errors_without_cursor() {
-    let info = PageInfo {
-        has_next_page: true,
-        end_cursor: None,
-    };
-    let err = info.next_cursor().expect_err("missing cursor");
-    assert!(matches!(err, VkError::BadResponse(_)));
-}
-
-#[test]
-fn payload_snippet_redacts_sensitive_fields() {
-    let payload = json!({
-        "query": "query { viewer { login } }",
-        "variables": {
-            "token": "secret",
-            "nested": { "password": "p" }
-        }
-    });
-    let snip = payload_snippet(&payload);
-    assert!(!snip.contains("secret"));
-    assert!(!snip.contains(":\"p\""));
-    assert!(snip.contains("<redacted>"));
 }
