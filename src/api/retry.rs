@@ -57,10 +57,13 @@ pub fn build_retry_builder(config: RetryConfig) -> ExponentialBuilder {
     }
 }
 
-/// Decide whether a request should be retried based on the error.
-///
-/// Network errors, empty responses, and transient deserialisation failures
-/// are treated as retryable.
+/// Determines whether a `VkError` is transient and should be retried.
+/// Returns `true` for network errors (`VkError::RequestContext`,
+/// `VkError::Request`), empty responses (`VkError::EmptyResponse`), and for
+/// `VkError::BadResponseSerde` errors only when
+/// `is_transient_serde_error(status, snippet)` returns true (indicating
+/// server-side or rate-limit failures). All other `VkError` variants return
+/// `false`.
 ///
 /// # Examples
 /// ```ignore
