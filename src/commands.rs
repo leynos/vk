@@ -25,6 +25,11 @@ use tracing::{error, warn};
 #[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
 
+#[cfg(feature = "unstable-rest-resolve")]
+const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 10;
+#[cfg(feature = "unstable-rest-resolve")]
+const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 5;
+
 struct PrContext {
     repo: RepoInfo,
     number: u64,
@@ -352,8 +357,13 @@ pub async fn run_resolve(
     }
     #[cfg(feature = "unstable-rest-resolve")]
     {
-        let http_timeout = Duration::from_secs(global.http_timeout.unwrap_or(10));
-        let connect_timeout = Duration::from_secs(global.connect_timeout.unwrap_or(5));
+        let http_timeout =
+            Duration::from_secs(global.http_timeout.unwrap_or(DEFAULT_HTTP_TIMEOUT_SECS));
+        let connect_timeout = Duration::from_secs(
+            global
+                .connect_timeout
+                .unwrap_or(DEFAULT_CONNECT_TIMEOUT_SECS),
+        );
         resolve::resolve_comment(
             &token,
             resolve::CommentRef {

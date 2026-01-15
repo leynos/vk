@@ -8,8 +8,17 @@ use super::types::{GraphQLError, Token};
 use crate::VkError;
 use crate::boxed::BoxedStr;
 
+/// Maximum number of characters to keep when logging response body snippets.
+///
+/// The limit keeps large payloads readable in error messages and transcripts.
 pub(super) const BODY_SNIPPET_LEN: usize = 500;
+/// Maximum number of characters to keep when logging request payload snippets.
+///
+/// Used for redacted GraphQL payloads to balance context and log size.
 pub(super) const REQUEST_SNIPPET_LEN: usize = 1024;
+/// Maximum number of characters to keep when logging individual value snippets.
+///
+/// The shorter length avoids overwhelming error messages with long values.
 pub(super) const VALUE_SNIPPET_LEN: usize = 200;
 
 /// Trim `text` to `max` characters, appending `...` when truncated.
@@ -150,6 +159,7 @@ mod tests {
     #[case("abc", 0, "")]
     #[case("abc", 3, "abc")]
     #[case("abcd", 3, "abc...")]
+    #[case("👍👍👍", 2, "👍👍...")]
     fn snippet_cases(#[case] text: &str, #[case] max: usize, #[case] expected: &str) {
         assert_eq!(snippet(text, max), expected);
     }
