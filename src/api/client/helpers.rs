@@ -40,6 +40,7 @@ fn redact_sensitive(value: &mut Value) {
                         | "password"
                         | "secret"
                         | "access_token"
+                        | "refresh_token"
                         | "api_key"
                         | "apikey"
                         | "bearer"

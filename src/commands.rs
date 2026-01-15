@@ -64,6 +64,13 @@ fn map_printer_error(err: anyhow::Error) -> VkError {
     VkError::Io(Box::new(std::io::Error::other(err)))
 }
 
+/// Inspect a print `result`, returning true when a broken pipe is detected so
+/// callers stop further output, or false when normal processing should
+/// continue.
+///
+/// The `result` captures output failures and `label` provides context for
+/// logging. Broken pipe checks apply to `std::io::Error` and
+/// `termimad::Error` values.
 fn handle_print_result<E>(result: Result<(), E>, label: &str) -> bool
 where
     E: std::fmt::Display + Any,
