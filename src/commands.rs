@@ -75,16 +75,12 @@ fn warn_on_missing_token_and_locale(token: &str) {
 fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
     err.chain().any(|c| {
         c.downcast_ref::<std::io::Error>()
-            .is_some_and(is_broken_pipe_io)
+            .is_some_and(|io| is_broken_pipe_kind(io.kind()))
     })
 }
 
-fn is_broken_pipe_io(err: &std::io::Error) -> bool {
-    err.kind() == ErrorKind::BrokenPipe
-}
-
-fn is_broken_pipe_vk(err: &VkError) -> bool {
-    matches!(err, VkError::Io(inner) if is_broken_pipe_io(inner))
+fn is_broken_pipe_kind(kind: ErrorKind) -> bool {
+    kind == ErrorKind::BrokenPipe
 }
 
 fn handle_banner<F>(print: F, label: &str) -> bool
@@ -92,7 +88,7 @@ where
     F: FnOnce() -> std::io::Result<()>,
 {
     if let Err(e) = print() {
-        if is_broken_pipe_io(&e) {
+        if is_broken_pipe_kind(e.kind()) {
             return true;
         }
         error!("error printing {label} banner: {e}");
@@ -116,7 +112,7 @@ fn print_reviews_block(skin: &MadSkin, reviews: Vec<PullRequestReview>) -> bool 
 fn print_threads_block(skin: &MadSkin, threads: Vec<ReviewThread>) -> bool {
     for thread in threads {
         if let Err(e) = print_thread(skin, &thread) {
-            if is_broken_pipe_vk(&e) {
+            if matches!(e, VkError::Io(ref inner) if is_broken_pipe_kind(inner.kind())) {
                 return true;
             }
             error!("error printing thread: {e}");
@@ -161,7 +157,7 @@ fn handle_empty_threads(files: &[String], comment: Option<u64>) -> Result<(), Vk
         (false, false) => "No unresolved comments for the specified files.",
     };
     if let Err(e) = writeln!(std::io::stdout().lock(), "{msg}") {
-        if is_broken_pipe_io(&e) {
+        if is_broken_pipe_kind(e.kind()) {
             return Ok(());
         }
         error!("error writing empty state: {e}");
@@ -195,6 +191,11 @@ fn generate_pr_output(threads: Vec<ReviewThread>, reviews: Vec<PullRequestReview
     let _ = handle_banner(print_end_banner, "end");
 }
 
+/// Run the `pr` command and print unresolved review threads.
+///
+/// Uses CLI and global configuration for repository selection, transcript
+/// output, and token resolution. Returns an error when the reference is
+/// invalid or the API request fails.
 pub async fn run_pr(
     args: PrArgs,
     global: &GlobalArgs,
@@ -244,6 +245,11 @@ pub async fn run_pr(
     Ok(())
 }
 
+/// Run the `issue` command and print issue details.
+///
+/// Uses CLI and global configuration for repository selection, transcript
+/// output, and token resolution. Returns an error when the reference is
+/// invalid or the API request fails.
 pub async fn run_issue(
     args: IssueArgs,
     global: &GlobalArgs,
@@ -258,12 +264,34 @@ pub async fn run_issue(
     let issue = fetch_issue(&client, &repo, number).await?;
 
     let skin = MadSkin::default();
-    skin.print_text(&format!("**{}**", issue.title));
-    skin.print_text(&issue.body);
-    println!();
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    if let Err(e) = skin.write_text_on(&mut handle, &format!("**{}**", issue.title)) {
+        if matches!(e, termimad::Error::IO(ref io) if is_broken_pipe_kind(io.kind())) {
+            return Ok(());
+        }
+        error!("error printing issue title: {e}");
+    }
+    if let Err(e) = skin.write_text_on(&mut handle, &issue.body) {
+        if matches!(e, termimad::Error::IO(ref io) if is_broken_pipe_kind(io.kind())) {
+            return Ok(());
+        }
+        error!("error printing issue body: {e}");
+    }
+    if let Err(e) = writeln!(handle) {
+        if is_broken_pipe_kind(e.kind()) {
+            return Ok(());
+        }
+        error!("error printing issue footer: {e}");
+    }
     Ok(())
 }
 
+/// Run the `resolve` command to resolve a pull request comment.
+///
+/// Uses CLI and global configuration for repository selection and token
+/// resolution. Returns an error when the reference is invalid or when
+/// authentication is missing.
 pub async fn run_resolve(
     args: ResolveArgs,
     global: &GlobalArgs,

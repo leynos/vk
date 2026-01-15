@@ -32,6 +32,8 @@ impl Default for RetryConfig {
 ///
 /// The builder uses the configured attempt count and base delay, and applies
 /// jitter when enabled.
+/// The `request_timeout` field is handled by the HTTP client and is not used
+/// to configure the backoff policy.
 ///
 /// # Examples
 /// ```ignore
