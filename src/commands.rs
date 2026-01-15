@@ -191,11 +191,17 @@ fn generate_pr_output(threads: Vec<ReviewThread>, reviews: Vec<PullRequestReview
     let _ = handle_banner(print_end_banner, "end");
 }
 
-/// Run the `pr` command and print unresolved review threads.
+/// Run the `pr` command and print pull request review threads.
 ///
-/// Uses CLI and global configuration for repository selection, transcript
-/// output, and token resolution. Returns an error when the reference is
-/// invalid or the API request fails.
+/// Parameters:
+/// - `args`: CLI arguments controlling PR behaviour and filtering.
+/// - `global`: global CLI options, including repository defaults and transcript
+///   output.
+/// - `cli_token`: optional authentication token from the CLI.
+///
+/// Returns `Ok(())` on success or a `VkError` when the reference is invalid or
+/// the API request fails. When a discussion comment ID is present, resolved
+/// threads are included; otherwise unresolved threads are filtered by file.
 pub async fn run_pr(
     args: PrArgs,
     global: &GlobalArgs,
@@ -247,9 +253,14 @@ pub async fn run_pr(
 
 /// Run the `issue` command and print issue details.
 ///
-/// Uses CLI and global configuration for repository selection, transcript
-/// output, and token resolution. Returns an error when the reference is
-/// invalid or the API request fails.
+/// Parameters:
+/// - `args`: CLI arguments for selecting an issue reference.
+/// - `global`: global CLI options, including repository defaults and transcript
+///   output.
+/// - `cli_token`: optional authentication token from the CLI.
+///
+/// Returns `Ok(())` on success or a `VkError` when the reference is invalid or
+/// the API request fails.
 pub async fn run_issue(
     args: IssueArgs,
     global: &GlobalArgs,
@@ -289,9 +300,15 @@ pub async fn run_issue(
 
 /// Run the `resolve` command to resolve a pull request comment.
 ///
-/// Uses CLI and global configuration for repository selection and token
-/// resolution. Returns an error when the reference is invalid or when
-/// authentication is missing.
+/// Parameters:
+/// - `args`: CLI arguments containing the discussion reference and message.
+/// - `global`: global CLI options, including repository defaults and timeouts.
+/// - `cli_token`: optional authentication token from the CLI.
+///
+/// Returns `Ok(())` on success or a `VkError` when the reference is invalid or
+/// authentication is missing. The message is used only when the
+/// `unstable-rest-resolve` feature is enabled, and HTTP timeout settings are
+/// applied to that flow.
 pub async fn run_resolve(
     args: ResolveArgs,
     global: &GlobalArgs,

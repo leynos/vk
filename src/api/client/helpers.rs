@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn build_headers_includes_base_headers_without_token() {
         let headers =
-            build_headers(&Token::new("")).expect("build_headers should succeed without token");
+            build_headers(&Token::new("")).expect("failed to build headers without a token");
         assert!(headers.contains_key(USER_AGENT));
         assert!(headers.contains_key(ACCEPT));
         assert!(!headers.contains_key(AUTHORIZATION));
@@ -212,11 +212,11 @@ mod tests {
     #[test]
     fn build_headers_adds_authorization_with_token() {
         let headers =
-            build_headers(&Token::new("token")).expect("build_headers should succeed with token");
+            build_headers(&Token::new("token")).expect("failed to build headers with a token");
         let auth = headers
             .get(AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
-            .expect("authorization header missing for token");
+            .expect("authorization header missing or invalid for token");
         assert_eq!(auth, "Bearer token");
     }
 }
