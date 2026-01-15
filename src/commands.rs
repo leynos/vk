@@ -17,6 +17,7 @@ use crate::{
     FetchOptions, GraphQLClient, ReviewThread, VkError, fetch_issue,
     fetch_review_threads_with_options, filter_threads_by_files, resolve,
 };
+use std::any::Any;
 use std::io::{ErrorKind, Write};
 use termimad::MadSkin;
 use tracing::{error, warn};
@@ -61,6 +62,33 @@ fn map_printer_error(err: anyhow::Error) -> VkError {
         return VkError::Io(Box::new(std::io::Error::new(io.kind(), err)));
     }
     VkError::Io(Box::new(std::io::Error::other(err)))
+}
+
+fn handle_print_result<E>(result: Result<(), E>, label: &str) -> bool
+where
+    E: std::fmt::Display + Any,
+{
+    let Err(err) = result else {
+        return false;
+    };
+    let any = &err as &dyn Any;
+    if any
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|io| is_broken_pipe_kind(io.kind()))
+    {
+        return true;
+    }
+    if any
+        .downcast_ref::<termimad::Error>()
+        .is_some_and(|term_err| match term_err {
+            termimad::Error::IO(io) => is_broken_pipe_kind(io.kind()),
+            termimad::Error::InsufficientWidth(_) => false,
+        })
+    {
+        return true;
+    }
+    error!("error printing {label}: {err}");
+    false
 }
 
 fn warn_on_missing_token_and_locale(token: &str) {
@@ -277,23 +305,17 @@ pub async fn run_issue(
     let skin = MadSkin::default();
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
-    if let Err(e) = skin.write_text_on(&mut handle, &format!("**{}**", issue.title)) {
-        if matches!(e, termimad::Error::IO(ref io) if is_broken_pipe_kind(io.kind())) {
-            return Ok(());
-        }
-        error!("error printing issue title: {e}");
+    if handle_print_result(
+        skin.write_text_on(&mut handle, &format!("**{}**", issue.title)),
+        "issue title",
+    ) {
+        return Ok(());
     }
-    if let Err(e) = skin.write_text_on(&mut handle, &issue.body) {
-        if matches!(e, termimad::Error::IO(ref io) if is_broken_pipe_kind(io.kind())) {
-            return Ok(());
-        }
-        error!("error printing issue body: {e}");
+    if handle_print_result(skin.write_text_on(&mut handle, &issue.body), "issue body") {
+        return Ok(());
     }
-    if let Err(e) = writeln!(handle) {
-        if is_broken_pipe_kind(e.kind()) {
-            return Ok(());
-        }
-        error!("error printing issue footer: {e}");
+    if handle_print_result(writeln!(handle), "issue footer") {
+        return Ok(());
     }
     Ok(())
 }
