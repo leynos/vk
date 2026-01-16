@@ -50,12 +50,16 @@ impl GlobalArgs {
 #[command(name = "pr")]
 #[ortho_config(prefix = "VK")]
 pub struct PrArgs {
-    /// Pull request URL or number.
-    /// Passing a `#discussion_r<ID>` fragment shows only that discussion thread; file
-    /// filters are ignored and unresolved filtering still applies.
-    #[arg(required = true)]
-    // Clap marks the argument as required so parsing yields `Some(value)`. The
-    // `Option` allows `PrArgs::default()` and config merging to leave it unset.
+    /// Pull request URL, number, or discussion fragment.
+    ///
+    /// When omitted, auto-detects the PR from the current Git branch.
+    /// A bare `#discussion_r<ID>` fragment shows only that discussion thread
+    /// (auto-detecting the PR). File filters are ignored when a fragment is
+    /// provided; unresolved filtering still applies.
+    #[arg(required = false)]
+    // The argument is optional; when absent the PR is auto-detected from the
+    // current branch. The `Option` allows `PrArgs::default()` and config
+    // merging to leave it unset.
     pub reference: Option<String>,
     /// Only show comments for these files
     #[arg(value_name = "FILE", num_args = 0..)]

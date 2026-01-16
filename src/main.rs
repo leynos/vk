@@ -11,6 +11,7 @@ mod cli_args;
 mod commands;
 // configuration helpers have been folded into `ortho_config`
 mod auth;
+mod branch_pr;
 mod diff;
 mod graphql_queries;
 mod html;
@@ -53,10 +54,12 @@ use commands::{run_issue, run_pr, run_resolve};
 enum Commands {
     /// Show unresolved pull request comments
     ///
-    /// Passing a `#discussion_r<ID>` fragment prints only that discussion
-    /// thread starting from the referenced comment. When a fragment is
-    /// provided, both resolved and unresolved threads are searched.
-    /// Without a fragment, only unresolved threads are shown.
+    /// When invoked without arguments, detects the PR associated with the
+    /// current Git branch. Passing a `#discussion_r<ID>` fragment shows only
+    /// that discussion thread, auto-detecting the PR when no number or URL
+    /// is provided. When a fragment is given, both resolved and unresolved
+    /// threads are searched. Without a fragment, only unresolved threads are
+    /// shown.
     Pr(PrArgs),
     /// Read a GitHub issue (todo)
     Issue(IssueArgs),
@@ -117,6 +120,8 @@ pub enum VkError {
     EmptyCommentPath { thread_id: Box<str>, index: usize },
     #[error("comment {comment_id} not found")]
     CommentNotFound { comment_id: u64 },
+    #[error("no pull request found for branch '{branch}'")]
+    NoPrForBranch { branch: Box<str> },
     #[error("bad response: {0}")]
     BadResponse(Box<str>),
     #[error("empty GraphQL response (status {status}) for {operation}: {snippet}")]

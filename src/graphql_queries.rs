@@ -60,3 +60,13 @@ pub const ISSUE_QUERY: &str = r"
       }
     }
 ";
+
+pub const PR_FOR_BRANCH_QUERY: &str = r"
+    query($owner: String!, $name: String!, $headRef: String!) {
+      repository(owner: $owner, name: $name) {
+        pullRequests(headRefName: $headRef, first: 1, states: [OPEN, MERGED]) {
+          nodes { number }
+        }
+      }
+    }
+";

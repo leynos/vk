@@ -4,10 +4,14 @@
 //! resolution, API client setup, and rendering output to the terminal.
 
 use crate::auth::resolve_github_token;
+use crate::branch_pr::fetch_pr_for_branch;
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs, ResolveArgs};
 use crate::environment;
 use crate::printer::{print_reviews, write_thread};
-use crate::ref_parser::{RepoInfo, parse_issue_reference, parse_pr_thread_reference};
+use crate::ref_parser::{
+    RepoInfo, current_branch, is_fragment_only, parse_fragment_only, parse_issue_reference,
+    parse_pr_thread_reference, parse_repo_str, repo_from_fetch_head,
+};
 use crate::review_threads::thread_for_comment;
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
 use crate::summary::{
@@ -161,22 +165,57 @@ fn print_threads_block(skin: &MadSkin, threads: Vec<ReviewThread>) -> bool {
     false
 }
 
+/// Resolve the PR reference, detecting from branch when necessary.
+///
+/// Handles three cases:
+/// 1. No reference: detect PR from current branch
+/// 2. Fragment only (`#discussion_r<ID>`): detect PR from branch, extract comment ID
+/// 3. Full reference: use existing parsing
+async fn resolve_pr_reference(
+    reference: Option<&str>,
+    default_repo: Option<&str>,
+    client: &GraphQLClient,
+) -> Result<(RepoInfo, u64, Option<u64>), VkError> {
+    match reference {
+        None => {
+            let branch = current_branch().ok_or(VkError::InvalidRef)?;
+            let repo = default_repo
+                .and_then(parse_repo_str)
+                .or_else(repo_from_fetch_head)
+                .ok_or(VkError::RepoNotFound)?;
+            let number = fetch_pr_for_branch(client, &repo, &branch).await?;
+            Ok((repo, number, None))
+        }
+        Some(input) if is_fragment_only(input) => {
+            let comment_id = parse_fragment_only(input)?;
+            let branch = current_branch().ok_or(VkError::InvalidRef)?;
+            let repo = default_repo
+                .and_then(parse_repo_str)
+                .or_else(repo_from_fetch_head)
+                .ok_or(VkError::RepoNotFound)?;
+            let number = fetch_pr_for_branch(client, &repo, &branch).await?;
+            Ok((repo, number, Some(comment_id)))
+        }
+        Some(input) => parse_pr_thread_reference(input, default_repo),
+    }
+}
+
 /// Prepare PR context, validate environment and print the start banner.
 ///
 /// Returns `Ok(None)` when standard output is closed before printing.
-fn setup_pr_output(
+async fn setup_pr_output(
     args: &PrArgs,
     global: &GlobalArgs,
     cli_token: Option<&str>,
 ) -> Result<Option<PrContext>, VkError> {
-    let reference = args.reference.as_deref().ok_or(VkError::InvalidRef)?;
-    let (repo, number, comment) = parse_pr_thread_reference(reference, global.repo.as_deref())?;
     let token = resolve_github_token(cli_token, global.github_token.as_deref());
     warn_on_missing_token_and_locale(&token);
     if handle_banner(print_start_banner, "start") {
         return Ok(None);
     }
     let client = build_graphql_client(&token, global.transcript.as_ref())?;
+    let (repo, number, comment) =
+        resolve_pr_reference(args.reference.as_deref(), global.repo.as_deref(), &client).await?;
     Ok(Some(PrContext {
         repo,
         number,
@@ -252,7 +291,7 @@ pub async fn run_pr(
         number,
         comment_id: comment,
         client,
-    }) = setup_pr_output(&args, global, cli_token)?
+    }) = setup_pr_output(&args, global, cli_token).await?
     else {
         return Ok(());
     };

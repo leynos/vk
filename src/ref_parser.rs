@@ -35,6 +35,26 @@ fn strip_git_suffix(name: &str) -> &str {
     name.strip_suffix(".git").unwrap_or(name)
 }
 
+/// Extract the current branch name from `.git/HEAD`.
+///
+/// Returns `None` if the file cannot be read or does not contain a symbolic
+/// ref (e.g., when in detached HEAD state).
+///
+/// # Examples
+///
+/// ```ignore
+/// // When .git/HEAD contains "ref: refs/heads/feature-branch"
+/// assert_eq!(current_branch(), Some("feature-branch".to_string()));
+/// ```
+pub fn current_branch() -> Option<String> {
+    let path = Path::new(".git/HEAD");
+    let content = fs::read_to_string(path).ok()?;
+    content
+        .trim()
+        .strip_prefix("ref: refs/heads/")
+        .map(str::to_string)
+}
+
 fn parse_github_url(
     input: &str,
     resource: ResourceType,
@@ -67,7 +87,20 @@ fn parse_github_url(
     Some(Ok((repo, number)))
 }
 
-fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
+/// Parse a repository string into owner and name components.
+///
+/// Accepts GitHub URLs (`github.com[/:]owner/repo[.git]`) or short format
+/// (`owner/repo`).
+///
+/// # Examples
+///
+/// ```
+/// # use vk::ref_parser::parse_repo_str;
+/// let repo = parse_repo_str("owner/repo").unwrap();
+/// assert_eq!(repo.owner, "owner");
+/// assert_eq!(repo.name, "repo");
+/// ```
+pub fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
     if let Some(caps) = GITHUB_RE.captures(repo) {
         let owner = caps.name("owner")?.as_str().to_owned();
         let name = strip_git_suffix(caps.name("repo")?.as_str()).to_owned();
@@ -85,7 +118,11 @@ fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
     }
 }
 
-fn repo_from_fetch_head() -> Option<RepoInfo> {
+/// Extract repository information from `.git/FETCH_HEAD`.
+///
+/// Parses the first matching GitHub URL from the `FETCH_HEAD` file, which is
+/// written after `git fetch` operations.
+pub fn repo_from_fetch_head() -> Option<RepoInfo> {
     let path = Path::new(".git/FETCH_HEAD");
     let content = fs::read_to_string(path).ok()?;
     content.lines().find_map(parse_repo_str)
@@ -160,6 +197,45 @@ pub fn parse_pr_thread_reference(
     };
     let (repo, number) = parse_pr_reference(base, default_repo)?;
     Ok((repo, number, comment))
+}
+
+/// Check if input is a bare discussion fragment (e.g., `#discussion_r123`).
+///
+/// Returns `true` when the input starts with `#discussion_r`, indicating a
+/// fragment-only reference that requires PR auto-detection.
+///
+/// # Examples
+///
+/// ```
+/// # use vk::ref_parser::is_fragment_only;
+/// assert!(is_fragment_only("#discussion_r123"));
+/// assert!(!is_fragment_only("42#discussion_r123"));
+/// assert!(!is_fragment_only("https://github.com/o/r/pull/1#discussion_r123"));
+/// ```
+pub fn is_fragment_only(input: &str) -> bool {
+    input.starts_with("#discussion_r")
+}
+
+/// Extract the comment ID from a fragment-only input.
+///
+/// # Examples
+///
+/// ```
+/// # use vk::ref_parser::parse_fragment_only;
+/// assert_eq!(parse_fragment_only("#discussion_r123").unwrap(), 123);
+/// ```
+///
+/// # Errors
+///
+/// Returns [`VkError::InvalidRef`] if the fragment is malformed or the ID is
+/// not a valid number.
+pub fn parse_fragment_only(input: &str) -> Result<u64, VkError> {
+    const FRAG: &str = "#discussion_r";
+    let id_str = input.strip_prefix(FRAG).ok_or(VkError::InvalidRef)?;
+    if id_str.is_empty() {
+        return Err(VkError::InvalidRef);
+    }
+    id_str.parse().map_err(|_| VkError::InvalidRef)
 }
 
 #[cfg(test)]
@@ -292,5 +368,57 @@ mod tests {
     fn parse_pr_thread_reference_rejects_bad_fragment(#[case] input: &str) {
         let err = parse_pr_thread_reference(input, None).expect_err("invalid ref");
         assert!(matches!(err, VkError::InvalidRef));
+    }
+
+    #[test]
+    fn current_branch_parses_symbolic_ref() {
+        let dir = tempdir().expect("tempdir");
+        let git_dir = dir.path().join(".git");
+        fs::create_dir(&git_dir).expect("create git dir");
+        fs::write(git_dir.join("HEAD"), "ref: refs/heads/feature-branch\n").expect("write HEAD");
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("chdir temp");
+        let branch = current_branch().expect("branch from HEAD");
+        std::env::set_current_dir(cwd).expect("restore cwd");
+        assert_eq!(branch, "feature-branch");
+    }
+
+    #[test]
+    fn current_branch_returns_none_for_detached_head() {
+        let dir = tempdir().expect("tempdir");
+        let git_dir = dir.path().join(".git");
+        fs::create_dir(&git_dir).expect("create git dir");
+        fs::write(git_dir.join("HEAD"), "abc123def456\n").expect("write HEAD");
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("chdir temp");
+        let branch = current_branch();
+        std::env::set_current_dir(cwd).expect("restore cwd");
+        assert!(branch.is_none());
+    }
+
+    #[rstest]
+    #[case("#discussion_r123", true)]
+    #[case("#discussion_r1", true)]
+    #[case("42#discussion_r123", false)]
+    #[case("https://github.com/o/r/pull/1#discussion_r123", false)]
+    #[case("", false)]
+    #[case("#discussion_", false)]
+    fn is_fragment_only_detects_bare_fragments(#[case] input: &str, #[case] expected: bool) {
+        assert_eq!(is_fragment_only(input), expected);
+    }
+
+    #[test]
+    fn parse_fragment_only_extracts_comment_id() {
+        assert_eq!(parse_fragment_only("#discussion_r123").expect("parse"), 123);
+        assert_eq!(parse_fragment_only("#discussion_r1").expect("parse"), 1);
+    }
+
+    #[rstest]
+    #[case("#discussion_r")]
+    #[case("#discussion_rabc")]
+    #[case("42#discussion_r123")]
+    #[case("")]
+    fn parse_fragment_only_rejects_invalid_input(#[case] input: &str) {
+        assert!(parse_fragment_only(input).is_err());
     }
 }

@@ -18,9 +18,10 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::Duration;
+use tempfile::tempdir;
 mod utils;
 use hyper::{Response, StatusCode};
-use utils::start_mitm;
+use utils::{set_sequential_responder, start_mitm, vk_cmd};
 
 fn load_transcript(path: &str) -> Vec<String> {
     let data = fs::read_to_string(path).expect("read transcript");
@@ -212,5 +213,185 @@ async fn pr_exits_cleanly_on_broken_pipe() {
     .expect("command timed out")
     .expect("spawn blocking");
     assert!(status.success());
+    shutdown.shutdown().await;
+}
+
+#[tokio::test]
+async fn pr_auto_detects_from_branch() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+
+    let pr_lookup_body = serde_json::json!({
+        "data": {"repository": {"pullRequests": {
+            "nodes": [{"number": 42}]
+        }}}
+    })
+    .to_string();
+    let threads_body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
+    set_sequential_responder(&handler, vec![pr_lookup_body, threads_body, reviews_body]);
+
+    let dir = tempdir().expect("tempdir");
+    let git_dir = dir.path().join(".git");
+    fs::create_dir(&git_dir).expect("create git dir");
+    fs::write(git_dir.join("HEAD"), "ref: refs/heads/my-feature-branch\n").expect("write HEAD");
+    fs::write(
+        git_dir.join("FETCH_HEAD"),
+        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/owner/repo.git",
+    )
+    .expect("write FETCH_HEAD");
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            vk_cmd(addr)
+                .current_dir(dir.path())
+                .args(["pr"])
+                .assert()
+                .success()
+                .stdout(contains("No unresolved comments"));
+        }),
+    )
+    .await
+    .expect("command timed out")
+    .expect("spawn blocking");
+    shutdown.shutdown().await;
+}
+
+#[tokio::test]
+async fn pr_fragment_only_auto_detects_pr() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+
+    let pr_lookup_body = serde_json::json!({
+        "data": {"repository": {"pullRequests": {
+            "nodes": [{"number": 7}]
+        }}}
+    })
+    .to_string();
+    let threads_body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [{
+                "id": "t1",
+                "isResolved": false,
+                "isOutdated": false,
+                "comments": {
+                    "nodes": [{
+                        "body": "fragment comment",
+                        "diffHunk": "@@ -1 +1 @@\n-old\n+new\n",
+                        "originalPosition": null,
+                        "position": null,
+                        "path": "file.rs",
+                        "url": "https://github.com/o/r/pull/7#discussion_r99",
+                        "author": null
+                    }],
+                    "pageInfo": {"hasNextPage": false, "endCursor": null}
+                }
+            }],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
+    set_sequential_responder(&handler, vec![pr_lookup_body, threads_body, reviews_body]);
+
+    let dir = tempdir().expect("tempdir");
+    let git_dir = dir.path().join(".git");
+    fs::create_dir(&git_dir).expect("create git dir");
+    fs::write(git_dir.join("HEAD"), "ref: refs/heads/feature\n").expect("write HEAD");
+    fs::write(
+        git_dir.join("FETCH_HEAD"),
+        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/o/r.git",
+    )
+    .expect("write FETCH_HEAD");
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            vk_cmd(addr)
+                .current_dir(dir.path())
+                .args(["pr", "#discussion_r99"])
+                .assert()
+                .success()
+                .stdout(contains("fragment comment"));
+        }),
+    )
+    .await
+    .expect("command timed out")
+    .expect("spawn blocking");
+    shutdown.shutdown().await;
+}
+
+#[tokio::test]
+async fn pr_no_reference_fails_on_detached_head() {
+    let (addr, _handler, shutdown) = start_mitm().await.expect("start server");
+
+    let dir = tempdir().expect("tempdir");
+    let git_dir = dir.path().join(".git");
+    fs::create_dir(&git_dir).expect("create git dir");
+    fs::write(git_dir.join("HEAD"), "abc123def456\n").expect("write detached HEAD");
+    fs::write(
+        git_dir.join("FETCH_HEAD"),
+        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/owner/repo.git",
+    )
+    .expect("write FETCH_HEAD");
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            vk_cmd(addr)
+                .current_dir(dir.path())
+                .args(["pr"])
+                .assert()
+                .failure()
+                .stderr(contains("invalid reference"));
+        }),
+    )
+    .await
+    .expect("command timed out")
+    .expect("spawn blocking");
+    shutdown.shutdown().await;
+}
+
+#[tokio::test]
+async fn pr_no_reference_fails_when_no_pr_for_branch() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+
+    let pr_lookup_body = serde_json::json!({
+        "data": {"repository": {"pullRequests": {
+            "nodes": []
+        }}}
+    })
+    .to_string();
+    set_sequential_responder(&handler, vec![pr_lookup_body]);
+
+    let dir = tempdir().expect("tempdir");
+    let git_dir = dir.path().join(".git");
+    fs::create_dir(&git_dir).expect("create git dir");
+    fs::write(git_dir.join("HEAD"), "ref: refs/heads/orphan-branch\n").expect("write HEAD");
+    fs::write(
+        git_dir.join("FETCH_HEAD"),
+        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/owner/repo.git",
+    )
+    .expect("write FETCH_HEAD");
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            vk_cmd(addr)
+                .current_dir(dir.path())
+                .args(["pr"])
+                .assert()
+                .failure()
+                .stderr(contains("no pull request found for branch 'orphan-branch'"));
+        }),
+    )
+    .await
+    .expect("command timed out")
+    .expect("spawn blocking");
     shutdown.shutdown().await;
 }
