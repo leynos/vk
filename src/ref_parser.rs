@@ -241,8 +241,29 @@ pub fn parse_fragment_only(input: &str) -> Result<u64, VkError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::fs;
     use tempfile::tempdir;
+
+    /// Execute a test within a temporary directory containing a `.git/HEAD` file.
+    ///
+    /// Creates a temporary directory with a `.git` subdirectory and writes the
+    /// provided `head_content` to `.git/HEAD`. Changes to that directory,
+    /// executes the closure, then restores the original working directory.
+    fn with_git_head<F>(head_content: &str, test_fn: F)
+    where
+        F: FnOnce(),
+    {
+        let dir = tempdir().expect("tempdir");
+        let git_dir = dir.path().join(".git");
+        fs::create_dir(&git_dir).expect("create git dir");
+        fs::write(git_dir.join("HEAD"), head_content).expect("write HEAD");
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("chdir temp");
+        test_fn();
+        std::env::set_current_dir(cwd).expect("restore cwd");
+        drop(dir);
+    }
 
     #[test]
     fn parse_url() {
@@ -272,6 +293,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn repo_from_fetch_head_git_suffix() {
         let dir = tempdir().expect("tempdir");
         let git_dir = dir.path().join(".git");
@@ -371,29 +393,20 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn current_branch_parses_symbolic_ref() {
-        let dir = tempdir().expect("tempdir");
-        let git_dir = dir.path().join(".git");
-        fs::create_dir(&git_dir).expect("create git dir");
-        fs::write(git_dir.join("HEAD"), "ref: refs/heads/feature-branch\n").expect("write HEAD");
-        let cwd = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("chdir temp");
-        let branch = current_branch().expect("branch from HEAD");
-        std::env::set_current_dir(cwd).expect("restore cwd");
-        assert_eq!(branch, "feature-branch");
+        with_git_head("ref: refs/heads/feature-branch\n", || {
+            let branch = current_branch().expect("branch from HEAD");
+            assert_eq!(branch, "feature-branch");
+        });
     }
 
     #[test]
+    #[serial]
     fn current_branch_returns_none_for_detached_head() {
-        let dir = tempdir().expect("tempdir");
-        let git_dir = dir.path().join(".git");
-        fs::create_dir(&git_dir).expect("create git dir");
-        fs::write(git_dir.join("HEAD"), "abc123def456\n").expect("write HEAD");
-        let cwd = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("chdir temp");
-        let branch = current_branch();
-        std::env::set_current_dir(cwd).expect("restore cwd");
-        assert!(branch.is_none());
+        with_git_head("abc123def456\n", || {
+            assert!(current_branch().is_none());
+        });
     }
 
     #[rstest]
