@@ -221,6 +221,50 @@ sequenceDiagram
     end
 ```
 
+## PR Reference Resolution
+
+When `vk pr` is invoked, it determines the target pull request through a
+flexible resolution process. The following diagram illustrates the three
+supported input modes and their resolution paths.
+
+```mermaid
+flowchart TD
+    START[vk pr invoked] --> CHECK_REF{Reference<br/>provided?}
+
+    CHECK_REF -->|No| AUTO[Auto-detect from branch]
+    CHECK_REF -->|Yes| PARSE_REF{Parse reference}
+
+    AUTO --> GET_BRANCH[Get current branch<br/>from .git/HEAD]
+    GET_BRANCH --> BRANCH_OK{Branch<br/>found?}
+    BRANCH_OK -->|No| ERR_DETACHED[Error: detached HEAD]
+    BRANCH_OK -->|Yes| GET_REPO[Get repo from<br/>FETCH_HEAD or --repo]
+    GET_REPO --> REPO_OK{Repo<br/>found?}
+    REPO_OK -->|No| ERR_REPO[Error: repo not found]
+    REPO_OK -->|Yes| QUERY_PR[Query GitHub for PR<br/>matching branch]
+    QUERY_PR --> PR_FOUND{PR<br/>found?}
+    PR_FOUND -->|No| ERR_NO_PR[Error: no PR for branch]
+    PR_FOUND -->|Yes| FETCH_THREADS
+
+    PARSE_REF -->|"#discussion_r..."| FRAG_ONLY[Fragment-only reference]
+    PARSE_REF -->|"owner/repo#N" or URL| FULL_REF[Full reference]
+    PARSE_REF -->|"N"| NUMBER_ONLY[Number only]
+
+    FRAG_ONLY --> AUTO2[Auto-detect PR<br/>same as no-reference path]
+    AUTO2 --> FETCH_WITH_FRAG[Fetch threads<br/>filter by fragment]
+
+    FULL_REF --> EXTRACT[Extract owner, repo,<br/>number, fragment]
+    EXTRACT --> HAS_FRAG{Has<br/>fragment?}
+    HAS_FRAG -->|Yes| FETCH_WITH_FRAG
+    HAS_FRAG -->|No| FETCH_THREADS
+
+    NUMBER_ONLY --> NEED_REPO[Require --repo<br/>or auto-detect repo]
+    NEED_REPO --> FETCH_THREADS
+
+    FETCH_THREADS[Fetch review threads] --> DISPLAY[Display comments]
+    FETCH_WITH_FRAG --> FIND_THREAD[Find thread containing<br/>discussion comment]
+    FIND_THREAD --> DISPLAY
+```
+
 ## Configuration and features
 
 `vk` reads configuration files using `ortho_config`, which layers values from
