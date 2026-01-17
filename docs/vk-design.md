@@ -234,23 +234,30 @@ flowchart TD
     CHECK_REF -->|No| AUTO[Auto-detect from branch]
     CHECK_REF -->|Yes| PARSE_REF{Parse reference}
 
-    AUTO --> GET_BRANCH[Get current branch<br/>from .git/HEAD]
-    GET_BRANCH --> BRANCH_OK{Branch<br/>found?}
-    BRANCH_OK -->|No| ERR_DETACHED[Error: detached HEAD]
-    BRANCH_OK -->|Yes| GET_REPO[Get repo from<br/>FETCH_HEAD or --repo]
-    GET_REPO --> REPO_OK{Repo<br/>found?}
-    REPO_OK -->|No| ERR_REPO[Error: repo not found]
-    REPO_OK -->|Yes| QUERY_PR[Query GitHub for PR<br/>matching branch]
-    QUERY_PR --> PR_FOUND{PR<br/>found?}
-    PR_FOUND -->|No| ERR_NO_PR[Error: no PR for branch]
-    PR_FOUND -->|Yes| FETCH_THREADS
-
     PARSE_REF -->|"#discussion_r..."| FRAG_ONLY[Fragment-only reference]
     PARSE_REF -->|"owner/repo#N" or URL| FULL_REF[Full reference]
     PARSE_REF -->|"N"| NUMBER_ONLY[Number only]
 
-    FRAG_ONLY --> AUTO2[Auto-detect PR<br/>same as no-reference path]
-    AUTO2 --> FETCH_WITH_FRAG[Fetch threads<br/>filter by fragment]
+    AUTO --> SET_NO_FRAG[fragment = None]
+    FRAG_ONLY --> SET_FRAG[fragment = input]
+
+    subgraph branch_detect [Branch-based PR Detection]
+        GET_BRANCH[Get current branch<br/>from .git/HEAD]
+        GET_BRANCH --> BRANCH_OK{Branch<br/>found?}
+        BRANCH_OK -->|No| ERR_DETACHED[Error: detached HEAD]
+        BRANCH_OK -->|Yes| GET_REPO[Get repo from<br/>FETCH_HEAD or --repo]
+        GET_REPO --> REPO_OK{Repo<br/>found?}
+        REPO_OK -->|No| ERR_REPO[Error: repo not found]
+        REPO_OK -->|Yes| QUERY_PR[Query GitHub for PR<br/>matching branch]
+        QUERY_PR --> PR_FOUND{PR<br/>found?}
+        PR_FOUND -->|No| ERR_NO_PR[Error: no PR for branch]
+    end
+
+    SET_NO_FRAG --> GET_BRANCH
+    SET_FRAG --> GET_BRANCH
+
+    PR_FOUND -->|"Yes, fragment present"| FETCH_WITH_FRAG
+    PR_FOUND -->|"Yes, no fragment"| FETCH_THREADS
 
     FULL_REF --> EXTRACT[Extract owner, repo,<br/>number, fragment]
     EXTRACT --> HAS_FRAG{Has<br/>fragment?}
@@ -261,7 +268,7 @@ flowchart TD
     NEED_REPO --> FETCH_THREADS
 
     FETCH_THREADS[Fetch review threads] --> DISPLAY[Display comments]
-    FETCH_WITH_FRAG --> FIND_THREAD[Find thread containing<br/>discussion comment]
+    FETCH_WITH_FRAG[Fetch threads<br/>filter by fragment] --> FIND_THREAD[Find thread containing<br/>discussion comment]
     FIND_THREAD --> DISPLAY
 ```
 
