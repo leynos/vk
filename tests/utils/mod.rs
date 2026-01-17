@@ -236,9 +236,9 @@ pub fn set_sequential_responder_with_assert<F>(
     let assert_fn = Arc::new(assert_fn);
     *handler.lock().expect("lock handler") = Box::new(move |req: &Request<Bytes>| {
         let body_bytes = req.body();
-        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(body_bytes) {
-            assert_fn(&json);
-        }
+        let json = serde_json::from_slice::<serde_json::Value>(body_bytes)
+            .expect("invalid JSON request body");
+        assert_fn(&json);
         let body = responses_clone
             .lock()
             .expect("lock responses")

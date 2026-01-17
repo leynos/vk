@@ -74,26 +74,89 @@ fn handle_banner_logs_and_returns_false_on_other_errors() {
 
 mod resolve_branch_and_repo_tests {
     use super::super::resolve_branch_and_repo;
-    use crate::VkError;
+    use rstest::{fixture, rstest};
+    use serial_test::serial;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use tempfile::{TempDir, tempdir};
 
-    #[test]
-    fn returns_repo_from_default_repo_when_provided() {
-        // This test exercises the happy path when default_repo is provided
-        // but we're not in a git repo (no current_branch), so it should fail
-        // with DetachedHead since we can't get the branch
-        let result = resolve_branch_and_repo(Some("owner/repo"));
-        // In CI/test environment without a real git repo context, this returns
-        // DetachedHead (no .git/HEAD readable) or succeeds if run from repo root
-        match result {
-            Ok((repo, _branch)) => {
-                // If it succeeds (we're in a real git repo), verify the repo
-                assert_eq!(repo.owner, "owner");
-                assert_eq!(repo.name, "repo");
+    /// A temporary Git repository directory for testing `resolve_branch_and_repo`.
+    struct GitRepoFixture {
+        _dir: TempDir,
+        original_cwd: PathBuf,
+    }
+
+    impl GitRepoFixture {
+        /// Create a new fixture with a git repository on the specified branch
+        /// and with `FETCH_HEAD` containing the specified repo URL.
+        fn with_branch_and_fetch_head(branch: &str, fetch_head_content: &str) -> Self {
+            let dir = tempdir().expect("tempdir");
+            let original_cwd = std::env::current_dir().expect("cwd");
+
+            // Initialize a real git repository so git rev-parse works
+            // Use -c init.defaultBranch=main for compatibility with Git < 2.28
+            let status = Command::new("git")
+                .args(["-c", "init.defaultBranch=main", "init"])
+                .current_dir(dir.path())
+                .output()
+                .expect("git init");
+            assert!(status.status.success(), "git init failed");
+
+            // Use git symbolic-ref to set HEAD to desired branch
+            let status = Command::new("git")
+                .args(["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])
+                .current_dir(dir.path())
+                .output()
+                .expect("git symbolic-ref");
+            assert!(status.status.success(), "git symbolic-ref failed");
+
+            // Write FETCH_HEAD
+            let git_dir = dir.path().join(".git");
+            fs::write(git_dir.join("FETCH_HEAD"), fetch_head_content).expect("write FETCH_HEAD");
+
+            std::env::set_current_dir(dir.path()).expect("chdir temp");
+            Self {
+                _dir: dir,
+                original_cwd,
             }
-            Err(VkError::DetachedHead) => {
-                // Expected when not in a git repo context
-            }
-            Err(e) => panic!("unexpected error: {e:?}"),
         }
+    }
+
+    impl Drop for GitRepoFixture {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original_cwd);
+        }
+    }
+
+    /// rstest fixture for a repository on feature-branch with `FETCH_HEAD`.
+    #[fixture]
+    fn git_repo_on_feature_branch() -> GitRepoFixture {
+        GitRepoFixture::with_branch_and_fetch_head(
+            "feature-branch",
+            "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/fallback/repo.git",
+        )
+    }
+
+    #[rstest]
+    #[serial]
+    fn returns_repo_from_default_repo_when_provided(git_repo_on_feature_branch: GitRepoFixture) {
+        let _fixture = git_repo_on_feature_branch;
+        let result = resolve_branch_and_repo(Some("owner/repo"));
+        let (repo, branch) = result.expect("should resolve successfully");
+        assert_eq!(repo.owner, "owner", "should use provided repo owner");
+        assert_eq!(repo.name, "repo", "should use provided repo name");
+        assert_eq!(branch, "feature-branch", "should detect branch from git");
+    }
+
+    #[rstest]
+    #[serial]
+    fn falls_back_to_fetch_head_when_no_default_repo(git_repo_on_feature_branch: GitRepoFixture) {
+        let _fixture = git_repo_on_feature_branch;
+        let result = resolve_branch_and_repo(None);
+        let (repo, branch) = result.expect("should resolve successfully");
+        assert_eq!(repo.owner, "fallback", "should use FETCH_HEAD repo owner");
+        assert_eq!(repo.name, "repo", "should use FETCH_HEAD repo name");
+        assert_eq!(branch, "feature-branch", "should detect branch from git");
     }
 }

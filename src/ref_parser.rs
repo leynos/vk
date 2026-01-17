@@ -1,11 +1,11 @@
 //! Parse pull request and issue references into repository and number pairs, optionally including discussion comment IDs.
 
-use crate::VkError;
+use std::{fs, process::Command, sync::LazyLock};
+
 use regex::Regex;
-use std::process::Command;
-use std::sync::LazyLock;
-use std::fs;
 use url::Url;
+
+use crate::VkError;
 
 /// Fragment prefix for discussion comment IDs in GitHub URLs.
 const DISCUSSION_FRAGMENT: &str = "#discussion_r";
@@ -39,46 +39,32 @@ fn strip_git_suffix(name: &str) -> &str {
     name.strip_suffix(".git").unwrap_or(name)
 }
 
-/// Locate the Git repository root directory.
+/// Extract the current branch name using `git symbolic-ref`.
 ///
-/// Uses `git rev-parse --show-toplevel` to find the root, which works from
-/// any subdirectory within the repository.
+/// Uses `git symbolic-ref --short HEAD` to resolve the branch name, which
+/// works correctly with worktrees, linked gitdirs, and unborn branches where
+/// `.git` may be a file rather than a directory.
 ///
-/// Returns `None` if not inside a Git repository or if the command fails.
-fn git_root() -> Option<std::path::PathBuf> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let path = String::from_utf8(output.stdout).ok()?;
-    Some(std::path::PathBuf::from(path.trim()))
-}
-
-/// Extract the current branch name from `.git/HEAD`.
-///
-/// Resolves the Git repository root first, allowing this function to work
-/// from any subdirectory within the repository.
-///
-/// Returns `None` if the file cannot be read or does not contain a symbolic
-/// ref (e.g., when in detached HEAD state).
+/// Returns `None` if not inside a Git repository, in detached HEAD state,
+/// or if the command fails.
 ///
 /// # Examples
 ///
 /// ```ignore
-/// // When .git/HEAD contains "ref: refs/heads/feature-branch"
+/// // When on branch "feature-branch"
 /// assert_eq!(current_branch(), Some("feature-branch".to_string()));
 /// ```
 pub fn current_branch() -> Option<String> {
-    let root = git_root()?;
-    let path = root.join(".git/HEAD");
-    let content = fs::read_to_string(path).ok()?;
-    content
-        .trim()
-        .strip_prefix("ref: refs/heads/")
-        .map(str::to_string)
+    let output = Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        // Fails on detached HEAD or outside a git repo
+        return None;
+    }
+    let branch = String::from_utf8(output.stdout).ok()?;
+    Some(branch.trim().to_string())
 }
 
 fn parse_github_url(
@@ -144,17 +130,24 @@ pub fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
     }
 }
 
-/// Extract repository information from `.git/FETCH_HEAD`.
+/// Extract repository information from `FETCH_HEAD`.
 ///
-/// Resolves the Git repository root first, allowing this function to work
-/// from any subdirectory within the repository.
+/// Uses `git rev-parse --git-path FETCH_HEAD` to resolve the actual path to
+/// the `FETCH_HEAD` file, which works correctly with worktrees and linked
+/// gitdirs where `.git` may be a file rather than a directory.
 ///
 /// Parses the first matching GitHub URL from the `FETCH_HEAD` file, which is
 /// written after `git fetch` operations.
 pub fn repo_from_fetch_head() -> Option<RepoInfo> {
-    let root = git_root()?;
-    let path = root.join(".git/FETCH_HEAD");
-    let content = fs::read_to_string(path).ok()?;
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-path", "FETCH_HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?;
+    let content = fs::read_to_string(path.trim()).ok()?;
     content.lines().find_map(parse_repo_str)
 }
 
@@ -288,25 +281,32 @@ mod tests {
     }
 
     impl GitRepoFixture {
-        /// Create a new fixture by initializing a real git repository and then
-        /// overwriting the HEAD file with the specified content.
-        fn with_head(head_content: &str) -> Self {
+        /// Create a fixture with a symbolic ref to a branch.
+        ///
+        /// Initializes a git repository and uses `git symbolic-ref` to set HEAD
+        /// to point to the specified branch without requiring a commit.
+        fn on_branch(branch: &str) -> Self {
             use std::process::Command;
 
             let dir = tempdir().expect("tempdir");
             let original_cwd = std::env::current_dir().expect("cwd");
 
-            // Initialize a real git repository so git rev-parse works
+            // Initialize a real git repository
+            // Use -c init.defaultBranch=main for compatibility with Git < 2.28
             let status = Command::new("git")
-                .args(["init", "--initial-branch=main"])
+                .args(["-c", "init.defaultBranch=main", "init"])
                 .current_dir(dir.path())
                 .output()
                 .expect("git init");
             assert!(status.status.success(), "git init failed");
 
-            // Overwrite HEAD with our desired content
-            let git_dir = dir.path().join(".git");
-            fs::write(git_dir.join("HEAD"), head_content).expect("write HEAD");
+            // Use git symbolic-ref to set HEAD to desired branch
+            let status = Command::new("git")
+                .args(["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])
+                .current_dir(dir.path())
+                .output()
+                .expect("git symbolic-ref");
+            assert!(status.status.success(), "git symbolic-ref failed");
 
             std::env::set_current_dir(dir.path()).expect("chdir temp");
             Self {
@@ -315,14 +315,59 @@ mod tests {
             }
         }
 
-        /// Create a fixture with a symbolic ref to a branch.
-        fn on_branch(branch: &str) -> Self {
-            Self::with_head(&format!("ref: refs/heads/{branch}\n"))
-        }
-
         /// Create a fixture with a detached HEAD.
-        fn detached(commit_sha: &str) -> Self {
-            Self::with_head(&format!("{commit_sha}\n"))
+        ///
+        /// Initializes a git repository, creates an initial commit, then
+        /// detaches HEAD to that commit.
+        fn detached(_commit_sha: &str) -> Self {
+            use std::process::Command;
+
+            let dir = tempdir().expect("tempdir");
+            let original_cwd = std::env::current_dir().expect("cwd");
+
+            // Initialize a real git repository
+            let status = Command::new("git")
+                .args(["-c", "init.defaultBranch=main", "init"])
+                .current_dir(dir.path())
+                .output()
+                .expect("git init");
+            assert!(status.status.success(), "git init failed");
+
+            // Configure user for commit
+            let status = Command::new("git")
+                .args(["config", "user.email", "test@test.com"])
+                .current_dir(dir.path())
+                .output()
+                .expect("git config email");
+            assert!(status.status.success(), "git config email failed");
+            let status = Command::new("git")
+                .args(["config", "user.name", "Test"])
+                .current_dir(dir.path())
+                .output()
+                .expect("git config name");
+            assert!(status.status.success(), "git config name failed");
+
+            // Create an empty commit so we have something to detach to
+            let status = Command::new("git")
+                .args(["commit", "--allow-empty", "-m", "initial"])
+                .current_dir(dir.path())
+                .output()
+                .expect("git commit");
+            assert!(status.status.success(), "git commit failed");
+
+            // Detach HEAD
+            let status = Command::new("git")
+                .args(["checkout", "--detach"])
+                .current_dir(dir.path())
+                .output()
+                .expect("git checkout --detach");
+            assert!(status.status.success(), "git checkout --detach failed");
+
+            std::env::set_current_dir(dir.path()).expect("chdir temp");
+            Self {
+                _dir: dir,
+                original_cwd,
+            }
         }
     }
 

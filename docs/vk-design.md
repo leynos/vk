@@ -272,9 +272,9 @@ flowchart TD
     FIND_THREAD --> DISPLAY
 ```
 
-The sequence diagram below shows the module interactions during branch-based
-PR auto-detection, illustrating how the CLI, parser, and API modules
-collaborate to resolve the PR context.
+The sequence diagram below shows the module interactions during branch-based PR
+auto-detection, illustrating how the CLI, parser, and API modules collaborate
+to resolve the PR context.
 
 ```mermaid
 sequenceDiagram

@@ -16,10 +16,11 @@ use predicates::str::contains;
 use serde_json::Value;
 use std::fs;
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
-use tempfile::tempdir;
+use tempfile::{TempDir, tempdir};
 mod utils;
 use hyper::{Response, StatusCode};
 use utils::{
@@ -27,21 +28,101 @@ use utils::{
     vk_cmd,
 };
 
-/// Initialize a git repository in the given directory and overwrite HEAD.
+/// Initialize a git repository in the given directory and set HEAD appropriately.
+///
+/// Uses `git -c init.defaultBranch=main init` for compatibility with Git
+/// versions older than 2.28 which don't support `--initial-branch`.
+///
+/// The `head_content` parameter can be:
+/// - `"ref: refs/heads/<branch>\n"` to set HEAD to a branch
+/// - A commit SHA (anything else) to create a detached HEAD state
 fn init_git_repo(dir: &std::path::Path, head_content: &str) {
     use std::process::Command as StdCommand;
 
     // Initialize a real git repository so git rev-parse works
+    // Use -c init.defaultBranch=main for compatibility with Git < 2.28
     let status = StdCommand::new("git")
-        .args(["init", "--initial-branch=main"])
+        .args(["-c", "init.defaultBranch=main", "init"])
         .current_dir(dir)
         .output()
         .expect("git init");
     assert!(status.status.success(), "git init failed");
 
-    // Overwrite HEAD with our desired content
-    let git_dir = dir.join(".git");
-    fs::write(git_dir.join("HEAD"), head_content).expect("write HEAD");
+    // Check if head_content is a symbolic ref or a detached state
+    let trimmed = head_content.trim();
+    if let Some(branch) = trimmed.strip_prefix("ref: refs/heads/") {
+        // Use git symbolic-ref to set HEAD to the desired branch
+        let status = StdCommand::new("git")
+            .args(["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])
+            .current_dir(dir)
+            .output()
+            .expect("git symbolic-ref");
+        assert!(status.status.success(), "git symbolic-ref failed");
+    } else {
+        // For detached HEAD, we need a commit to detach to
+        // Configure user for commit
+        let status = StdCommand::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(dir)
+            .output()
+            .expect("git config email");
+        assert!(status.status.success(), "git config email failed");
+        let status = StdCommand::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(dir)
+            .output()
+            .expect("git config name");
+        assert!(status.status.success(), "git config name failed");
+
+        // Create an empty commit
+        let status = StdCommand::new("git")
+            .args(["commit", "--allow-empty", "-m", "initial"])
+            .current_dir(dir)
+            .output()
+            .expect("git commit");
+        assert!(status.status.success(), "git commit failed");
+
+        // Detach HEAD
+        let status = StdCommand::new("git")
+            .args(["checkout", "--detach"])
+            .current_dir(dir)
+            .output()
+            .expect("git checkout --detach");
+        assert!(status.status.success(), "git checkout --detach failed");
+    }
+}
+
+/// A temporary Git repository with configurable `HEAD` and `FETCH_HEAD`.
+///
+/// This struct encapsulates the common setup pattern of creating a temp
+/// directory, initializing git, and writing `HEAD`/`FETCH_HEAD` files.
+struct GitRepoWithFetchHead {
+    dir: TempDir,
+}
+
+/// Default `FETCH_HEAD` content pointing to a GitHub repo.
+const DEFAULT_FETCH_HEAD: &str =
+    "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/owner/repo.git";
+
+impl GitRepoWithFetchHead {
+    /// Create a new git repository fixture with the given `HEAD` and `FETCH_HEAD` content.
+    fn new(head_content: &str, fetch_head_content: &str) -> Self {
+        let dir = tempdir().expect("tempdir");
+        init_git_repo(dir.path(), head_content);
+        let git_dir = dir.path().join(".git");
+        fs::write(git_dir.join("FETCH_HEAD"), fetch_head_content).expect("write FETCH_HEAD");
+        Self { dir }
+    }
+
+    /// Create a new git repository fixture with custom `HEAD` and default `FETCH_HEAD`.
+    fn with_head(head_content: &str) -> Self {
+        Self::new(head_content, DEFAULT_FETCH_HEAD)
+    }
+
+    /// Get the path to the temporary directory.
+    fn path(&self) -> &Path {
+        self.dir.path()
+    }
 }
 
 fn load_transcript(path: &str) -> Vec<String> {
@@ -286,20 +367,16 @@ async fn pr_auto_detects_from_branch() {
         },
     );
 
-    let dir = tempdir().expect("tempdir");
-    init_git_repo(dir.path(), "ref: refs/heads/my-feature-branch\n");
-    let git_dir = dir.path().join(".git");
-    fs::write(
-        git_dir.join("FETCH_HEAD"),
+    let repo = GitRepoWithFetchHead::new(
+        "ref: refs/heads/my-feature-branch\n",
         "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/owner/repo.git",
-    )
-    .expect("write FETCH_HEAD");
+    );
 
     tokio::time::timeout(
         Duration::from_secs(10),
         tokio::task::spawn_blocking(move || {
             vk_cmd(addr)
-                .current_dir(dir.path())
+                .current_dir(repo.path())
                 .args(["pr"])
                 .assert()
                 .success()
@@ -348,20 +425,16 @@ async fn pr_fragment_only_auto_detects_pr() {
     let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
     set_sequential_responder(&handler, vec![pr_lookup_body, threads_body, reviews_body]);
 
-    let dir = tempdir().expect("tempdir");
-    init_git_repo(dir.path(), "ref: refs/heads/feature\n");
-    let git_dir = dir.path().join(".git");
-    fs::write(
-        git_dir.join("FETCH_HEAD"),
+    let repo = GitRepoWithFetchHead::new(
+        "ref: refs/heads/feature\n",
         "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/o/r.git",
-    )
-    .expect("write FETCH_HEAD");
+    );
 
     tokio::time::timeout(
         Duration::from_secs(10),
         tokio::task::spawn_blocking(move || {
             vk_cmd(addr)
-                .current_dir(dir.path())
+                .current_dir(repo.path())
                 .args(["pr", "#discussion_r99"])
                 .assert()
                 .success()
@@ -378,21 +451,14 @@ async fn pr_fragment_only_auto_detects_pr() {
 async fn pr_no_reference_fails_on_detached_head() {
     let (addr, _handler, shutdown) = start_mitm().await.expect("start server");
 
-    let dir = tempdir().expect("tempdir");
     // Initialize git but set HEAD to a detached state (commit SHA)
-    init_git_repo(dir.path(), "abc123def456\n");
-    let git_dir = dir.path().join(".git");
-    fs::write(
-        git_dir.join("FETCH_HEAD"),
-        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/owner/repo.git",
-    )
-    .expect("write FETCH_HEAD");
+    let repo = GitRepoWithFetchHead::with_head("abc123def456\n");
 
     tokio::time::timeout(
         Duration::from_secs(10),
         tokio::task::spawn_blocking(move || {
             vk_cmd(addr)
-                .current_dir(dir.path())
+                .current_dir(repo.path())
                 .args(["pr"])
                 .assert()
                 .failure()
@@ -417,20 +483,13 @@ async fn pr_no_reference_fails_when_no_pr_for_branch() {
     .to_string();
     set_sequential_responder(&handler, vec![pr_lookup_body]);
 
-    let dir = tempdir().expect("tempdir");
-    init_git_repo(dir.path(), "ref: refs/heads/orphan-branch\n");
-    let git_dir = dir.path().join(".git");
-    fs::write(
-        git_dir.join("FETCH_HEAD"),
-        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/owner/repo.git",
-    )
-    .expect("write FETCH_HEAD");
+    let repo = GitRepoWithFetchHead::with_head("ref: refs/heads/orphan-branch\n");
 
     tokio::time::timeout(
         Duration::from_secs(10),
         tokio::task::spawn_blocking(move || {
             vk_cmd(addr)
-                .current_dir(dir.path())
+                .current_dir(repo.path())
                 .args(["pr"])
                 .assert()
                 .failure()
