@@ -107,6 +107,8 @@ pub enum VkError {
     },
     #[error("invalid reference")]
     InvalidRef,
+    #[error("cannot auto-detect PR: repository is in detached HEAD state")]
+    DetachedHead,
     #[error("GitHub token not set")]
     MissingAuth,
     #[error("pull request number out of range")]
@@ -309,6 +311,45 @@ mod tests {
             Commands::Pr(args) => {
                 assert_eq!(args.reference.as_deref(), Some("123"));
                 assert_eq!(args.files, ["src/lib.rs", "README.md"]);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+    #[test]
+    fn pr_subcommand_parses_without_reference() {
+        let cli = Cli::try_parse_from(["vk", "pr"]).expect("parse cli");
+        match cli.command {
+            Commands::Pr(args) => {
+                assert!(args.reference.is_none());
+                assert!(args.files.is_empty());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+    #[test]
+    fn pr_subcommand_parses_fragment_only() {
+        let cli = Cli::try_parse_from(["vk", "pr", "#discussion_r123"]).expect("parse cli");
+        match cli.command {
+            Commands::Pr(args) => {
+                assert_eq!(args.reference.as_deref(), Some("#discussion_r123"));
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+    #[test]
+    fn pr_subcommand_parses_url() {
+        let cli = Cli::try_parse_from([
+            "vk",
+            "pr",
+            "https://github.com/owner/repo/pull/42#discussion_r99",
+        ])
+        .expect("parse cli");
+        match cli.command {
+            Commands::Pr(args) => {
+                assert_eq!(
+                    args.reference.as_deref(),
+                    Some("https://github.com/owner/repo/pull/42#discussion_r99")
+                );
             }
             _ => panic!("wrong variant"),
         }

@@ -2,9 +2,13 @@
 
 use crate::VkError;
 use regex::Regex;
+use std::process::Command;
 use std::sync::LazyLock;
-use std::{fs, path::Path};
+use std::fs;
 use url::Url;
+
+/// Fragment prefix for discussion comment IDs in GitHub URLs.
+const DISCUSSION_FRAGMENT: &str = "#discussion_r";
 
 #[derive(Debug, Clone)]
 pub struct RepoInfo {
@@ -35,7 +39,28 @@ fn strip_git_suffix(name: &str) -> &str {
     name.strip_suffix(".git").unwrap_or(name)
 }
 
+/// Locate the Git repository root directory.
+///
+/// Uses `git rev-parse --show-toplevel` to find the root, which works from
+/// any subdirectory within the repository.
+///
+/// Returns `None` if not inside a Git repository or if the command fails.
+fn git_root() -> Option<std::path::PathBuf> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?;
+    Some(std::path::PathBuf::from(path.trim()))
+}
+
 /// Extract the current branch name from `.git/HEAD`.
+///
+/// Resolves the Git repository root first, allowing this function to work
+/// from any subdirectory within the repository.
 ///
 /// Returns `None` if the file cannot be read or does not contain a symbolic
 /// ref (e.g., when in detached HEAD state).
@@ -47,7 +72,8 @@ fn strip_git_suffix(name: &str) -> &str {
 /// assert_eq!(current_branch(), Some("feature-branch".to_string()));
 /// ```
 pub fn current_branch() -> Option<String> {
-    let path = Path::new(".git/HEAD");
+    let root = git_root()?;
+    let path = root.join(".git/HEAD");
     let content = fs::read_to_string(path).ok()?;
     content
         .trim()
@@ -96,7 +122,7 @@ fn parse_github_url(
 ///
 /// ```
 /// # use vk::ref_parser::parse_repo_str;
-/// let repo = parse_repo_str("owner/repo").unwrap();
+/// let repo = parse_repo_str("owner/repo").expect("valid owner/repo string");
 /// assert_eq!(repo.owner, "owner");
 /// assert_eq!(repo.name, "repo");
 /// ```
@@ -120,10 +146,14 @@ pub fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
 
 /// Extract repository information from `.git/FETCH_HEAD`.
 ///
+/// Resolves the Git repository root first, allowing this function to work
+/// from any subdirectory within the repository.
+///
 /// Parses the first matching GitHub URL from the `FETCH_HEAD` file, which is
 /// written after `git fetch` operations.
 pub fn repo_from_fetch_head() -> Option<RepoInfo> {
-    let path = Path::new(".git/FETCH_HEAD");
+    let root = git_root()?;
+    let path = root.join(".git/FETCH_HEAD");
     let content = fs::read_to_string(path).ok()?;
     content.lines().find_map(parse_repo_str)
 }
@@ -186,8 +216,7 @@ pub fn parse_pr_thread_reference(
     input: &str,
     default_repo: Option<&str>,
 ) -> Result<(RepoInfo, u64, Option<u64>), VkError> {
-    const FRAG: &str = "#discussion_r";
-    let (base, comment) = match input.split_once(FRAG) {
+    let (base, comment) = match input.split_once(DISCUSSION_FRAGMENT) {
         Some((base, id)) if !id.is_empty() => {
             let cid = id.parse().map_err(|_| VkError::InvalidRef)?;
             (base, Some(cid))
@@ -213,7 +242,7 @@ pub fn parse_pr_thread_reference(
 /// assert!(!is_fragment_only("https://github.com/o/r/pull/1#discussion_r123"));
 /// ```
 pub fn is_fragment_only(input: &str) -> bool {
-    input.starts_with("#discussion_r")
+    input.starts_with(DISCUSSION_FRAGMENT)
 }
 
 /// Extract the comment ID from a fragment-only input.
@@ -222,7 +251,7 @@ pub fn is_fragment_only(input: &str) -> bool {
 ///
 /// ```
 /// # use vk::ref_parser::parse_fragment_only;
-/// assert_eq!(parse_fragment_only("#discussion_r123").unwrap(), 123);
+/// assert_eq!(parse_fragment_only("#discussion_r123").expect("valid fragment"), 123);
 /// ```
 ///
 /// # Errors
@@ -230,8 +259,9 @@ pub fn is_fragment_only(input: &str) -> bool {
 /// Returns [`VkError::InvalidRef`] if the fragment is malformed or the ID is
 /// not a valid number.
 pub fn parse_fragment_only(input: &str) -> Result<u64, VkError> {
-    const FRAG: &str = "#discussion_r";
-    let id_str = input.strip_prefix(FRAG).ok_or(VkError::InvalidRef)?;
+    let id_str = input
+        .strip_prefix(DISCUSSION_FRAGMENT)
+        .ok_or(VkError::InvalidRef)?;
     if id_str.is_empty() {
         return Err(VkError::InvalidRef);
     }
@@ -241,28 +271,77 @@ pub fn parse_fragment_only(input: &str) -> Result<u64, VkError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::{fixture, rstest};
     use serial_test::serial;
     use std::fs;
-    use tempfile::tempdir;
+    use std::path::PathBuf;
+    use tempfile::{TempDir, tempdir};
 
-    /// Execute a test within a temporary directory containing a `.git/HEAD` file.
+    /// A temporary Git repository directory for testing.
     ///
-    /// Creates a temporary directory with a `.git` subdirectory and writes the
-    /// provided `head_content` to `.git/HEAD`. Changes to that directory,
-    /// executes the closure, then restores the original working directory.
-    fn with_git_head<F>(head_content: &str, test_fn: F)
-    where
-        F: FnOnce(),
-    {
-        let dir = tempdir().expect("tempdir");
-        let git_dir = dir.path().join(".git");
-        fs::create_dir(&git_dir).expect("create git dir");
-        fs::write(git_dir.join("HEAD"), head_content).expect("write HEAD");
-        let cwd = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("chdir temp");
-        test_fn();
-        std::env::set_current_dir(cwd).expect("restore cwd");
-        drop(dir);
+    /// This struct manages a temporary directory containing an initialized Git
+    /// repository and handles changing into that directory and restoring the
+    /// original working directory on drop.
+    struct GitRepoFixture {
+        _dir: TempDir,
+        original_cwd: PathBuf,
+    }
+
+    impl GitRepoFixture {
+        /// Create a new fixture by initializing a real git repository and then
+        /// overwriting the HEAD file with the specified content.
+        fn with_head(head_content: &str) -> Self {
+            use std::process::Command;
+
+            let dir = tempdir().expect("tempdir");
+            let original_cwd = std::env::current_dir().expect("cwd");
+
+            // Initialize a real git repository so git rev-parse works
+            let status = Command::new("git")
+                .args(["init", "--initial-branch=main"])
+                .current_dir(dir.path())
+                .output()
+                .expect("git init");
+            assert!(status.status.success(), "git init failed");
+
+            // Overwrite HEAD with our desired content
+            let git_dir = dir.path().join(".git");
+            fs::write(git_dir.join("HEAD"), head_content).expect("write HEAD");
+
+            std::env::set_current_dir(dir.path()).expect("chdir temp");
+            Self {
+                _dir: dir,
+                original_cwd,
+            }
+        }
+
+        /// Create a fixture with a symbolic ref to a branch.
+        fn on_branch(branch: &str) -> Self {
+            Self::with_head(&format!("ref: refs/heads/{branch}\n"))
+        }
+
+        /// Create a fixture with a detached HEAD.
+        fn detached(commit_sha: &str) -> Self {
+            Self::with_head(&format!("{commit_sha}\n"))
+        }
+    }
+
+    impl Drop for GitRepoFixture {
+        fn drop(&mut self) {
+            let _ = std::env::set_current_dir(&self.original_cwd);
+        }
+    }
+
+    /// rstest fixture for a repository on a feature branch.
+    #[fixture]
+    fn feature_branch_repo() -> GitRepoFixture {
+        GitRepoFixture::on_branch("feature-branch")
+    }
+
+    /// rstest fixture for a repository with detached HEAD.
+    #[fixture]
+    fn detached_head_repo() -> GitRepoFixture {
+        GitRepoFixture::detached("abc123def456")
     }
 
     #[test]
@@ -295,9 +374,19 @@ mod tests {
     #[test]
     #[serial]
     fn repo_from_fetch_head_git_suffix() {
+        use std::process::Command;
+
         let dir = tempdir().expect("tempdir");
+
+        // Initialize a real git repository so git rev-parse works
+        let status = Command::new("git")
+            .args(["init", "--initial-branch=main"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git init");
+        assert!(status.status.success(), "git init failed");
+
         let git_dir = dir.path().join(".git");
-        fs::create_dir(&git_dir).expect("create git dir");
         fs::write(
             git_dir.join("FETCH_HEAD"),
             "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/foo/bar.git",
@@ -382,8 +471,6 @@ mod tests {
         assert_eq!(comment, Some(99));
     }
 
-    use rstest::rstest;
-
     #[rstest]
     #[case("https://github.com/o/r/pull/1#discussion_r")]
     #[case("https://github.com/o/r/pull/1#discussion_rabc")]
@@ -392,21 +479,19 @@ mod tests {
         assert!(matches!(err, VkError::InvalidRef));
     }
 
-    #[test]
+    #[rstest]
     #[serial]
-    fn current_branch_parses_symbolic_ref() {
-        with_git_head("ref: refs/heads/feature-branch\n", || {
-            let branch = current_branch().expect("branch from HEAD");
-            assert_eq!(branch, "feature-branch");
-        });
+    fn current_branch_parses_symbolic_ref(feature_branch_repo: GitRepoFixture) {
+        let _repo = feature_branch_repo;
+        let branch = current_branch().expect("branch from HEAD");
+        assert_eq!(branch, "feature-branch");
     }
 
-    #[test]
+    #[rstest]
     #[serial]
-    fn current_branch_returns_none_for_detached_head() {
-        with_git_head("abc123def456\n", || {
-            assert!(current_branch().is_none());
-        });
+    fn current_branch_returns_none_for_detached_head(detached_head_repo: GitRepoFixture) {
+        let _repo = detached_head_repo;
+        assert!(current_branch().is_none());
     }
 
     #[rstest]

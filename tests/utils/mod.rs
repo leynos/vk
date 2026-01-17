@@ -215,4 +215,41 @@ pub fn set_sequential_responder(handler: &Handler, bodies: impl Into<Vec<String>
     });
 }
 
+/// Configure capture handler with request body assertions.
+///
+/// This handler uses `start_mitm_capture` to access request bodies and allows
+/// asserting GraphQL variables in requests for end-to-end wiring verification.
+///
+/// # Panics
+///
+/// Panics if a response body is missing or if building the response fails.
+#[allow(dead_code, reason = "helper used in some tests only")]
+pub fn set_sequential_responder_with_assert<F>(
+    handler: &CaptureHandler,
+    bodies: impl Into<Vec<String>>,
+    assert_fn: F,
+) where
+    F: Fn(&serde_json::Value) + Send + Sync + 'static,
+{
+    let responses = Arc::new(Mutex::new(VecDeque::from(bodies.into())));
+    let responses_clone = Arc::clone(&responses);
+    let assert_fn = Arc::new(assert_fn);
+    *handler.lock().expect("lock handler") = Box::new(move |req: &Request<Bytes>| {
+        let body_bytes = req.body();
+        if let Ok(json) = serde_json::from_slice::<serde_json::Value>(body_bytes) {
+            assert_fn(&json);
+        }
+        let body = responses_clone
+            .lock()
+            .expect("lock responses")
+            .pop_front()
+            .expect("response");
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/json")
+            .body(Full::from(body))
+            .expect("build response")
+    });
+}
+
 const _: fn(SocketAddr) -> Command = vk_cmd;

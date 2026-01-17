@@ -165,6 +165,19 @@ fn print_threads_block(skin: &MadSkin, threads: Vec<ReviewThread>) -> bool {
     false
 }
 
+/// Resolve the current branch and repository for PR auto-detection.
+///
+/// Returns `VkError::DetachedHead` when the repository is in detached HEAD
+/// state, or `VkError::RepoNotFound` when the repository cannot be determined.
+fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<(RepoInfo, String), VkError> {
+    let branch = current_branch().ok_or(VkError::DetachedHead)?;
+    let repo = default_repo
+        .and_then(parse_repo_str)
+        .or_else(repo_from_fetch_head)
+        .ok_or(VkError::RepoNotFound)?;
+    Ok((repo, branch))
+}
+
 /// Resolve the PR reference, detecting from branch when necessary.
 ///
 /// Handles three cases:
@@ -178,21 +191,13 @@ async fn resolve_pr_reference(
 ) -> Result<(RepoInfo, u64, Option<u64>), VkError> {
     match reference {
         None => {
-            let branch = current_branch().ok_or(VkError::InvalidRef)?;
-            let repo = default_repo
-                .and_then(parse_repo_str)
-                .or_else(repo_from_fetch_head)
-                .ok_or(VkError::RepoNotFound)?;
+            let (repo, branch) = resolve_branch_and_repo(default_repo)?;
             let number = fetch_pr_for_branch(client, &repo, &branch).await?;
             Ok((repo, number, None))
         }
         Some(input) if is_fragment_only(input) => {
             let comment_id = parse_fragment_only(input)?;
-            let branch = current_branch().ok_or(VkError::InvalidRef)?;
-            let repo = default_repo
-                .and_then(parse_repo_str)
-                .or_else(repo_from_fetch_head)
-                .ok_or(VkError::RepoNotFound)?;
+            let (repo, branch) = resolve_branch_and_repo(default_repo)?;
             let number = fetch_pr_for_branch(client, &repo, &branch).await?;
             Ok((repo, number, Some(comment_id)))
         }

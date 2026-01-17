@@ -17,11 +17,32 @@ use serde_json::Value;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::tempdir;
 mod utils;
 use hyper::{Response, StatusCode};
-use utils::{set_sequential_responder, start_mitm, vk_cmd};
+use utils::{
+    set_sequential_responder, set_sequential_responder_with_assert, start_mitm, start_mitm_capture,
+    vk_cmd,
+};
+
+/// Initialize a git repository in the given directory and overwrite HEAD.
+fn init_git_repo(dir: &std::path::Path, head_content: &str) {
+    use std::process::Command as StdCommand;
+
+    // Initialize a real git repository so git rev-parse works
+    let status = StdCommand::new("git")
+        .args(["init", "--initial-branch=main"])
+        .current_dir(dir)
+        .output()
+        .expect("git init");
+    assert!(status.status.success(), "git init failed");
+
+    // Overwrite HEAD with our desired content
+    let git_dir = dir.join(".git");
+    fs::write(git_dir.join("HEAD"), head_content).expect("write HEAD");
+}
 
 fn load_transcript(path: &str) -> Vec<String> {
     let data = fs::read_to_string(path).expect("read transcript");
@@ -218,7 +239,9 @@ async fn pr_exits_cleanly_on_broken_pipe() {
 
 #[tokio::test]
 async fn pr_auto_detects_from_branch() {
-    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
 
     let pr_lookup_body = serde_json::json!({
         "data": {"repository": {"pullRequests": {
@@ -234,12 +257,38 @@ async fn pr_auto_detects_from_branch() {
     })
     .to_string();
     let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
-    set_sequential_responder(&handler, vec![pr_lookup_body, threads_body, reviews_body]);
+
+    // Track which request we're on to only assert on the first (PR lookup) request
+    let request_count = Arc::new(AtomicUsize::new(0));
+    let request_count_clone = Arc::clone(&request_count);
+
+    set_sequential_responder_with_assert(
+        &handler,
+        vec![pr_lookup_body, threads_body, reviews_body],
+        move |body: &serde_json::Value| {
+            let count = request_count_clone.fetch_add(1, Ordering::SeqCst);
+            // Only assert on the first request (PR lookup by branch)
+            if count == 0 {
+                let vars = &body["variables"];
+                assert_eq!(
+                    vars["headRef"], "my-feature-branch",
+                    "GraphQL headRef should match branch from .git/HEAD"
+                );
+                assert_eq!(
+                    vars["owner"], "owner",
+                    "GraphQL owner should match repo from FETCH_HEAD"
+                );
+                assert_eq!(
+                    vars["name"], "repo",
+                    "GraphQL name should match repo from FETCH_HEAD"
+                );
+            }
+        },
+    );
 
     let dir = tempdir().expect("tempdir");
+    init_git_repo(dir.path(), "ref: refs/heads/my-feature-branch\n");
     let git_dir = dir.path().join(".git");
-    fs::create_dir(&git_dir).expect("create git dir");
-    fs::write(git_dir.join("HEAD"), "ref: refs/heads/my-feature-branch\n").expect("write HEAD");
     fs::write(
         git_dir.join("FETCH_HEAD"),
         "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/owner/repo.git",
@@ -300,9 +349,8 @@ async fn pr_fragment_only_auto_detects_pr() {
     set_sequential_responder(&handler, vec![pr_lookup_body, threads_body, reviews_body]);
 
     let dir = tempdir().expect("tempdir");
+    init_git_repo(dir.path(), "ref: refs/heads/feature\n");
     let git_dir = dir.path().join(".git");
-    fs::create_dir(&git_dir).expect("create git dir");
-    fs::write(git_dir.join("HEAD"), "ref: refs/heads/feature\n").expect("write HEAD");
     fs::write(
         git_dir.join("FETCH_HEAD"),
         "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/o/r.git",
@@ -331,9 +379,9 @@ async fn pr_no_reference_fails_on_detached_head() {
     let (addr, _handler, shutdown) = start_mitm().await.expect("start server");
 
     let dir = tempdir().expect("tempdir");
+    // Initialize git but set HEAD to a detached state (commit SHA)
+    init_git_repo(dir.path(), "abc123def456\n");
     let git_dir = dir.path().join(".git");
-    fs::create_dir(&git_dir).expect("create git dir");
-    fs::write(git_dir.join("HEAD"), "abc123def456\n").expect("write detached HEAD");
     fs::write(
         git_dir.join("FETCH_HEAD"),
         "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/owner/repo.git",
@@ -348,7 +396,7 @@ async fn pr_no_reference_fails_on_detached_head() {
                 .args(["pr"])
                 .assert()
                 .failure()
-                .stderr(contains("invalid reference"));
+                .stderr(contains("detached HEAD state"));
         }),
     )
     .await
@@ -370,9 +418,8 @@ async fn pr_no_reference_fails_when_no_pr_for_branch() {
     set_sequential_responder(&handler, vec![pr_lookup_body]);
 
     let dir = tempdir().expect("tempdir");
+    init_git_repo(dir.path(), "ref: refs/heads/orphan-branch\n");
     let git_dir = dir.path().join(".git");
-    fs::create_dir(&git_dir).expect("create git dir");
-    fs::write(git_dir.join("HEAD"), "ref: refs/heads/orphan-branch\n").expect("write HEAD");
     fs::write(
         git_dir.join("FETCH_HEAD"),
         "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/owner/repo.git",

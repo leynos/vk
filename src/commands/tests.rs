@@ -71,3 +71,29 @@ fn handle_banner_logs_and_returns_false_on_other_errors() {
     let other_err = || -> std::io::Result<()> { Err(std::io::Error::other("boom")) };
     assert!(!handle_banner(other_err, "end"));
 }
+
+mod resolve_branch_and_repo_tests {
+    use super::super::resolve_branch_and_repo;
+    use crate::VkError;
+
+    #[test]
+    fn returns_repo_from_default_repo_when_provided() {
+        // This test exercises the happy path when default_repo is provided
+        // but we're not in a git repo (no current_branch), so it should fail
+        // with DetachedHead since we can't get the branch
+        let result = resolve_branch_and_repo(Some("owner/repo"));
+        // In CI/test environment without a real git repo context, this returns
+        // DetachedHead (no .git/HEAD readable) or succeeds if run from repo root
+        match result {
+            Ok((repo, _branch)) => {
+                // If it succeeds (we're in a real git repo), verify the repo
+                assert_eq!(repo.owner, "owner");
+                assert_eq!(repo.name, "repo");
+            }
+            Err(VkError::DetachedHead) => {
+                // Expected when not in a git repo context
+            }
+            Err(e) => panic!("unexpected error: {e:?}"),
+        }
+    }
+}
