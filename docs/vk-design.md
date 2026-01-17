@@ -265,6 +265,36 @@ flowchart TD
     FIND_THREAD --> DISPLAY
 ```
 
+The sequence diagram below shows the module interactions during branch-based
+PR auto-detection, illustrating how the CLI, parser, and API modules
+collaborate to resolve the PR context.
+
+```mermaid
+sequenceDiagram
+    participant User as User/CLI
+    participant Cmd as commands.rs
+    participant RefParse as ref_parser.rs
+    participant BranchPR as branch_pr.rs
+    participant Git as Git Repo
+    participant API as GitHub GraphQL API
+
+    User->>Cmd: vk pr (no reference arg)
+    Cmd->>RefParse: resolve_pr_reference(None, ...)
+    RefParse->>Git: current_branch()
+    Git-->>RefParse: branch name
+    RefParse->>RefParse: resolve_branch_and_repo()
+    RefParse->>Git: git_root(), repo info
+    Git-->>RefParse: repo context
+    RefParse->>BranchPR: fetch_pr_for_branch(client, repo, branch)
+    BranchPR->>API: GraphQL PR_FOR_BRANCH_QUERY
+    API-->>BranchPR: PR nodes
+    BranchPR-->>RefParse: PR number
+    RefParse-->>Cmd: PrContext (repo, number)
+    Cmd->>API: Fetch PR details, reviews
+    API-->>Cmd: PR data
+    Cmd-->>User: Output PR information
+```
+
 ## Configuration and features
 
 `vk` reads configuration files using `ortho_config`, which layers values from
