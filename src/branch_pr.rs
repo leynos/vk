@@ -64,6 +64,29 @@ struct Owner {
 /// Returns [`VkError::NoPrForBranch`] if no PR exists for the branch (or no PR
 /// matches the specified head owner), or propagates API errors from the
 /// underlying request.
+///
+/// # Example
+///
+/// ```ignore
+/// use crate::{GraphQLClient, VkError};
+/// use crate::ref_parser::RepoInfo;
+/// use crate::branch_pr::fetch_pr_for_branch;
+///
+/// async fn demo(client: &GraphQLClient) -> Result<(), VkError> {
+///     let repo = RepoInfo {
+///         owner: "upstream".into(),
+///         name: "project".into(),
+///     };
+///     let pr_number = fetch_pr_for_branch(
+///         client,
+///         &repo,
+///         "feature-branch",
+///         Some("fork-owner"),
+///     ).await?;
+///     println!("Found PR #{pr_number}");
+///     Ok(())
+/// }
+/// ```
 pub async fn fetch_pr_for_branch(
     client: &GraphQLClient,
     repo: &RepoInfo,

@@ -294,19 +294,16 @@ pub fn parse_fragment_only(input: &str) -> Result<u64, VkError> {
 mod tests {
     use super::*;
     use rstest::{fixture, rstest};
-    use serial_test::serial;
     use std::fs;
-    use std::path::PathBuf;
     use tempfile::{TempDir, tempdir};
 
     /// A temporary Git repository directory for testing.
     ///
     /// This struct manages a temporary directory containing an initialized Git
-    /// repository and handles changing into that directory and restoring the
-    /// original working directory on drop.
+    /// repository. Tests should use the `path()` method to get the directory
+    /// path and pass it to commands via `current_dir()`.
     struct GitRepoFixture {
-        _dir: TempDir,
-        original_cwd: PathBuf,
+        dir: TempDir,
     }
 
     impl GitRepoFixture {
@@ -318,7 +315,6 @@ mod tests {
             use std::process::Command;
 
             let dir = tempdir().expect("tempdir");
-            let original_cwd = std::env::current_dir().expect("cwd");
 
             // Initialize a real git repository
             // Use -c init.defaultBranch=main for compatibility with Git < 2.28
@@ -337,11 +333,7 @@ mod tests {
                 .expect("git symbolic-ref");
             assert!(status.status.success(), "git symbolic-ref failed");
 
-            std::env::set_current_dir(dir.path()).expect("chdir temp");
-            Self {
-                _dir: dir,
-                original_cwd,
-            }
+            Self { dir }
         }
 
         /// Create a fixture with a detached HEAD.
@@ -352,7 +344,6 @@ mod tests {
             use std::process::Command;
 
             let dir = tempdir().expect("tempdir");
-            let original_cwd = std::env::current_dir().expect("cwd");
 
             // Initialize a real git repository
             let status = Command::new("git")
@@ -392,18 +383,70 @@ mod tests {
                 .expect("git checkout --detach");
             assert!(status.status.success(), "git checkout --detach failed");
 
-            std::env::set_current_dir(dir.path()).expect("chdir temp");
-            Self {
-                _dir: dir,
-                original_cwd,
-            }
+            Self { dir }
+        }
+
+        /// Get the path to the temporary git repository.
+        fn path(&self) -> &std::path::Path {
+            self.dir.path()
         }
     }
 
-    impl Drop for GitRepoFixture {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.original_cwd);
+    /// Get current branch for a specific directory (test helper).
+    ///
+    /// This is a test-only variant of `current_branch()` that operates on a
+    /// specific directory instead of the process's current working directory.
+    fn current_branch_in(dir: &std::path::Path) -> Option<String> {
+        use std::process::Command;
+        let output = Command::new("git")
+            .args(["symbolic-ref", "--short", "HEAD"])
+            .current_dir(dir)
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
         }
+        let branch = String::from_utf8(output.stdout).ok()?;
+        Some(branch.trim().to_string())
+    }
+
+    /// Get repo from `FETCH_HEAD` for a specific directory (test helper).
+    ///
+    /// This is a test-only variant of `repo_from_fetch_head()` that operates on
+    /// a specific directory instead of the process's current working directory.
+    fn repo_from_fetch_head_in(dir: &std::path::Path) -> Option<RepoInfo> {
+        use std::process::Command;
+        let output = Command::new("git")
+            .args(["rev-parse", "--git-path", "FETCH_HEAD"])
+            .current_dir(dir)
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let rel_path = String::from_utf8(output.stdout).ok()?;
+        // git rev-parse --git-path returns a path relative to the working directory
+        let full_path = dir.join(rel_path.trim());
+        let content = fs::read_to_string(full_path).ok()?;
+        content.lines().find_map(parse_repo_str)
+    }
+
+    /// Get repo from origin remote for a specific directory (test helper).
+    ///
+    /// This is a test-only variant of `repo_from_origin()` that operates on
+    /// a specific directory instead of the process's current working directory.
+    fn repo_from_origin_in(dir: &std::path::Path) -> Option<RepoInfo> {
+        use std::process::Command;
+        let output = Command::new("git")
+            .args(["remote", "get-url", "origin"])
+            .current_dir(dir)
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let url = String::from_utf8(output.stdout).ok()?;
+        parse_repo_str(url.trim())
     }
 
     /// rstest fixture for a repository on a feature branch.
@@ -446,15 +489,15 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn repo_from_fetch_head_git_suffix() {
         use std::process::Command;
 
         let dir = tempdir().expect("tempdir");
 
         // Initialize a real git repository so git rev-parse works
+        // Use -c init.defaultBranch=main for compatibility with Git < 2.28
         let status = Command::new("git")
-            .args(["init", "--initial-branch=main"])
+            .args(["-c", "init.defaultBranch=main", "init"])
             .current_dir(dir.path())
             .output()
             .expect("git init");
@@ -466,10 +509,9 @@ mod tests {
             "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/foo/bar.git",
         )
         .expect("write FETCH_HEAD");
-        let cwd = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("chdir temp");
-        let repo = repo_from_fetch_head().expect("repo from fetch head");
-        std::env::set_current_dir(cwd).expect("restore cwd");
+
+        // Use test helper that operates on a specific directory
+        let repo = repo_from_fetch_head_in(dir.path()).expect("repo from fetch head");
         assert_eq!(repo.owner, "foo");
         assert_eq!(repo.name, "bar");
     }
@@ -554,18 +596,14 @@ mod tests {
     }
 
     #[rstest]
-    #[serial]
     fn current_branch_parses_symbolic_ref(feature_branch_repo: GitRepoFixture) {
-        let _repo = feature_branch_repo;
-        let branch = current_branch().expect("branch from HEAD");
+        let branch = current_branch_in(feature_branch_repo.path()).expect("branch from HEAD");
         assert_eq!(branch, "feature-branch");
     }
 
     #[rstest]
-    #[serial]
     fn current_branch_returns_none_for_detached_head(detached_head_repo: GitRepoFixture) {
-        let _repo = detached_head_repo;
-        assert!(current_branch().is_none());
+        assert!(current_branch_in(detached_head_repo.path()).is_none());
     }
 
     #[rstest]
@@ -595,13 +633,13 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn repo_from_origin_extracts_owner_and_name() {
         use std::process::Command;
 
         let dir = tempdir().expect("tempdir");
 
         // Initialize a real git repository
+        // Use -c init.defaultBranch=main for compatibility with Git < 2.28
         let status = Command::new("git")
             .args(["-c", "init.defaultBranch=main", "init"])
             .current_dir(dir.path())
@@ -622,24 +660,20 @@ mod tests {
             .expect("git remote add");
         assert!(status.status.success(), "git remote add failed");
 
-        let cwd = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("chdir temp");
-
-        let repo = repo_from_origin().expect("repo from origin");
+        // Use test helper that operates on a specific directory
+        let repo = repo_from_origin_in(dir.path()).expect("repo from origin");
         assert_eq!(repo.owner, "fork-owner");
         assert_eq!(repo.name, "my-repo");
-
-        std::env::set_current_dir(cwd).expect("restore cwd");
     }
 
     #[test]
-    #[serial]
     fn repo_from_origin_returns_none_without_remote() {
         use std::process::Command;
 
         let dir = tempdir().expect("tempdir");
 
         // Initialize a real git repository without any remotes
+        // Use -c init.defaultBranch=main for compatibility with Git < 2.28
         let status = Command::new("git")
             .args(["-c", "init.defaultBranch=main", "init"])
             .current_dir(dir.path())
@@ -647,11 +681,7 @@ mod tests {
             .expect("git init");
         assert!(status.status.success(), "git init failed");
 
-        let cwd = std::env::current_dir().expect("cwd");
-        std::env::set_current_dir(dir.path()).expect("chdir temp");
-
-        assert!(repo_from_origin().is_none());
-
-        std::env::set_current_dir(cwd).expect("restore cwd");
+        // Use test helper that operates on a specific directory
+        assert!(repo_from_origin_in(dir.path()).is_none());
     }
 }

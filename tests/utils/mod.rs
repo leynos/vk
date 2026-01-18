@@ -223,7 +223,13 @@ pub fn set_sequential_responder(handler: &Handler, bodies: impl Into<Vec<String>
 /// # Panics
 ///
 /// Panics if a response body is missing or if building the response fails.
-#[allow(dead_code, reason = "helper used only in tests/e2e.rs")]
+// Note: Cannot use #[expect(dead_code)] here because this module is compiled
+// separately for each integration test crate. The function is used in e2e tests
+// but appears dead in other test crates (auth, cli, etc.).
+#[allow(
+    dead_code,
+    reason = "used only by e2e tests; appears dead in other test crates"
+)]
 pub fn set_sequential_responder_with_assert<F>(
     handler: &CaptureHandler,
     bodies: impl Into<Vec<String>>,
