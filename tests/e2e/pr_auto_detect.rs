@@ -205,35 +205,21 @@ async fn pr_fork_disambiguation_selects_correct_pr() {
     let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
 
     // Multiple PRs with the same branch name from different forks.
-    // The user's fork is "my-fork", and there's also PRs from "other-fork" and
-    // "another-fork" with the same branch name.
     let (pr_lookup_body, threads_body, reviews_body) = fork_disambiguation_responses(&[
         (100, "other-fork"),
         (200, "my-fork"),
         (300, "another-fork"),
     ]);
 
-    // Track request count to assert on the second request (threads query)
-    let request_count = Arc::new(AtomicUsize::new(0));
-    let request_count_clone = Arc::clone(&request_count);
-
+    // Verify PR #200 (from my-fork) is selected in the threads query
+    let (_counter, asserter) = assert_pr_number_on_threads_query(200);
     set_sequential_responder_with_assert(
         &handler,
         vec![pr_lookup_body, threads_body, reviews_body],
-        move |body: &serde_json::Value| {
-            let count = request_count_clone.fetch_add(1, Ordering::SeqCst);
-            // Assert on the second request (threads query) to verify PR #200 was selected
-            if count == 1 {
-                let vars = &body["variables"];
-                assert_eq!(
-                    vars["number"], 200,
-                    "Should select PR #200 from my-fork, not #100 or #300"
-                );
-            }
-        },
+        asserter,
     );
 
-    // Create a repo with origin pointing to my-fork
+    // Create repo with origin pointing to my-fork (the user's fork)
     let repo = GitRepoWithFetchHead::new(
         "ref: refs/heads/feature-branch\n",
         "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
@@ -243,7 +229,6 @@ async fn pr_fork_disambiguation_selects_correct_pr() {
     tokio::time::timeout(
         Duration::from_secs(10),
         tokio::task::spawn_blocking(move || {
-            // Use --repo to specify the upstream repository
             vk_cmd(addr)
                 .current_dir(repo.path())
                 .args(["--repo", "upstream/repo", "pr"])

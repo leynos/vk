@@ -136,12 +136,12 @@ pub fn format_comment_diff(comment: &ReviewComment) -> Result<String, std::fmt::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{fmt::Write, fs};
+    use std::fmt::Write;
 
     #[test]
     fn format_comment_diff_sample() {
-        let data = fs::read_to_string("tests/fixtures/review_comment.json").expect("fixture");
-        let comment: ReviewComment = serde_json::from_str(&data).expect("deserialize");
+        let data = include_str!("../tests/fixtures/review_comment.json");
+        let comment: ReviewComment = serde_json::from_str(data).expect("deserialize");
         let diff = format_comment_diff(&comment).expect("diff");
         assert!(diff.contains("-import dataclasses"));
         assert!(diff.contains("import typing"));

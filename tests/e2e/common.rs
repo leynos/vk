@@ -206,3 +206,35 @@ pub fn add_origin_remote(repo_path: &Path, origin_url: &str) {
         .expect("git remote add");
     assert!(status.status.success(), "git remote add failed");
 }
+
+/// Create a request asserter that verifies a specific PR number is selected.
+///
+/// Returns a closure that tracks request count and asserts the expected PR number
+/// appears in the threads query (second request). This is used to verify fork
+/// disambiguation selects the correct PR.
+pub fn assert_pr_number_on_threads_query(
+    expected_pr: u64,
+) -> (
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    impl Fn(&serde_json::Value) + Send + Sync + 'static,
+) {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let request_count = Arc::new(AtomicUsize::new(0));
+    let request_count_clone = Arc::clone(&request_count);
+
+    let asserter = move |body: &serde_json::Value| {
+        let count = request_count_clone.fetch_add(1, Ordering::SeqCst);
+        // Assert on the second request (threads query) to verify correct PR was selected
+        if count == 1 {
+            let vars = &body["variables"];
+            assert_eq!(
+                vars["number"], expected_pr,
+                "Should select PR #{expected_pr}"
+            );
+        }
+    };
+
+    (request_count, asserter)
+}
