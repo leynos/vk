@@ -227,6 +227,19 @@ mod tests {
     use termimad::MadSkin;
     use vk::environment;
 
+    /// Parse CLI arguments and extract `PrArgs` from the `Pr` subcommand.
+    ///
+    /// # Panics
+    ///
+    /// Panics if parsing fails or if the command is not `Commands::Pr`.
+    fn parse_pr_args(args: &[&str]) -> PrArgs {
+        let cli = Cli::try_parse_from(args).expect("parse cli");
+        match cli.command {
+            Commands::Pr(pr_args) => pr_args,
+            _ => panic!("expected Pr command, got different variant"),
+        }
+    }
+
     #[test]
     fn cli_loads_repo_from_flag() {
         let cli = Cli::try_parse_from(["vk", "--repo", "foo/bar", "pr", "1"]).expect("parse cli");
@@ -294,65 +307,38 @@ mod tests {
     }
     #[test]
     fn pr_subcommand_parses() {
-        let cli = Cli::try_parse_from(["vk", "pr", "123"]).expect("parse cli");
-        match cli.command {
-            Commands::Pr(args) => {
-                assert_eq!(args.reference.as_deref(), Some("123"));
-                assert!(args.files.is_empty());
-            }
-            _ => panic!("wrong variant"),
-        }
+        let args = parse_pr_args(&["vk", "pr", "123"]);
+        assert_eq!(args.reference.as_deref(), Some("123"));
+        assert!(args.files.is_empty());
     }
     #[test]
     fn pr_subcommand_parses_files() {
-        let cli =
-            Cli::try_parse_from(["vk", "pr", "123", "src/lib.rs", "README.md"]).expect("parse cli");
-        match cli.command {
-            Commands::Pr(args) => {
-                assert_eq!(args.reference.as_deref(), Some("123"));
-                assert_eq!(args.files, ["src/lib.rs", "README.md"]);
-            }
-            _ => panic!("wrong variant"),
-        }
+        let args = parse_pr_args(&["vk", "pr", "123", "src/lib.rs", "README.md"]);
+        assert_eq!(args.reference.as_deref(), Some("123"));
+        assert_eq!(args.files, ["src/lib.rs", "README.md"]);
     }
     #[test]
     fn pr_subcommand_parses_without_reference() {
-        let cli = Cli::try_parse_from(["vk", "pr"]).expect("parse cli");
-        match cli.command {
-            Commands::Pr(args) => {
-                assert!(args.reference.is_none());
-                assert!(args.files.is_empty());
-            }
-            _ => panic!("wrong variant"),
-        }
+        let args = parse_pr_args(&["vk", "pr"]);
+        assert!(args.reference.is_none());
+        assert!(args.files.is_empty());
     }
     #[test]
     fn pr_subcommand_parses_fragment_only() {
-        let cli = Cli::try_parse_from(["vk", "pr", "#discussion_r123"]).expect("parse cli");
-        match cli.command {
-            Commands::Pr(args) => {
-                assert_eq!(args.reference.as_deref(), Some("#discussion_r123"));
-            }
-            _ => panic!("wrong variant"),
-        }
+        let args = parse_pr_args(&["vk", "pr", "#discussion_r123"]);
+        assert_eq!(args.reference.as_deref(), Some("#discussion_r123"));
     }
     #[test]
     fn pr_subcommand_parses_url() {
-        let cli = Cli::try_parse_from([
+        let args = parse_pr_args(&[
             "vk",
             "pr",
             "https://github.com/owner/repo/pull/42#discussion_r99",
-        ])
-        .expect("parse cli");
-        match cli.command {
-            Commands::Pr(args) => {
-                assert_eq!(
-                    args.reference.as_deref(),
-                    Some("https://github.com/owner/repo/pull/42#discussion_r99")
-                );
-            }
-            _ => panic!("wrong variant"),
-        }
+        ]);
+        assert_eq!(
+            args.reference.as_deref(),
+            Some("https://github.com/owner/repo/pull/42#discussion_r99")
+        );
     }
     #[test]
     fn issue_subcommand_parses() {

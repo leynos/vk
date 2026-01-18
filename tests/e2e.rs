@@ -13,6 +13,7 @@ use assert_cmd::cargo::cargo_bin;
 use assert_cmd::prelude::*;
 use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
+use rstest::fixture;
 use serde_json::Value;
 use std::fs;
 use std::io::{BufRead, BufReader};
@@ -123,6 +124,18 @@ impl GitRepoWithFetchHead {
     fn path(&self) -> &Path {
         self.dir.path()
     }
+}
+
+/// rstest fixture for creating a git repository with configurable HEAD and `FETCH_HEAD`.
+///
+/// Default HEAD is `ref: refs/heads/main\n` (on branch main).
+/// Default `FETCH_HEAD` points to `https://github.com/owner/repo.git`.
+#[fixture]
+fn git_repo_with_fetch_head(
+    #[default("ref: refs/heads/main\n")] head: &str,
+    #[default(DEFAULT_FETCH_HEAD)] fetch_head: &str,
+) -> GitRepoWithFetchHead {
+    GitRepoWithFetchHead::new(head, fetch_head)
 }
 
 fn load_transcript(path: &str) -> Vec<String> {

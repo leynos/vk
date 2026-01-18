@@ -242,8 +242,8 @@ flowchart TD
     FRAG_ONLY --> SET_FRAG[fragment = input]
 
     subgraph branch_detect [Branch-based PR Detection]
-        GET_BRANCH[Get current branch<br/>from .git/HEAD]
-        GET_BRANCH --> BRANCH_OK{Branch<br/>found?}
+        GET_BRANCH[Get current branch<br/>via git symbolic-ref]
+        GET_BRANCH --> BRANCH_OK{Symbolic ref<br/>resolved?}
         BRANCH_OK -->|No| ERR_DETACHED[Error: detached HEAD]
         BRANCH_OK -->|Yes| GET_REPO[Get repo from<br/>FETCH_HEAD or --repo]
         GET_REPO --> REPO_OK{Repo<br/>found?}
