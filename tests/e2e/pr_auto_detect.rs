@@ -3,8 +3,8 @@
 use super::common::*;
 use assert_cmd::prelude::*;
 use predicates::str::contains;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 #[tokio::test]
@@ -202,46 +202,16 @@ async fn pr_no_reference_fails_when_no_pr_for_branch() {
 
 #[tokio::test]
 async fn pr_fork_disambiguation_selects_correct_pr() {
-    use std::process::Command as StdCommand;
-
     let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
 
     // Multiple PRs with the same branch name from different forks.
     // The user's fork is "my-fork", and there's also PRs from "other-fork" and
     // "another-fork" with the same branch name.
-    let pr_lookup_body = serde_json::json!({
-        "data": {"repository": {"pullRequests": {
-            "nodes": [
-                {
-                    "number": 100,
-                    "headRepository": {
-                        "owner": {"login": "other-fork"}
-                    }
-                },
-                {
-                    "number": 200,
-                    "headRepository": {
-                        "owner": {"login": "my-fork"}
-                    }
-                },
-                {
-                    "number": 300,
-                    "headRepository": {
-                        "owner": {"login": "another-fork"}
-                    }
-                }
-            ]
-        }}}
-    })
-    .to_string();
-    let threads_body = serde_json::json!({
-        "data": {"repository": {"pullRequest": {"reviewThreads": {
-            "nodes": [],
-            "pageInfo": {"hasNextPage": false, "endCursor": null}
-        }}}}
-    })
-    .to_string();
-    let reviews_body = include_str!("../fixtures/reviews_empty.json").to_string();
+    let (pr_lookup_body, threads_body, reviews_body) = fork_disambiguation_responses(&[
+        (100, "other-fork"),
+        (200, "my-fork"),
+        (300, "another-fork"),
+    ]);
 
     // Track request count to assert on the second request (threads query)
     let request_count = Arc::new(AtomicUsize::new(0));
@@ -268,19 +238,7 @@ async fn pr_fork_disambiguation_selects_correct_pr() {
         "ref: refs/heads/feature-branch\n",
         "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
     );
-
-    // Add origin remote pointing to the user's fork
-    let status = StdCommand::new("git")
-        .args([
-            "remote",
-            "add",
-            "origin",
-            "https://github.com/my-fork/repo.git",
-        ])
-        .current_dir(repo.path())
-        .output()
-        .expect("git remote add");
-    assert!(status.status.success(), "git remote add failed");
+    add_origin_remote(repo.path(), "https://github.com/my-fork/repo.git");
 
     tokio::time::timeout(
         Duration::from_secs(10),

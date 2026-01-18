@@ -155,3 +155,54 @@ pub fn empty_comments_fallback() -> String {
     })
     .to_string()
 }
+
+/// Build response bodies for fork disambiguation tests.
+///
+/// Takes a slice of (PR number, owner name) tuples and returns:
+/// - `pr_lookup_body`: JSON with multiple PRs from different forks
+/// - `threads_body`: Empty threads response
+/// - `reviews_body`: Empty reviews response loaded from fixture
+pub fn fork_disambiguation_responses(fork_prs: &[(u64, &str)]) -> (String, String, String) {
+    let nodes: Vec<serde_json::Value> = fork_prs
+        .iter()
+        .map(|(number, owner)| {
+            serde_json::json!({
+                "number": number,
+                "headRepository": {
+                    "owner": {"login": owner}
+                }
+            })
+        })
+        .collect();
+
+    let pr_lookup_body = serde_json::json!({
+        "data": {"repository": {"pullRequests": {
+            "nodes": nodes
+        }}}
+    })
+    .to_string();
+
+    let threads_body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+
+    let reviews_body = include_str!("../fixtures/reviews_empty.json").to_string();
+
+    (pr_lookup_body, threads_body, reviews_body)
+}
+
+/// Add an origin remote to a git repository.
+pub fn add_origin_remote(repo_path: &Path, origin_url: &str) {
+    use std::process::Command as StdCommand;
+
+    let status = StdCommand::new("git")
+        .args(["remote", "add", "origin", origin_url])
+        .current_dir(repo_path)
+        .output()
+        .expect("git remote add");
+    assert!(status.status.success(), "git remote add failed");
+}
