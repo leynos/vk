@@ -143,10 +143,15 @@ mod resolve_branch_and_repo_tests {
     fn returns_repo_from_default_repo_when_provided(git_repo_on_feature_branch: GitRepoFixture) {
         let _fixture = git_repo_on_feature_branch;
         let result = resolve_branch_and_repo(Some("owner/repo"));
-        let (repo, branch) = result.expect("should resolve successfully");
-        assert_eq!(repo.owner, "owner", "should use provided repo owner");
-        assert_eq!(repo.name, "repo", "should use provided repo name");
-        assert_eq!(branch, "feature-branch", "should detect branch from git");
+        let ctx = result.expect("should resolve successfully");
+        assert_eq!(ctx.repo.owner, "owner", "should use provided repo owner");
+        assert_eq!(ctx.repo.name, "repo", "should use provided repo name");
+        assert_eq!(
+            ctx.branch, "feature-branch",
+            "should detect branch from git"
+        );
+        // No origin remote configured in test fixture, so head_owner should be None
+        assert!(ctx.head_owner.is_none(), "no origin remote configured");
     }
 
     #[rstest]
@@ -154,9 +159,52 @@ mod resolve_branch_and_repo_tests {
     fn falls_back_to_fetch_head_when_no_default_repo(git_repo_on_feature_branch: GitRepoFixture) {
         let _fixture = git_repo_on_feature_branch;
         let result = resolve_branch_and_repo(None);
-        let (repo, branch) = result.expect("should resolve successfully");
-        assert_eq!(repo.owner, "fallback", "should use FETCH_HEAD repo owner");
-        assert_eq!(repo.name, "repo", "should use FETCH_HEAD repo name");
-        assert_eq!(branch, "feature-branch", "should detect branch from git");
+        let ctx = result.expect("should resolve successfully");
+        assert_eq!(
+            ctx.repo.owner, "fallback",
+            "should use FETCH_HEAD repo owner"
+        );
+        assert_eq!(ctx.repo.name, "repo", "should use FETCH_HEAD repo name");
+        assert_eq!(
+            ctx.branch, "feature-branch",
+            "should detect branch from git"
+        );
+    }
+
+    /// Fixture for a repo with origin remote pointing to a fork.
+    #[fixture]
+    fn git_repo_with_fork_origin() -> GitRepoFixture {
+        let fixture = GitRepoFixture::with_branch_and_fetch_head(
+            "feature-branch",
+            "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
+        );
+        // Add origin remote pointing to the fork
+        let status = Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/fork-owner/repo.git",
+            ])
+            .output()
+            .expect("git remote add");
+        assert!(status.status.success(), "git remote add failed");
+        fixture
+    }
+
+    #[rstest]
+    #[serial]
+    fn extracts_head_owner_from_origin_remote(git_repo_with_fork_origin: GitRepoFixture) {
+        let _fixture = git_repo_with_fork_origin;
+        let result = resolve_branch_and_repo(Some("upstream/repo"));
+        let ctx = result.expect("should resolve successfully");
+        assert_eq!(ctx.repo.owner, "upstream", "target repo from --repo flag");
+        assert_eq!(ctx.repo.name, "repo", "target repo name");
+        assert_eq!(ctx.branch, "feature-branch", "branch from git");
+        assert_eq!(
+            ctx.head_owner.as_deref(),
+            Some("fork-owner"),
+            "head owner from origin remote"
+        );
     }
 }

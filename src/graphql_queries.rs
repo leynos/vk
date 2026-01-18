@@ -61,11 +61,21 @@ pub const ISSUE_QUERY: &str = r"
     }
 ";
 
+/// Query to find PRs by head branch name.
+///
+/// Fetches up to 10 PRs with the given head ref name to support disambiguation
+/// when multiple forks have PRs with the same branch name. The response includes
+/// the head repository owner for client-side filtering.
 pub const PR_FOR_BRANCH_QUERY: &str = r"
     query($owner: String!, $name: String!, $headRef: String!) {
       repository(owner: $owner, name: $name) {
-        pullRequests(headRefName: $headRef, first: 1, states: [OPEN, MERGED]) {
-          nodes { number }
+        pullRequests(headRefName: $headRef, first: 10, states: [OPEN, MERGED]) {
+          nodes {
+            number
+            headRepository {
+              owner { login }
+            }
+          }
         }
       }
     }

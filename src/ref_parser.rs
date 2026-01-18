@@ -151,6 +151,35 @@ pub fn repo_from_fetch_head() -> Option<RepoInfo> {
     content.lines().find_map(parse_repo_str)
 }
 
+/// Extract repository information from the `origin` remote URL.
+///
+/// Uses `git remote get-url origin` to retrieve the URL, which works correctly
+/// with worktrees and linked gitdirs. This identifies the user's fork when
+/// working on a forked repository.
+///
+/// Returns `None` if the `origin` remote is not configured or the URL cannot
+/// be parsed as a GitHub repository.
+///
+/// # Examples
+///
+/// ```ignore
+/// // When origin points to a GitHub repository
+/// let repo = repo_from_origin().expect("origin configured");
+/// assert_eq!(repo.owner, "fork-owner");
+/// assert_eq!(repo.name, "repo");
+/// ```
+pub fn repo_from_origin() -> Option<RepoInfo> {
+    let output = Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let url = String::from_utf8(output.stdout).ok()?;
+    parse_repo_str(url.trim())
+}
+
 fn parse_reference(
     input: &str,
     default_repo: Option<&str>,
@@ -563,5 +592,66 @@ mod tests {
     #[case("")]
     fn parse_fragment_only_rejects_invalid_input(#[case] input: &str) {
         assert!(parse_fragment_only(input).is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn repo_from_origin_extracts_owner_and_name() {
+        use std::process::Command;
+
+        let dir = tempdir().expect("tempdir");
+
+        // Initialize a real git repository
+        let status = Command::new("git")
+            .args(["-c", "init.defaultBranch=main", "init"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git init");
+        assert!(status.status.success(), "git init failed");
+
+        // Add an origin remote
+        let status = Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/fork-owner/my-repo.git",
+            ])
+            .current_dir(dir.path())
+            .output()
+            .expect("git remote add");
+        assert!(status.status.success(), "git remote add failed");
+
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("chdir temp");
+
+        let repo = repo_from_origin().expect("repo from origin");
+        assert_eq!(repo.owner, "fork-owner");
+        assert_eq!(repo.name, "my-repo");
+
+        std::env::set_current_dir(cwd).expect("restore cwd");
+    }
+
+    #[test]
+    #[serial]
+    fn repo_from_origin_returns_none_without_remote() {
+        use std::process::Command;
+
+        let dir = tempdir().expect("tempdir");
+
+        // Initialize a real git repository without any remotes
+        let status = Command::new("git")
+            .args(["-c", "init.defaultBranch=main", "init"])
+            .current_dir(dir.path())
+            .output()
+            .expect("git init");
+        assert!(status.status.success(), "git init failed");
+
+        let cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir.path()).expect("chdir temp");
+
+        assert!(repo_from_origin().is_none());
+
+        std::env::set_current_dir(cwd).expect("restore cwd");
     }
 }

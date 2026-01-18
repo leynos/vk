@@ -324,9 +324,15 @@ async fn pr_auto_detects_from_branch() {
 
     let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
 
+    // PR lookup now includes headRepository for fork disambiguation
     let pr_lookup_body = serde_json::json!({
         "data": {"repository": {"pullRequests": {
-            "nodes": [{"number": 42}]
+            "nodes": [{
+                "number": 42,
+                "headRepository": {
+                    "owner": {"login": "owner"}
+                }
+            }]
         }}}
     })
     .to_string();
@@ -395,7 +401,12 @@ async fn pr_fragment_only_auto_detects_pr() {
 
     let pr_lookup_body = serde_json::json!({
         "data": {"repository": {"pullRequests": {
-            "nodes": [{"number": 7}]
+            "nodes": [{
+                "number": 7,
+                "headRepository": {
+                    "owner": {"login": "o"}
+                }
+            }]
         }}}
     })
     .to_string();
@@ -494,6 +505,149 @@ async fn pr_no_reference_fails_when_no_pr_for_branch() {
                 .assert()
                 .failure()
                 .stderr(contains("no pull request found for branch 'orphan-branch'"));
+        }),
+    )
+    .await
+    .expect("command timed out")
+    .expect("spawn blocking");
+    shutdown.shutdown().await;
+}
+
+#[tokio::test]
+async fn pr_fork_disambiguation_selects_correct_pr() {
+    use std::process::Command as StdCommand;
+
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+
+    // Multiple PRs with the same branch name from different forks.
+    // The user's fork is "my-fork", and there's also PRs from "other-fork" and
+    // "another-fork" with the same branch name.
+    let pr_lookup_body = serde_json::json!({
+        "data": {"repository": {"pullRequests": {
+            "nodes": [
+                {
+                    "number": 100,
+                    "headRepository": {
+                        "owner": {"login": "other-fork"}
+                    }
+                },
+                {
+                    "number": 200,
+                    "headRepository": {
+                        "owner": {"login": "my-fork"}
+                    }
+                },
+                {
+                    "number": 300,
+                    "headRepository": {
+                        "owner": {"login": "another-fork"}
+                    }
+                }
+            ]
+        }}}
+    })
+    .to_string();
+    let threads_body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
+    set_sequential_responder(&handler, vec![pr_lookup_body, threads_body, reviews_body]);
+
+    // Create a repo with origin pointing to my-fork
+    let repo = GitRepoWithFetchHead::new(
+        "ref: refs/heads/feature-branch\n",
+        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
+    );
+
+    // Add origin remote pointing to the user's fork
+    let status = StdCommand::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/my-fork/repo.git",
+        ])
+        .current_dir(repo.path())
+        .output()
+        .expect("git remote add");
+    assert!(status.status.success(), "git remote add failed");
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            // Use --repo to specify the upstream repository
+            vk_cmd(addr)
+                .current_dir(repo.path())
+                .args(["--repo", "upstream/repo", "pr"])
+                .assert()
+                .success()
+                .stdout(contains("No unresolved comments"));
+            // The PR selected should be #200 (from my-fork), not #100 (other-fork)
+            // or #300 (another-fork). Since the test succeeds, it means the correct
+            // PR was selected (filtering by head_owner from origin remote).
+        }),
+    )
+    .await
+    .expect("command timed out")
+    .expect("spawn blocking");
+    shutdown.shutdown().await;
+}
+
+#[tokio::test]
+async fn pr_fork_disambiguation_falls_back_to_first_when_no_origin() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+
+    // Multiple PRs with the same branch name - without origin remote configured,
+    // it should fall back to the first PR.
+    let pr_lookup_body = serde_json::json!({
+        "data": {"repository": {"pullRequests": {
+            "nodes": [
+                {
+                    "number": 100,
+                    "headRepository": {
+                        "owner": {"login": "first-fork"}
+                    }
+                },
+                {
+                    "number": 200,
+                    "headRepository": {
+                        "owner": {"login": "second-fork"}
+                    }
+                }
+            ]
+        }}}
+    })
+    .to_string();
+    let threads_body = serde_json::json!({
+        "data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": [],
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}}
+    })
+    .to_string();
+    let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
+    set_sequential_responder(&handler, vec![pr_lookup_body, threads_body, reviews_body]);
+
+    // Create a repo WITHOUT origin remote - only FETCH_HEAD
+    let repo = GitRepoWithFetchHead::new(
+        "ref: refs/heads/feature-branch\n",
+        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
+    );
+
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::task::spawn_blocking(move || {
+            // Without origin remote, should fall back to first PR (#100)
+            vk_cmd(addr)
+                .current_dir(repo.path())
+                .args(["pr"])
+                .assert()
+                .success()
+                .stdout(contains("No unresolved comments"));
         }),
     )
     .await

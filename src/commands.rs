@@ -10,7 +10,7 @@ use crate::environment;
 use crate::printer::{print_reviews, write_thread};
 use crate::ref_parser::{
     RepoInfo, current_branch, is_fragment_only, parse_fragment_only, parse_issue_reference,
-    parse_pr_thread_reference, parse_repo_str, repo_from_fetch_head,
+    parse_pr_thread_reference, parse_repo_str, repo_from_fetch_head, repo_from_origin,
 };
 use crate::review_threads::thread_for_comment;
 use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
@@ -165,17 +165,40 @@ fn print_threads_block(skin: &MadSkin, threads: Vec<ReviewThread>) -> bool {
     false
 }
 
+/// Context for branch-based PR auto-detection.
+struct BranchContext {
+    /// The target repository (where the PR is opened against).
+    repo: RepoInfo,
+    /// The current branch name.
+    branch: String,
+    /// The head repository owner (from origin remote), used to disambiguate
+    /// when multiple forks have PRs with the same branch name.
+    head_owner: Option<String>,
+}
+
 /// Resolve the current branch and repository for PR auto-detection.
+///
+/// Returns the target repository (from `--repo` flag or `FETCH_HEAD`), the
+/// current branch name, and optionally the head repository owner (from the
+/// `origin` remote URL) for disambiguating PRs from forks.
+///
+/// # Errors
 ///
 /// Returns `VkError::DetachedHead` when the repository is in detached HEAD
 /// state, or `VkError::RepoNotFound` when the repository cannot be determined.
-fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<(RepoInfo, String), VkError> {
+fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<BranchContext, VkError> {
     let branch = current_branch().ok_or(VkError::DetachedHead)?;
     let repo = default_repo
         .and_then(parse_repo_str)
         .or_else(repo_from_fetch_head)
         .ok_or(VkError::RepoNotFound)?;
-    Ok((repo, branch))
+    // Get the head owner from origin remote for fork disambiguation
+    let head_owner = repo_from_origin().map(|r| r.owner);
+    Ok(BranchContext {
+        repo,
+        branch,
+        head_owner,
+    })
 }
 
 /// Resolve the PR reference, detecting from branch when necessary.
@@ -184,6 +207,9 @@ fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<(RepoInfo, Stri
 /// 1. No reference: detect PR from current branch
 /// 2. Fragment only (`#discussion_r<ID>`): detect PR from branch, extract comment ID
 /// 3. Full reference: use existing parsing
+///
+/// When auto-detecting from branch, uses the origin remote's repository owner
+/// to disambiguate between multiple forks with the same branch name.
 async fn resolve_pr_reference(
     reference: Option<&str>,
     default_repo: Option<&str>,
@@ -191,15 +217,19 @@ async fn resolve_pr_reference(
 ) -> Result<(RepoInfo, u64, Option<u64>), VkError> {
     match reference {
         None => {
-            let (repo, branch) = resolve_branch_and_repo(default_repo)?;
-            let number = fetch_pr_for_branch(client, &repo, &branch).await?;
-            Ok((repo, number, None))
+            let ctx = resolve_branch_and_repo(default_repo)?;
+            let number =
+                fetch_pr_for_branch(client, &ctx.repo, &ctx.branch, ctx.head_owner.as_deref())
+                    .await?;
+            Ok((ctx.repo, number, None))
         }
         Some(input) if is_fragment_only(input) => {
             let comment_id = parse_fragment_only(input)?;
-            let (repo, branch) = resolve_branch_and_repo(default_repo)?;
-            let number = fetch_pr_for_branch(client, &repo, &branch).await?;
-            Ok((repo, number, Some(comment_id)))
+            let ctx = resolve_branch_and_repo(default_repo)?;
+            let number =
+                fetch_pr_for_branch(client, &ctx.repo, &ctx.branch, ctx.head_owner.as_deref())
+                    .await?;
+            Ok((ctx.repo, number, Some(comment_id)))
         }
         Some(input) => parse_pr_thread_reference(input, default_repo),
     }
