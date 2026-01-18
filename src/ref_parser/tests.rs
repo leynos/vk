@@ -154,6 +154,15 @@ fn parse_url_git_suffix() {
 }
 
 #[test]
+fn parse_url_dotted_repo_name() {
+    let (repo, number) = parse_pr_reference("https://github.com/owner/my.repo.git/pull/5", None)
+        .expect("valid reference");
+    assert_eq!(repo.owner, "owner");
+    assert_eq!(repo.name, "my.repo");
+    assert_eq!(number, 5);
+}
+
+#[test]
 fn parse_url_plural_segment() {
     let (repo, number) = parse_pr_reference("https://github.com/owner/repo/pulls/13", None)
         .expect("valid reference");

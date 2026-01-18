@@ -36,7 +36,7 @@ impl ResourceType {
 }
 
 static GITHUB_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/.]+)").expect("valid regex")
+    Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/]+)").expect("valid regex")
 });
 
 fn strip_git_suffix(name: &str) -> &str {

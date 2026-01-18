@@ -1,8 +1,7 @@
-//! End-to-end tests for GraphQL error diagnostics.
+//! Shared end-to-end test utilities: fixtures, helpers, and mock infrastructure.
 //!
-//! These tests verify that enhanced error reporting works correctly when
-//! GraphQL responses contain missing nodes, using mock HTTPS servers to
-//! simulate real-world scenarios.
+//! This module provides common building blocks for e2e tests, including git
+//! repository fixtures and helper functions for setting up test scenarios.
 //!
 //! Each test spawns a [`third-wheel`](https://crates.io/crates/third-wheel)
 //! Man-in-the-Middle proxy that intercepts outbound GitHub requests. This
