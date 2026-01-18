@@ -222,4 +222,258 @@ mod tests {
         });
         assert!(no_match.is_none());
     }
+
+    mod fetch_pr_for_branch_tests {
+        use super::*;
+        use crate::api::RetryConfig;
+        use std::convert::Infallible;
+        use std::sync::Arc;
+        use third_wheel::hyper::{Body, Response, Server, StatusCode, service::service_fn};
+        use tokio::task::JoinHandle;
+        use tokio::time::Duration;
+
+        /// Start a mock HTTP server that returns the given JSON body.
+        fn start_mock_server(body: String) -> (GraphQLClient, JoinHandle<()>) {
+            let body = Arc::new(body);
+            let svc = third_wheel::hyper::service::make_service_fn(move |_conn| {
+                let body = Arc::clone(&body);
+                async move {
+                    Ok::<_, Infallible>(service_fn(move |_req| {
+                        let body = Arc::clone(&body);
+                        async move {
+                            Ok::<_, Infallible>(
+                                Response::builder()
+                                    .status(StatusCode::OK)
+                                    .header("Content-Type", "application/json")
+                                    .body(Body::from(body.as_ref().clone()))
+                                    .expect("response"),
+                            )
+                        }
+                    }))
+                }
+            });
+            let server = Server::bind(&"127.0.0.1:0".parse().expect("addr")).serve(svc);
+            let addr = server.local_addr();
+            let join = tokio::spawn(async move {
+                let _ = server.await;
+            });
+            let retry = RetryConfig {
+                base_delay: Duration::from_millis(1),
+                jitter: false,
+                ..RetryConfig::default()
+            };
+            let client =
+                GraphQLClient::with_endpoint_retry("token", format!("http://{addr}"), None, retry)
+                    .expect("client");
+            (client, join)
+        }
+
+        #[tokio::test]
+        async fn returns_pr_number_on_success() {
+            let body = json!({
+                "data": {
+                    "repository": {
+                        "pullRequests": {
+                            "nodes": [{
+                                "number": 42,
+                                "headRepository": {
+                                    "owner": { "login": "my-fork" }
+                                }
+                            }]
+                        }
+                    }
+                }
+            })
+            .to_string();
+            let (client, join) = start_mock_server(body);
+            let repo = RepoInfo {
+                owner: "owner".into(),
+                name: "repo".into(),
+            };
+
+            let result = fetch_pr_for_branch(&client, &repo, "feature", None).await;
+
+            assert_eq!(result.expect("success"), 42);
+            join.abort();
+            let _ = join.await;
+        }
+
+        #[tokio::test]
+        async fn returns_no_pr_for_branch_when_empty() {
+            let body = json!({
+                "data": {
+                    "repository": {
+                        "pullRequests": {
+                            "nodes": []
+                        }
+                    }
+                }
+            })
+            .to_string();
+            let (client, join) = start_mock_server(body);
+            let repo = RepoInfo {
+                owner: "owner".into(),
+                name: "repo".into(),
+            };
+
+            let result = fetch_pr_for_branch(&client, &repo, "orphan", None).await;
+
+            match result {
+                Err(VkError::NoPrForBranch { branch }) => {
+                    assert_eq!(branch.as_ref(), "orphan");
+                }
+                other => panic!("expected NoPrForBranch, got {other:?}"),
+            }
+            join.abort();
+            let _ = join.await;
+        }
+
+        #[tokio::test]
+        async fn filters_by_head_owner_when_provided() {
+            let body = json!({
+                "data": {
+                    "repository": {
+                        "pullRequests": {
+                            "nodes": [
+                                {
+                                    "number": 100,
+                                    "headRepository": {
+                                        "owner": { "login": "other-fork" }
+                                    }
+                                },
+                                {
+                                    "number": 200,
+                                    "headRepository": {
+                                        "owner": { "login": "my-fork" }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            })
+            .to_string();
+            let (client, join) = start_mock_server(body);
+            let repo = RepoInfo {
+                owner: "upstream".into(),
+                name: "repo".into(),
+            };
+
+            let result = fetch_pr_for_branch(&client, &repo, "feature", Some("my-fork")).await;
+
+            assert_eq!(result.expect("success"), 200);
+            join.abort();
+            let _ = join.await;
+        }
+
+        #[tokio::test]
+        async fn returns_no_pr_when_head_owner_not_found() {
+            let body = json!({
+                "data": {
+                    "repository": {
+                        "pullRequests": {
+                            "nodes": [{
+                                "number": 100,
+                                "headRepository": {
+                                    "owner": { "login": "other-fork" }
+                                }
+                            }]
+                        }
+                    }
+                }
+            })
+            .to_string();
+            let (client, join) = start_mock_server(body);
+            let repo = RepoInfo {
+                owner: "upstream".into(),
+                name: "repo".into(),
+            };
+
+            let result =
+                fetch_pr_for_branch(&client, &repo, "feature", Some("nonexistent-fork")).await;
+
+            match result {
+                Err(VkError::NoPrForBranch { branch }) => {
+                    assert_eq!(branch.as_ref(), "feature");
+                }
+                other => panic!("expected NoPrForBranch, got {other:?}"),
+            }
+            join.abort();
+            let _ = join.await;
+        }
+
+        #[tokio::test]
+        async fn skips_pr_with_null_head_repository() {
+            let body = json!({
+                "data": {
+                    "repository": {
+                        "pullRequests": {
+                            "nodes": [
+                                {
+                                    "number": 100,
+                                    "headRepository": null
+                                },
+                                {
+                                    "number": 200,
+                                    "headRepository": {
+                                        "owner": { "login": "my-fork" }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            })
+            .to_string();
+            let (client, join) = start_mock_server(body);
+            let repo = RepoInfo {
+                owner: "upstream".into(),
+                name: "repo".into(),
+            };
+
+            // When filtering by head_owner, PRs with null headRepository are skipped
+            let result = fetch_pr_for_branch(&client, &repo, "feature", Some("my-fork")).await;
+
+            assert_eq!(result.expect("success"), 200);
+            join.abort();
+            let _ = join.await;
+        }
+
+        #[tokio::test]
+        async fn returns_first_pr_when_head_owner_is_none() {
+            let body = json!({
+                "data": {
+                    "repository": {
+                        "pullRequests": {
+                            "nodes": [
+                                {
+                                    "number": 100,
+                                    "headRepository": null
+                                },
+                                {
+                                    "number": 200,
+                                    "headRepository": {
+                                        "owner": { "login": "my-fork" }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            })
+            .to_string();
+            let (client, join) = start_mock_server(body);
+            let repo = RepoInfo {
+                owner: "upstream".into(),
+                name: "repo".into(),
+            };
+
+            // Without head_owner filter, returns the first PR regardless of headRepository
+            let result = fetch_pr_for_branch(&client, &repo, "feature", None).await;
+
+            assert_eq!(result.expect("success"), 100);
+            join.abort();
+            let _ = join.await;
+        }
+    }
 }
