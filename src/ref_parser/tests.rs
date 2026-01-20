@@ -73,8 +73,16 @@ impl GitRepoFixture {
         assert!(status.status.success(), "git config name failed");
 
         // Create an empty commit so we have something to detach to
+        // (disable gpgsign for hermetic test)
         let status = Command::new("git")
-            .args(["commit", "--allow-empty", "-m", "initial"])
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ])
             .current_dir(dir.path())
             .output()
             .expect("git commit");

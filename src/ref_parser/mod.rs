@@ -29,13 +29,13 @@ pub struct DefaultRepo<'a>(Option<&'a str>);
 
 impl<'a> DefaultRepo<'a> {
     /// Create a default repository reference from an owner/repo string.
-    #[allow(dead_code, reason = "public API for callers to construct DefaultRepo")]
+    #[expect(dead_code, reason = "public API for callers to construct DefaultRepo")]
     pub fn new(repo: &'a str) -> Self {
         Self(Some(repo))
     }
 
     /// No default repository; will fall back to `FETCH_HEAD` for numeric refs.
-    #[allow(dead_code, reason = "public API for callers to construct DefaultRepo")]
+    #[expect(dead_code, reason = "public API for callers to construct DefaultRepo")]
     pub const fn none() -> Self {
         Self(None)
     }
