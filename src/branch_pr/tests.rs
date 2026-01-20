@@ -204,30 +204,25 @@ mod fetch_pr_for_branch_tests {
 
     /// Node data for building mock PR lookup responses.
     #[derive(Debug)]
-    struct PrNode {
+    struct TestPrNode {
         number: u64,
-        head_repository: Option<&'static str>,
+        head_owner: Option<&'static str>,
     }
 
     /// Build a JSON response for the PR-for-branch GraphQL query.
-    fn build_pr_lookup_response(nodes: &[PrNode]) -> String {
-        let pr_nodes: Vec<_> = nodes
+    fn build_pr_lookup_response(nodes: &[TestPrNode]) -> String {
+        use serde_json::Value;
+
+        let nodes_json: Vec<Value> = nodes
             .iter()
-            .map(|n| {
-                let head_repo = n.head_repository.map_or_else(
-                    || "null".to_string(),
-                    |owner| format!(r#"{{ "owner": {{ "login": "{owner}" }} }}"#),
-                );
-                format!(
-                    r#"{{ "number": {}, "headRepository": {} }}"#,
-                    n.number, head_repo
-                )
+            .map(|pr| {
+                let head_repository = pr
+                    .head_owner
+                    .map_or(Value::Null, |owner| json!({"owner": {"login": owner}}));
+                json!({"number": pr.number, "headRepository": head_repository})
             })
             .collect();
-        format!(
-            r#"{{ "data": {{ "repository": {{ "pullRequests": {{ "nodes": [{}] }} }} }} }}"#,
-            pr_nodes.join(", ")
-        )
+        json!({"data": {"repository": {"pullRequests": {"nodes": nodes_json}}}}).to_string()
     }
 
     #[tokio::test]
@@ -283,7 +278,7 @@ mod fetch_pr_for_branch_tests {
     /// Test cases for PR filtering by head owner.
     ///
     /// Each case specifies:
-    /// - A list of PRs (number, `head_repository` owner)
+    /// - A list of PRs (number, `head_owner`)
     /// - The `head_owner` filter to apply
     /// - The expected PR number result
     #[tokio::test]
@@ -311,9 +306,9 @@ mod fetch_pr_for_branch_tests {
     ) {
         let nodes: Vec<_> = prs
             .iter()
-            .map(|(number, head_repository)| PrNode {
+            .map(|(number, owner)| TestPrNode {
                 number: *number,
-                head_repository: *head_repository,
+                head_owner: *owner,
             })
             .collect();
         let body = build_pr_lookup_response(&nodes);
