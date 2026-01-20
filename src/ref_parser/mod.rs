@@ -258,7 +258,7 @@ pub fn repo_from_origin() -> Option<RepoInfo> {
 
 fn parse_reference(
     input: &str,
-    default_repo: Option<&str>,
+    default_repo: DefaultRepo,
     resource_type: ResourceType,
 ) -> Result<(RepoInfo, u64), VkError> {
     if let Some(res) = parse_github_url(input, resource_type) {
@@ -266,6 +266,7 @@ fn parse_reference(
     }
     if let Ok(number) = input.parse::<u64>() {
         let repo = default_repo
+            .as_option()
             .and_then(parse_repo_str)
             .or_else(repo_from_fetch_head)
             .ok_or(VkError::RepoNotFound)?;
@@ -278,16 +279,14 @@ pub fn parse_issue_reference<'a>(
     input: &str,
     default_repo: impl Into<DefaultRepo<'a>>,
 ) -> Result<(RepoInfo, u64), VkError> {
-    let default_repo = default_repo.into();
-    parse_reference(input, default_repo.as_option(), ResourceType::Issues)
+    parse_reference(input, default_repo.into(), ResourceType::Issues)
 }
 
 pub fn parse_pr_reference<'a>(
     input: &str,
     default_repo: impl Into<DefaultRepo<'a>>,
 ) -> Result<(RepoInfo, u64), VkError> {
-    let default_repo = default_repo.into();
-    parse_reference(input, default_repo.as_option(), ResourceType::PullRequest)
+    parse_reference(input, default_repo.into(), ResourceType::PullRequest)
 }
 
 /// Parse a pull request reference with an optional discussion fragment.
@@ -325,7 +324,7 @@ pub fn parse_pr_thread_reference<'a>(
         Some(_) => return Err(VkError::InvalidRef),
         None => (input, None),
     };
-    let (repo, number) = parse_pr_reference(base, default_repo.as_option())?;
+    let (repo, number) = parse_pr_reference(base, default_repo)?;
     Ok((repo, number, comment))
 }
 

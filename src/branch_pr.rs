@@ -249,14 +249,33 @@ mod tests {
     mod fetch_pr_for_branch_tests {
         use super::*;
         use crate::api::RetryConfig;
+        use rstest::rstest;
         use std::convert::Infallible;
         use std::sync::Arc;
         use third_wheel::hyper::{Body, Response, Server, StatusCode, service::service_fn};
         use tokio::task::JoinHandle;
         use tokio::time::Duration;
 
+        /// RAII guard for mock server cleanup.
+        struct MockServer {
+            client: GraphQLClient,
+            join: JoinHandle<()>,
+        }
+
+        impl MockServer {
+            fn client(&self) -> &GraphQLClient {
+                &self.client
+            }
+        }
+
+        impl Drop for MockServer {
+            fn drop(&mut self) {
+                self.join.abort();
+            }
+        }
+
         /// Start a mock HTTP server that returns the given JSON body.
-        fn start_mock_server(body: String) -> (GraphQLClient, JoinHandle<()>) {
+        fn start_mock_server(body: String) -> MockServer {
             let body = Arc::new(body);
             let svc = third_wheel::hyper::service::make_service_fn(move |_conn| {
                 let body = Arc::clone(&body);
@@ -288,11 +307,28 @@ mod tests {
             let client =
                 GraphQLClient::with_endpoint_retry("token", format!("http://{addr}"), None, retry)
                     .expect("client");
-            (client, join)
+            MockServer { client, join }
+        }
+
+        #[rstest::fixture]
+        fn basic_repo() -> RepoInfo {
+            RepoInfo {
+                owner: "owner".into(),
+                name: "repo".into(),
+            }
+        }
+
+        #[rstest::fixture]
+        fn upstream_repo() -> RepoInfo {
+            RepoInfo {
+                owner: "upstream".into(),
+                name: "repo".into(),
+            }
         }
 
         #[tokio::test]
-        async fn returns_pr_number_on_success() {
+        #[rstest]
+        async fn returns_pr_number_on_success(basic_repo: RepoInfo) {
             let body = json!({
                 "data": {
                     "repository": {
@@ -308,21 +344,16 @@ mod tests {
                 }
             })
             .to_string();
-            let (client, join) = start_mock_server(body);
-            let repo = RepoInfo {
-                owner: "owner".into(),
-                name: "repo".into(),
-            };
+            let server = start_mock_server(body);
 
-            let result = fetch_pr_for_branch(&client, &repo, "feature", None).await;
+            let result = fetch_pr_for_branch(server.client(), &basic_repo, "feature", None).await;
 
             assert_eq!(result.expect("success"), 42);
-            join.abort();
-            let _ = join.await;
         }
 
         #[tokio::test]
-        async fn returns_no_pr_for_branch_when_empty() {
+        #[rstest]
+        async fn returns_no_pr_for_branch_when_empty(basic_repo: RepoInfo) {
             let body = json!({
                 "data": {
                     "repository": {
@@ -333,13 +364,9 @@ mod tests {
                 }
             })
             .to_string();
-            let (client, join) = start_mock_server(body);
-            let repo = RepoInfo {
-                owner: "owner".into(),
-                name: "repo".into(),
-            };
+            let server = start_mock_server(body);
 
-            let result = fetch_pr_for_branch(&client, &repo, "orphan", None).await;
+            let result = fetch_pr_for_branch(server.client(), &basic_repo, "orphan", None).await;
 
             match result {
                 Err(VkError::NoPrForBranch { branch }) => {
@@ -347,12 +374,11 @@ mod tests {
                 }
                 other => panic!("expected NoPrForBranch, got {other:?}"),
             }
-            join.abort();
-            let _ = join.await;
         }
 
         #[tokio::test]
-        async fn filters_by_head_owner_when_provided() {
+        #[rstest]
+        async fn filters_by_head_owner_when_provided(upstream_repo: RepoInfo) {
             let body = json!({
                 "data": {
                     "repository": {
@@ -376,21 +402,18 @@ mod tests {
                 }
             })
             .to_string();
-            let (client, join) = start_mock_server(body);
-            let repo = RepoInfo {
-                owner: "upstream".into(),
-                name: "repo".into(),
-            };
+            let server = start_mock_server(body);
 
-            let result = fetch_pr_for_branch(&client, &repo, "feature", Some("my-fork")).await;
+            let result =
+                fetch_pr_for_branch(server.client(), &upstream_repo, "feature", Some("my-fork"))
+                    .await;
 
             assert_eq!(result.expect("success"), 200);
-            join.abort();
-            let _ = join.await;
         }
 
         #[tokio::test]
-        async fn returns_no_pr_when_head_owner_not_found() {
+        #[rstest]
+        async fn returns_no_pr_when_head_owner_not_found(upstream_repo: RepoInfo) {
             let body = json!({
                 "data": {
                     "repository": {
@@ -406,14 +429,15 @@ mod tests {
                 }
             })
             .to_string();
-            let (client, join) = start_mock_server(body);
-            let repo = RepoInfo {
-                owner: "upstream".into(),
-                name: "repo".into(),
-            };
+            let server = start_mock_server(body);
 
-            let result =
-                fetch_pr_for_branch(&client, &repo, "feature", Some("nonexistent-fork")).await;
+            let result = fetch_pr_for_branch(
+                server.client(),
+                &upstream_repo,
+                "feature",
+                Some("nonexistent-fork"),
+            )
+            .await;
 
             match result {
                 Err(VkError::NoPrForBranch { branch }) => {
@@ -421,12 +445,11 @@ mod tests {
                 }
                 other => panic!("expected NoPrForBranch, got {other:?}"),
             }
-            join.abort();
-            let _ = join.await;
         }
 
         #[tokio::test]
-        async fn skips_pr_with_null_head_repository() {
+        #[rstest]
+        async fn skips_pr_with_null_head_repository(upstream_repo: RepoInfo) {
             let body = json!({
                 "data": {
                     "repository": {
@@ -448,22 +471,19 @@ mod tests {
                 }
             })
             .to_string();
-            let (client, join) = start_mock_server(body);
-            let repo = RepoInfo {
-                owner: "upstream".into(),
-                name: "repo".into(),
-            };
+            let server = start_mock_server(body);
 
             // When filtering by head_owner, PRs with null headRepository are skipped
-            let result = fetch_pr_for_branch(&client, &repo, "feature", Some("my-fork")).await;
+            let result =
+                fetch_pr_for_branch(server.client(), &upstream_repo, "feature", Some("my-fork"))
+                    .await;
 
             assert_eq!(result.expect("success"), 200);
-            join.abort();
-            let _ = join.await;
         }
 
         #[tokio::test]
-        async fn returns_first_pr_when_head_owner_is_none() {
+        #[rstest]
+        async fn returns_first_pr_when_head_owner_is_none(upstream_repo: RepoInfo) {
             let body = json!({
                 "data": {
                     "repository": {
@@ -485,18 +505,13 @@ mod tests {
                 }
             })
             .to_string();
-            let (client, join) = start_mock_server(body);
-            let repo = RepoInfo {
-                owner: "upstream".into(),
-                name: "repo".into(),
-            };
+            let server = start_mock_server(body);
 
             // Without head_owner filter, returns the first PR regardless of headRepository
-            let result = fetch_pr_for_branch(&client, &repo, "feature", None).await;
+            let result =
+                fetch_pr_for_branch(server.client(), &upstream_repo, "feature", None).await;
 
             assert_eq!(result.expect("success"), 100);
-            join.abort();
-            let _ = join.await;
         }
     }
 }
