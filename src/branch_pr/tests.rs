@@ -125,7 +125,7 @@ fn filter_prs_by_head_owner() {
 mod fetch_pr_for_branch_tests {
     use super::*;
     use crate::api::RetryConfig;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use std::convert::Infallible;
     use std::sync::Arc;
     use third_wheel::hyper::{Body, Response, Server, StatusCode, service::service_fn};
@@ -186,7 +186,7 @@ mod fetch_pr_for_branch_tests {
         MockServer { client, join }
     }
 
-    #[rstest::fixture]
+    #[fixture]
     fn basic_repo() -> RepoInfo {
         RepoInfo {
             owner: "owner".into(),
@@ -194,12 +194,40 @@ mod fetch_pr_for_branch_tests {
         }
     }
 
-    #[rstest::fixture]
+    #[fixture]
     fn upstream_repo() -> RepoInfo {
         RepoInfo {
             owner: "upstream".into(),
             name: "repo".into(),
         }
+    }
+
+    /// Node data for building mock PR lookup responses.
+    #[derive(Debug)]
+    struct PrNode {
+        number: u64,
+        head_repository: Option<&'static str>,
+    }
+
+    /// Build a JSON response for the PR-for-branch GraphQL query.
+    fn build_pr_lookup_response(nodes: &[PrNode]) -> String {
+        let pr_nodes: Vec<_> = nodes
+            .iter()
+            .map(|n| {
+                let head_repo = n.head_repository.map_or_else(
+                    || "null".to_string(),
+                    |owner| format!(r#"{{ "owner": {{ "login": "{owner}" }} }}"#),
+                );
+                format!(
+                    r#"{{ "number": {}, "headRepository": {} }}"#,
+                    n.number, head_repo
+                )
+            })
+            .collect();
+        format!(
+            r#"{{ "data": {{ "repository": {{ "pullRequests": {{ "nodes": [{}] }} }} }} }}"#,
+            pr_nodes.join(", ")
+        )
     }
 
     #[tokio::test]
@@ -252,38 +280,49 @@ mod fetch_pr_for_branch_tests {
         }
     }
 
+    /// Test cases for PR filtering by head owner.
+    ///
+    /// Each case specifies:
+    /// - A list of PRs (number, `head_repository` owner)
+    /// - The `head_owner` filter to apply
+    /// - The expected PR number result
     #[tokio::test]
     #[rstest]
-    async fn filters_by_head_owner_when_provided(upstream_repo: RepoInfo) {
-        let body = json!({
-            "data": {
-                "repository": {
-                    "pullRequests": {
-                        "nodes": [
-                            {
-                                "number": 100,
-                                "headRepository": {
-                                    "owner": { "login": "other-fork" }
-                                }
-                            },
-                            {
-                                "number": 200,
-                                "headRepository": {
-                                    "owner": { "login": "my-fork" }
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        })
-        .to_string();
+    #[case::filters_by_head_owner_when_provided(
+        &[(100, Some("other-fork")), (200, Some("my-fork"))],
+        Some("my-fork"),
+        200
+    )]
+    #[case::skips_pr_with_null_head_repository(
+        &[(100, None), (200, Some("my-fork"))],
+        Some("my-fork"),
+        200
+    )]
+    #[case::returns_first_pr_when_head_owner_is_none(
+        &[(100, None), (200, Some("my-fork"))],
+        None,
+        100
+    )]
+    async fn head_owner_filtering(
+        upstream_repo: RepoInfo,
+        #[case] prs: &[(u64, Option<&'static str>)],
+        #[case] head_owner: Option<&str>,
+        #[case] expected: u64,
+    ) {
+        let nodes: Vec<_> = prs
+            .iter()
+            .map(|(number, head_repository)| PrNode {
+                number: *number,
+                head_repository: *head_repository,
+            })
+            .collect();
+        let body = build_pr_lookup_response(&nodes);
         let server = start_mock_server(body);
 
         let result =
-            fetch_pr_for_branch(server.client(), &upstream_repo, "feature", Some("my-fork")).await;
+            fetch_pr_for_branch(server.client(), &upstream_repo, "feature", head_owner).await;
 
-        assert_eq!(result.expect("success"), 200);
+        assert_eq!(result.expect("success"), expected);
     }
 
     #[tokio::test]
@@ -320,70 +359,5 @@ mod fetch_pr_for_branch_tests {
             }
             other => panic!("expected NoPrForBranch, got {other:?}"),
         }
-    }
-
-    #[tokio::test]
-    #[rstest]
-    async fn skips_pr_with_null_head_repository(upstream_repo: RepoInfo) {
-        let body = json!({
-            "data": {
-                "repository": {
-                    "pullRequests": {
-                        "nodes": [
-                            {
-                                "number": 100,
-                                "headRepository": null
-                            },
-                            {
-                                "number": 200,
-                                "headRepository": {
-                                    "owner": { "login": "my-fork" }
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        })
-        .to_string();
-        let server = start_mock_server(body);
-
-        // When filtering by head_owner, PRs with null headRepository are skipped
-        let result =
-            fetch_pr_for_branch(server.client(), &upstream_repo, "feature", Some("my-fork")).await;
-
-        assert_eq!(result.expect("success"), 200);
-    }
-
-    #[tokio::test]
-    #[rstest]
-    async fn returns_first_pr_when_head_owner_is_none(upstream_repo: RepoInfo) {
-        let body = json!({
-            "data": {
-                "repository": {
-                    "pullRequests": {
-                        "nodes": [
-                            {
-                                "number": 100,
-                                "headRepository": null
-                            },
-                            {
-                                "number": 200,
-                                "headRepository": {
-                                    "owner": { "login": "my-fork" }
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        })
-        .to_string();
-        let server = start_mock_server(body);
-
-        // Without head_owner filter, returns the first PR regardless of headRepository
-        let result = fetch_pr_for_branch(server.client(), &upstream_repo, "feature", None).await;
-
-        assert_eq!(result.expect("success"), 100);
     }
 }

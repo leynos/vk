@@ -94,8 +94,8 @@ pub async fn fetch_pr_for_branch(
     head_owner: Option<&str>,
 ) -> Result<u64, VkError> {
     let mut vars = Map::new();
-    vars.insert("owner".into(), json!(repo.owner.clone()));
-    vars.insert("name".into(), json!(repo.name.clone()));
+    vars.insert("owner".into(), json!(&repo.owner));
+    vars.insert("name".into(), json!(&repo.name));
     vars.insert("headRef".into(), json!(branch));
 
     let data: PrForBranchData = client.run_query(PR_FOR_BRANCH_QUERY, vars).await?;

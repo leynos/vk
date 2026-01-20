@@ -275,6 +275,23 @@ fn parse_reference(
     Err(VkError::InvalidRef)
 }
 
+/// Parse an issue reference into repository and issue number.
+///
+/// Accepts either a full GitHub issue URL or a bare issue number (using
+/// `default_repo` for context, falling back to `FETCH_HEAD`).
+///
+/// # Arguments
+///
+/// * `input` - Issue reference: full URL (`https://github.com/o/r/issues/42`)
+///   or bare number (`42`).
+/// * `default_repo` - Optional `owner/repo` string for bare number resolution.
+///
+/// # Errors
+///
+/// Returns [`VkError::InvalidRef`] for malformed input,
+/// [`VkError::RepoNotFound`] when a bare number is provided without a
+/// resolvable repository, or [`VkError::WrongResourceType`] when the URL
+/// points to a pull request instead of an issue.
 pub fn parse_issue_reference<'a>(
     input: &str,
     default_repo: impl Into<DefaultRepo<'a>>,
@@ -282,6 +299,23 @@ pub fn parse_issue_reference<'a>(
     parse_reference(input, default_repo.into(), ResourceType::Issues)
 }
 
+/// Parse a pull request reference into repository and PR number.
+///
+/// Accepts either a full GitHub pull request URL or a bare PR number (using
+/// `default_repo` for context, falling back to `FETCH_HEAD`).
+///
+/// # Arguments
+///
+/// * `input` - PR reference: full URL (`https://github.com/o/r/pull/42`)
+///   or bare number (`42`).
+/// * `default_repo` - Optional `owner/repo` string for bare number resolution.
+///
+/// # Errors
+///
+/// Returns [`VkError::InvalidRef`] for malformed input,
+/// [`VkError::RepoNotFound`] when a bare number is provided without a
+/// resolvable repository, or [`VkError::WrongResourceType`] when the URL
+/// points to an issue instead of a pull request.
 pub fn parse_pr_reference<'a>(
     input: &str,
     default_repo: impl Into<DefaultRepo<'a>>,
