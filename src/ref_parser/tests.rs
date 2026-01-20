@@ -3,6 +3,7 @@
 use super::*;
 use rstest::{fixture, rstest};
 use std::fs;
+use std::process::Command;
 use tempfile::TempDir;
 
 /// A temporary Git repository directory for testing.
@@ -20,8 +21,6 @@ impl GitRepoFixture {
     /// Initializes a git repository and uses `git symbolic-ref` to set HEAD
     /// to point to the specified branch without requiring a commit.
     fn on_branch(branch: &str) -> Self {
-        use std::process::Command;
-
         let dir = TempDir::new().expect("tempdir");
 
         // Initialize a real git repository
@@ -49,8 +48,6 @@ impl GitRepoFixture {
     /// Initializes a git repository, creates an initial commit, then
     /// detaches HEAD to that commit.
     fn detached() -> Self {
-        use std::process::Command;
-
         let dir = TempDir::new().expect("tempdir");
 
         // Initialize a real git repository
@@ -98,8 +95,6 @@ impl GitRepoFixture {
     ///
     /// Configures the origin remote to point to the given URL.
     fn with_origin(self, url: &str) -> Self {
-        use std::process::Command;
-
         let status = Command::new("git")
             .args(["remote", "add", "origin", url])
             .current_dir(self.dir.path())

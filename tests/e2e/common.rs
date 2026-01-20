@@ -68,9 +68,16 @@ pub fn init_git_repo(dir: &std::path::Path, head_content: &str) {
             .expect("git config name");
         assert!(status.status.success(), "git config name failed");
 
-        // Create an empty commit
+        // Create an empty commit (disable gpgsign for hermetic test)
         let status = StdCommand::new("git")
-            .args(["commit", "--allow-empty", "-m", "initial"])
+            .args([
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "initial",
+            ])
             .current_dir(dir)
             .output()
             .expect("git commit");

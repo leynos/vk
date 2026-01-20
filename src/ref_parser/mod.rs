@@ -20,6 +20,44 @@ pub struct RepoInfo {
     pub name: String,
 }
 
+/// Optional default repository for resolving bare numeric references.
+///
+/// When parsing a bare number (e.g., "42"), the default repository provides
+/// the owner/repo context. If not provided, falls back to `FETCH_HEAD`.
+#[derive(Debug, Clone, Copy)]
+pub struct DefaultRepo<'a>(Option<&'a str>);
+
+impl<'a> DefaultRepo<'a> {
+    /// Create a default repository reference from an owner/repo string.
+    #[allow(dead_code, reason = "public API for callers to construct DefaultRepo")]
+    pub fn new(repo: &'a str) -> Self {
+        Self(Some(repo))
+    }
+
+    /// No default repository; will fall back to `FETCH_HEAD` for numeric refs.
+    #[allow(dead_code, reason = "public API for callers to construct DefaultRepo")]
+    pub const fn none() -> Self {
+        Self(None)
+    }
+
+    /// Get the inner `Option<&str>`.
+    pub(crate) fn as_option(self) -> Option<&'a str> {
+        self.0
+    }
+}
+
+impl<'a> From<Option<&'a str>> for DefaultRepo<'a> {
+    fn from(opt: Option<&'a str>) -> Self {
+        Self(opt)
+    }
+}
+
+impl<'a> From<&'a str> for DefaultRepo<'a> {
+    fn from(s: &'a str) -> Self {
+        Self(Some(s))
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum ResourceType {
     Issues,
@@ -90,27 +128,25 @@ fn parse_github_url(
         return None;
     }
     let parts: Vec<_> = url.path_segments()?.collect();
-    if parts.len() < 4 {
-        return Some(Err(VkError::InvalidRef));
+    match parts.as_slice() {
+        [owner, repo_part, segment, number_str, ..] => {
+            if !resource.allowed_segments().contains(segment) {
+                return Some(Err(VkError::WrongResourceType {
+                    expected: resource.allowed_segments(),
+                    found: (*segment).into(),
+                }));
+            }
+            let Ok(number) = number_str.parse() else {
+                return Some(Err(VkError::InvalidRef));
+            };
+            let repo = RepoInfo {
+                owner: (*owner).into(),
+                name: strip_git_suffix(repo_part).into(),
+            };
+            Some(Ok((repo, number)))
+        }
+        _ => Some(Err(VkError::InvalidRef)),
     }
-    let segment = parts.get(2).expect("length checked");
-    if !resource.allowed_segments().contains(segment) {
-        return Some(Err(VkError::WrongResourceType {
-            expected: resource.allowed_segments(),
-            found: (*segment).into(),
-        }));
-    }
-    let number_str = parts.get(3).expect("length checked");
-    let Ok(number) = number_str.parse() else {
-        return Some(Err(VkError::InvalidRef));
-    };
-    let owner = parts.first().expect("length checked");
-    let repo_part = parts.get(1).expect("length checked");
-    let repo = RepoInfo {
-        owner: (*owner).into(),
-        name: strip_git_suffix(repo_part).into(),
-    };
-    Some(Ok((repo, number)))
 }
 
 /// Parse a repository string into owner and name components.
@@ -133,12 +169,13 @@ pub fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
         Some(RepoInfo { owner, name })
     } else if repo.contains('/') {
         let mut parts = repo.splitn(2, '/');
-        let owner = parts.next().expect("split ensured one slash");
-        let name_part = parts.next().expect("split ensured two parts");
-        Some(RepoInfo {
-            owner: owner.to_owned(),
-            name: strip_git_suffix(name_part).to_owned(),
-        })
+        match (parts.next(), parts.next()) {
+            (Some(owner), Some(name_part)) => Some(RepoInfo {
+                owner: owner.to_owned(),
+                name: strip_git_suffix(name_part).to_owned(),
+            }),
+            _ => None,
+        }
     } else {
         None
     }
@@ -237,18 +274,20 @@ fn parse_reference(
     Err(VkError::InvalidRef)
 }
 
-pub fn parse_issue_reference(
+pub fn parse_issue_reference<'a>(
     input: &str,
-    default_repo: Option<&str>,
+    default_repo: impl Into<DefaultRepo<'a>>,
 ) -> Result<(RepoInfo, u64), VkError> {
-    parse_reference(input, default_repo, ResourceType::Issues)
+    let default_repo = default_repo.into();
+    parse_reference(input, default_repo.as_option(), ResourceType::Issues)
 }
 
-pub fn parse_pr_reference(
+pub fn parse_pr_reference<'a>(
     input: &str,
-    default_repo: Option<&str>,
+    default_repo: impl Into<DefaultRepo<'a>>,
 ) -> Result<(RepoInfo, u64), VkError> {
-    parse_reference(input, default_repo, ResourceType::PullRequest)
+    let default_repo = default_repo.into();
+    parse_reference(input, default_repo.as_option(), ResourceType::PullRequest)
 }
 
 /// Parse a pull request reference with an optional discussion fragment.
@@ -260,7 +299,7 @@ pub fn parse_pr_reference(
 /// # Examples
 ///
 /// ```
-/// # use crate::ref_parser::parse_pr_thread_reference;
+/// # use vk::ref_parser::parse_pr_thread_reference;
 /// let (repo, number, comment) = parse_pr_thread_reference("https://github.com/o/r/pull/1#discussion_r2", None)
 ///     .expect("valid reference");
 /// assert_eq!(repo.owner, "o");
@@ -273,10 +312,11 @@ pub fn parse_pr_reference(
 ///
 /// Returns [`VkError::InvalidRef`] when the fragment is present but empty or
 /// non-numeric, or when the input is not a valid pull request reference.
-pub fn parse_pr_thread_reference(
+pub fn parse_pr_thread_reference<'a>(
     input: &str,
-    default_repo: Option<&str>,
+    default_repo: impl Into<DefaultRepo<'a>>,
 ) -> Result<(RepoInfo, u64, Option<u64>), VkError> {
+    let default_repo = default_repo.into();
     let (base, comment) = match input.split_once(DISCUSSION_FRAGMENT) {
         Some((base, id)) if !id.is_empty() => {
             let cid = id.parse().map_err(|_| VkError::InvalidRef)?;
@@ -285,7 +325,7 @@ pub fn parse_pr_thread_reference(
         Some(_) => return Err(VkError::InvalidRef),
         None => (input, None),
     };
-    let (repo, number) = parse_pr_reference(base, default_repo)?;
+    let (repo, number) = parse_pr_reference(base, default_repo.as_option())?;
     Ok((repo, number, comment))
 }
 
