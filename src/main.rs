@@ -11,6 +11,7 @@ mod cli_args;
 mod commands;
 // configuration helpers have been folded into `ortho_config`
 mod auth;
+mod branch_pr;
 mod diff;
 mod graphql_queries;
 mod html;
@@ -53,10 +54,12 @@ use commands::{run_issue, run_pr, run_resolve};
 enum Commands {
     /// Show unresolved pull request comments
     ///
-    /// Passing a `#discussion_r<ID>` fragment prints only that discussion
-    /// thread starting from the referenced comment. When a fragment is
-    /// provided, both resolved and unresolved threads are searched.
-    /// Without a fragment, only unresolved threads are shown.
+    /// When invoked without arguments, detects the PR associated with the
+    /// current Git branch. Passing a `#discussion_r<ID>` fragment shows only
+    /// that discussion thread, auto-detecting the PR when no number or URL
+    /// is provided. When a fragment is given, both resolved and unresolved
+    /// threads are searched. Without a fragment, only unresolved threads are
+    /// shown.
     Pr(PrArgs),
     /// Read a GitHub issue (todo)
     Issue(IssueArgs),
@@ -104,6 +107,8 @@ pub enum VkError {
     },
     #[error("invalid reference")]
     InvalidRef,
+    #[error("cannot auto-detect PR: repository is in detached HEAD state")]
+    DetachedHead,
     #[error("GitHub token not set")]
     MissingAuth,
     #[error("pull request number out of range")]
@@ -117,6 +122,8 @@ pub enum VkError {
     EmptyCommentPath { thread_id: Box<str>, index: usize },
     #[error("comment {comment_id} not found")]
     CommentNotFound { comment_id: u64 },
+    #[error("no pull request found for branch '{branch}'")]
+    NoPrForBranch { branch: Box<str> },
     #[error("bad response: {0}")]
     BadResponse(Box<str>),
     #[error("empty GraphQL response (status {status}) for {operation}: {snippet}")]
@@ -220,6 +227,19 @@ mod tests {
     use termimad::MadSkin;
     use vk::environment;
 
+    /// Parse CLI arguments and extract `PrArgs` from the `Pr` subcommand.
+    ///
+    /// # Panics
+    ///
+    /// Panics if parsing fails or if the command is not `Commands::Pr`.
+    fn parse_pr_args(args: &[&str]) -> PrArgs {
+        let cli = Cli::try_parse_from(args).expect("parse cli");
+        match cli.command {
+            Commands::Pr(pr_args) => pr_args,
+            _ => panic!("expected Pr command, got different variant"),
+        }
+    }
+
     #[test]
     fn cli_loads_repo_from_flag() {
         let cli = Cli::try_parse_from(["vk", "--repo", "foo/bar", "pr", "1"]).expect("parse cli");
@@ -287,26 +307,38 @@ mod tests {
     }
     #[test]
     fn pr_subcommand_parses() {
-        let cli = Cli::try_parse_from(["vk", "pr", "123"]).expect("parse cli");
-        match cli.command {
-            Commands::Pr(args) => {
-                assert_eq!(args.reference.as_deref(), Some("123"));
-                assert!(args.files.is_empty());
-            }
-            _ => panic!("wrong variant"),
-        }
+        let args = parse_pr_args(&["vk", "pr", "123"]);
+        assert_eq!(args.reference.as_deref(), Some("123"));
+        assert!(args.files.is_empty());
     }
     #[test]
     fn pr_subcommand_parses_files() {
-        let cli =
-            Cli::try_parse_from(["vk", "pr", "123", "src/lib.rs", "README.md"]).expect("parse cli");
-        match cli.command {
-            Commands::Pr(args) => {
-                assert_eq!(args.reference.as_deref(), Some("123"));
-                assert_eq!(args.files, ["src/lib.rs", "README.md"]);
-            }
-            _ => panic!("wrong variant"),
-        }
+        let args = parse_pr_args(&["vk", "pr", "123", "src/lib.rs", "README.md"]);
+        assert_eq!(args.reference.as_deref(), Some("123"));
+        assert_eq!(args.files, ["src/lib.rs", "README.md"]);
+    }
+    #[test]
+    fn pr_subcommand_parses_without_reference() {
+        let args = parse_pr_args(&["vk", "pr"]);
+        assert!(args.reference.is_none());
+        assert!(args.files.is_empty());
+    }
+    #[test]
+    fn pr_subcommand_parses_fragment_only() {
+        let args = parse_pr_args(&["vk", "pr", "#discussion_r123"]);
+        assert_eq!(args.reference.as_deref(), Some("#discussion_r123"));
+    }
+    #[test]
+    fn pr_subcommand_parses_url() {
+        let args = parse_pr_args(&[
+            "vk",
+            "pr",
+            "https://github.com/owner/repo/pull/42#discussion_r99",
+        ]);
+        assert_eq!(
+            args.reference.as_deref(),
+            Some("https://github.com/owner/repo/pull/42#discussion_r99")
+        );
     }
     #[test]
     fn issue_subcommand_parses() {

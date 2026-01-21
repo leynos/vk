@@ -1,50 +1,14 @@
-//! End-to-end tests for GraphQL error diagnostics.
-//!
-//! These tests verify that enhanced error reporting works correctly when
-//! GraphQL responses contain missing nodes, using mock HTTPS servers to
-//! simulate real-world scenarios.
-//!
-//! Each test spawns a [`third-wheel`](https://crates.io/crates/third-wheel)
-//! Man-in-the-Middle proxy that intercepts outbound GitHub requests. This
-//! proxy serves canned responses from `tests/fixtures` so the suite runs in a
-//! fully hermetic and deterministic manner.
+//! Tests for basic PR retrieval by explicit reference.
 
+use super::common::*;
 use assert_cmd::cargo::cargo_bin;
 use assert_cmd::prelude::*;
+use hyper::{Response, StatusCode};
 use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
-use serde_json::Value;
-use std::fs;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::time::Duration;
-mod utils;
-use hyper::{Response, StatusCode};
-use utils::start_mitm;
-
-fn load_transcript(path: &str) -> Vec<String> {
-    let data = fs::read_to_string(path).expect("read transcript");
-    data.lines()
-        .map(|line| {
-            let v: Value = serde_json::from_str(line).expect("valid json line");
-            v.get("response")
-                .and_then(|r| r.as_str())
-                .unwrap_or("{}")
-                .to_owned()
-        })
-        .collect()
-}
-
-/// Build a default empty `comments` payload.
-fn empty_comments_fallback() -> String {
-    serde_json::json!({
-        "data": {"node": {"comments": {
-            "nodes": [],
-            "pageInfo": {"hasNextPage": false, "endCursor": null}
-        }}}
-    })
-    .to_string()
-}
 
 #[tokio::test]
 #[ignore = "requires recorded network transcript"]
@@ -78,6 +42,7 @@ async fn e2e_pr_42() {
     .expect("spawn blocking");
     shutdown.shutdown().await;
 }
+
 #[tokio::test]
 async fn e2e_missing_nodes_reports_path() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
@@ -145,7 +110,7 @@ async fn pr_discussion_reference_fetches_resolved_thread() {
             "pageInfo": { "hasNextPage": false, "endCursor": null }
         }}}}
     }).to_string();
-    let reviews_body = include_str!("fixtures/reviews_empty.json").to_string();
+    let reviews_body = include_str!("../fixtures/reviews_empty.json").to_string();
     let mut responses = vec![threads_body, reviews_body].into_iter();
     *handler.lock().expect("lock handler") = Box::new(move |_req| {
         let body = responses.next().expect("response");

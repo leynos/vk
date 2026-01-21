@@ -221,6 +221,87 @@ sequenceDiagram
     end
 ```
 
+## PR Reference Resolution
+
+When `vk pr` is invoked, it determines the target pull request through a
+flexible resolution process. The following diagram illustrates the three
+supported input modes and their resolution paths.
+
+```mermaid
+flowchart TD
+    START[vk pr invoked] --> CHECK_REF{Reference<br/>provided?}
+
+    CHECK_REF -->|No| AUTO[Auto-detect from branch]
+    CHECK_REF -->|Yes| PARSE_REF{Parse reference}
+
+    PARSE_REF -->|"#discussion_r..."| FRAG_ONLY[Fragment-only reference]
+    PARSE_REF -->|"owner/repo#N" or URL| FULL_REF[Full reference]
+    PARSE_REF -->|"N"| NUMBER_ONLY[Number only]
+
+    AUTO --> SET_NO_FRAG[fragment = None]
+    FRAG_ONLY --> SET_FRAG[fragment = input]
+
+    subgraph branch_detect [Branch-based PR Detection]
+        GET_BRANCH[Get current branch<br/>via git symbolic-ref]
+        GET_BRANCH --> BRANCH_OK{Symbolic ref<br/>resolved?}
+        BRANCH_OK -->|No| ERR_DETACHED[Error: detached HEAD]
+        BRANCH_OK -->|Yes| GET_REPO[Get repo from<br/>FETCH_HEAD or --repo]
+        GET_REPO --> REPO_OK{Repo<br/>found?}
+        REPO_OK -->|No| ERR_REPO[Error: repo not found]
+        REPO_OK -->|Yes| QUERY_PR[Query GitHub for PR<br/>matching branch]
+        QUERY_PR --> PR_FOUND{PR<br/>found?}
+        PR_FOUND -->|No| ERR_NO_PR[Error: no PR for branch]
+    end
+
+    SET_NO_FRAG --> GET_BRANCH
+    SET_FRAG --> GET_BRANCH
+
+    PR_FOUND -->|"Yes, fragment present"| FETCH_WITH_FRAG
+    PR_FOUND -->|"Yes, no fragment"| FETCH_THREADS
+
+    FULL_REF --> EXTRACT[Extract owner, repo,<br/>number, fragment]
+    EXTRACT --> HAS_FRAG{Has<br/>fragment?}
+    HAS_FRAG -->|Yes| FETCH_WITH_FRAG
+    HAS_FRAG -->|No| FETCH_THREADS
+
+    NUMBER_ONLY --> NEED_REPO[Require --repo<br/>or auto-detect repo]
+    NEED_REPO --> FETCH_THREADS
+
+    FETCH_THREADS[Fetch review threads] --> DISPLAY[Display comments]
+    FETCH_WITH_FRAG[Fetch threads<br/>filter by fragment] --> FIND_THREAD[Find thread containing<br/>discussion comment]
+    FIND_THREAD --> DISPLAY
+```
+
+The sequence diagram below shows the module interactions during branch-based PR
+auto-detection, illustrating how the CLI, parser, and API modules collaborate
+to resolve the PR context.
+
+```mermaid
+sequenceDiagram
+    participant User as User/CLI
+    participant Cmd as commands.rs
+    participant RefParse as ref_parser.rs
+    participant BranchPR as branch_pr.rs
+    participant Git as Git Repo
+    participant API as GitHub GraphQL API
+
+    User->>Cmd: vk pr (no reference arg)
+    Cmd->>RefParse: resolve_pr_reference(None, ...)
+    RefParse->>Git: current_branch()
+    Git-->>RefParse: branch name
+    RefParse->>RefParse: resolve_branch_and_repo()
+    RefParse->>Git: git_root(), repo info
+    Git-->>RefParse: repo context
+    RefParse->>BranchPR: fetch_pr_for_branch(client, repo, branch)
+    BranchPR->>API: GraphQL PR_FOR_BRANCH_QUERY
+    API-->>BranchPR: PR nodes
+    BranchPR-->>RefParse: PR number
+    RefParse-->>Cmd: PrContext (repo, number)
+    Cmd->>API: Fetch PR details, reviews
+    API-->>Cmd: PR data
+    Cmd-->>User: Output PR information
+```
+
 ## Configuration and features
 
 `vk` reads configuration files using `ortho_config`, which layers values from
