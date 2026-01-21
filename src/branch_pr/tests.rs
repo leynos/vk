@@ -151,6 +151,13 @@ mod fetch_pr_for_branch_tests {
         }
     }
 
+    /// Extract GraphQL variables from a request body.
+    fn extract_graphql_variables(bytes: Option<third_wheel::hyper::body::Bytes>) -> Option<Value> {
+        let bytes = bytes?;
+        let json: Value = serde_json::from_slice(&bytes).ok()?;
+        json.get("variables").cloned()
+    }
+
     /// Start a mock HTTP server that returns the given JSON body and captures requests.
     fn start_mock_server(body: String) -> MockServer {
         let body = Arc::new(body);
@@ -166,13 +173,9 @@ mod fetch_pr_for_branch_tests {
                     let captured = Arc::clone(&captured);
                     async move {
                         // Capture the request body to extract variables
-                        let (parts, req_body) = req.into_parts();
-                        let _ = parts; // Silence unused warning
+                        let (_parts, req_body) = req.into_parts();
                         let bytes = third_wheel::hyper::body::to_bytes(req_body).await.ok();
-                        if let Some(bytes) = bytes
-                            && let Ok(json) = serde_json::from_slice::<Value>(&bytes)
-                            && let Some(vars) = json.get("variables").cloned()
-                        {
+                        if let Some(vars) = extract_graphql_variables(bytes) {
                             captured.lock().expect("lock").variables = Some(vars);
                         }
 
