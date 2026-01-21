@@ -114,21 +114,34 @@ mod fetch_pr_for_branch_tests {
     use super::*;
     use crate::api::RetryConfig;
     use rstest::{fixture, rstest};
+    use serde_json::Value;
     use std::convert::Infallible;
-    use std::sync::Arc;
-    use third_wheel::hyper::{Body, Response, Server, StatusCode, service::service_fn};
+    use std::sync::{Arc, Mutex};
+    use third_wheel::hyper::{Body, Request, Response, Server, StatusCode, service::service_fn};
     use tokio::task::JoinHandle;
     use tokio::time::Duration;
 
-    /// RAII guard for mock server cleanup.
+    /// Captured GraphQL request variables for verification.
+    #[derive(Debug, Default)]
+    struct CapturedRequest {
+        variables: Option<Value>,
+    }
+
+    /// RAII guard for mock server cleanup with request inspection.
     struct MockServer {
         client: GraphQLClient,
         join: JoinHandle<()>,
+        captured: Arc<Mutex<CapturedRequest>>,
     }
 
     impl MockServer {
         fn client(&self) -> &GraphQLClient {
             &self.client
+        }
+
+        /// Get the captured GraphQL variables from the last request.
+        fn captured_variables(&self) -> Option<Value> {
+            self.captured.lock().expect("lock").variables.clone()
         }
     }
 
@@ -138,15 +151,31 @@ mod fetch_pr_for_branch_tests {
         }
     }
 
-    /// Start a mock HTTP server that returns the given JSON body.
+    /// Start a mock HTTP server that returns the given JSON body and captures requests.
     fn start_mock_server(body: String) -> MockServer {
         let body = Arc::new(body);
+        let captured = Arc::new(Mutex::new(CapturedRequest::default()));
+        let captured_clone = Arc::clone(&captured);
+
         let svc = third_wheel::hyper::service::make_service_fn(move |_conn| {
             let body = Arc::clone(&body);
+            let captured = Arc::clone(&captured_clone);
             async move {
-                Ok::<_, Infallible>(service_fn(move |_req| {
+                Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
                     let body = Arc::clone(&body);
+                    let captured = Arc::clone(&captured);
                     async move {
+                        // Capture the request body to extract variables
+                        let (parts, req_body) = req.into_parts();
+                        let _ = parts; // Silence unused warning
+                        let bytes = third_wheel::hyper::body::to_bytes(req_body).await.ok();
+                        if let Some(bytes) = bytes
+                            && let Ok(json) = serde_json::from_slice::<Value>(&bytes)
+                            && let Some(vars) = json.get("variables").cloned()
+                        {
+                            captured.lock().expect("lock").variables = Some(vars);
+                        }
+
                         Ok::<_, Infallible>(
                             Response::builder()
                                 .status(StatusCode::OK)
@@ -171,7 +200,11 @@ mod fetch_pr_for_branch_tests {
         let client =
             GraphQLClient::with_endpoint_retry("token", format!("http://{addr}"), None, retry)
                 .expect("client");
-        MockServer { client, join }
+        MockServer {
+            client,
+            join,
+            captured,
+        }
     }
 
     #[fixture]
@@ -236,6 +269,12 @@ mod fetch_pr_for_branch_tests {
         let result = fetch_pr_for_branch(server.client(), &basic_repo, "feature", None).await;
 
         assert_eq!(result.expect("success"), 42);
+
+        // Verify request variables
+        let vars = server.captured_variables().expect("captured variables");
+        assert_eq!(vars.get("owner"), Some(&json!("owner")));
+        assert_eq!(vars.get("name"), Some(&json!("repo")));
+        assert_eq!(vars.get("headRef"), Some(&json!("feature")));
     }
 
     #[rstest]

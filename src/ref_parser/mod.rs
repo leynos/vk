@@ -1,19 +1,17 @@
 //! Parse pull request and issue references into repository and number pairs, optionally including discussion comment IDs.
 
-use std::sync::LazyLock;
-
-use regex::Regex;
-use url::Url;
-
 use crate::VkError;
 
 mod git;
+mod parse;
 #[cfg(test)]
 mod tests;
 
 pub use git::{current_branch, repo_from_fetch_head, repo_from_origin};
 #[cfg(test)]
 pub(crate) use git::{current_branch_impl, repo_from_fetch_head_impl, repo_from_origin_impl};
+
+use parse::{GITHUB_RE, ResourceType, parse_reference, strip_git_suffix};
 
 /// Fragment prefix for discussion comment IDs in GitHub URLs.
 const DISCUSSION_FRAGMENT: &str = "#discussion_r";
@@ -62,59 +60,6 @@ impl<'a> From<&'a str> for DefaultRepo<'a> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum ResourceType {
-    Issues,
-    PullRequest,
-}
-
-impl ResourceType {
-    fn allowed_segments(self) -> &'static [&'static str] {
-        match self {
-            Self::Issues => &["issues", "issue"],
-            Self::PullRequest => &["pull", "pulls"],
-        }
-    }
-}
-
-static GITHUB_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/]+)").expect("valid regex")
-});
-
-fn strip_git_suffix(name: &str) -> &str {
-    name.strip_suffix(".git").unwrap_or(name)
-}
-
-fn parse_github_url(
-    input: &str,
-    resource: ResourceType,
-) -> Option<Result<(RepoInfo, u64), VkError>> {
-    let url = Url::parse(input).ok()?;
-    if url.host_str()? != "github.com" {
-        return None;
-    }
-    let parts: Vec<_> = url.path_segments()?.collect();
-    match parts.as_slice() {
-        [owner, repo_part, segment, number_str, ..] => {
-            if !resource.allowed_segments().contains(segment) {
-                return Some(Err(VkError::WrongResourceType {
-                    expected: resource.allowed_segments(),
-                    found: (*segment).into(),
-                }));
-            }
-            let Ok(number) = number_str.parse() else {
-                return Some(Err(VkError::InvalidRef));
-            };
-            let repo = RepoInfo {
-                owner: (*owner).into(),
-                name: strip_git_suffix(repo_part).into(),
-            };
-            Some(Ok((repo, number)))
-        }
-        _ => Some(Err(VkError::InvalidRef)),
-    }
-}
-
 /// Parse a repository string into owner and name components.
 ///
 /// Accepts GitHub URLs (`github.com[/:]owner/repo[.git]`) or short format
@@ -129,7 +74,8 @@ fn parse_github_url(
 /// assert_eq!(repo.name, "repo");
 /// ```
 pub fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
-    if let Some(caps) = GITHUB_RE.captures(repo) {
+    let re = GITHUB_RE.as_ref().ok()?;
+    if let Some(caps) = re.captures(repo) {
         let owner = caps.name("owner")?.as_str().to_owned();
         let name = strip_git_suffix(caps.name("repo")?.as_str()).to_owned();
         Some(RepoInfo { owner, name })
@@ -150,25 +96,6 @@ pub fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
             _ => None,
         }
     }
-}
-
-fn parse_reference(
-    input: &str,
-    default_repo: DefaultRepo,
-    resource_type: ResourceType,
-) -> Result<(RepoInfo, u64), VkError> {
-    if let Some(res) = parse_github_url(input, resource_type) {
-        return res;
-    }
-    if let Ok(number) = input.parse::<u64>() {
-        let repo = default_repo
-            .as_option()
-            .and_then(parse_repo_str)
-            .or_else(repo_from_fetch_head)
-            .ok_or(VkError::RepoNotFound)?;
-        return Ok((repo, number));
-    }
-    Err(VkError::InvalidRef)
 }
 
 /// Parse an issue reference into repository and issue number.
