@@ -97,28 +97,16 @@ fn filter_prs_by_head_owner() {
         },
     ];
 
-    // Find PR by head owner
-    let matching = prs.iter().find(|pr| {
-        pr.head_repository
-            .as_ref()
-            .is_some_and(|hr| hr.owner.login.eq_ignore_ascii_case("target-owner"))
-    });
+    // Find PR by head owner using the helper
+    let matching = prs.iter().find(|pr| head_owner_matches(pr, "target-owner"));
     assert_eq!(matching.expect("found PR").number, 2);
 
     // Case-insensitive match
-    let matching_case = prs.iter().find(|pr| {
-        pr.head_repository
-            .as_ref()
-            .is_some_and(|hr| hr.owner.login.eq_ignore_ascii_case("TARGET-OWNER"))
-    });
+    let matching_case = prs.iter().find(|pr| head_owner_matches(pr, "TARGET-OWNER"));
     assert_eq!(matching_case.expect("found PR").number, 2);
 
     // No match for unknown owner
-    let no_match = prs.iter().find(|pr| {
-        pr.head_repository
-            .as_ref()
-            .is_some_and(|hr| hr.owner.login.eq_ignore_ascii_case("unknown"))
-    });
+    let no_match = prs.iter().find(|pr| head_owner_matches(pr, "unknown"));
     assert!(no_match.is_none());
 }
 
@@ -225,8 +213,8 @@ mod fetch_pr_for_branch_tests {
         json!({"data": {"repository": {"pullRequests": {"nodes": nodes_json}}}}).to_string()
     }
 
-    #[tokio::test]
     #[rstest]
+    #[tokio::test]
     async fn returns_pr_number_on_success(basic_repo: RepoInfo) {
         let body = json!({
             "data": {
@@ -250,8 +238,8 @@ mod fetch_pr_for_branch_tests {
         assert_eq!(result.expect("success"), 42);
     }
 
-    #[tokio::test]
     #[rstest]
+    #[tokio::test]
     async fn returns_no_pr_for_branch_when_empty(basic_repo: RepoInfo) {
         let body = json!({
             "data": {
@@ -281,7 +269,6 @@ mod fetch_pr_for_branch_tests {
     /// - A list of PRs (number, `head_owner`)
     /// - The `head_owner` filter to apply
     /// - The expected PR number result
-    #[tokio::test]
     #[rstest]
     #[case::filters_by_head_owner_when_provided(
         &[(100, Some("other-fork")), (200, Some("my-fork"))],
@@ -298,6 +285,7 @@ mod fetch_pr_for_branch_tests {
         None,
         100
     )]
+    #[tokio::test]
     async fn head_owner_filtering(
         upstream_repo: RepoInfo,
         #[case] prs: &[(u64, Option<&'static str>)],
@@ -320,8 +308,8 @@ mod fetch_pr_for_branch_tests {
         assert_eq!(result.expect("success"), expected);
     }
 
-    #[tokio::test]
     #[rstest]
+    #[tokio::test]
     async fn returns_no_pr_when_head_owner_not_found(upstream_repo: RepoInfo) {
         let body = json!({
             "data": {

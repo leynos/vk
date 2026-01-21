@@ -133,17 +133,22 @@ pub fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
         let owner = caps.name("owner")?.as_str().to_owned();
         let name = strip_git_suffix(caps.name("repo")?.as_str()).to_owned();
         Some(RepoInfo { owner, name })
-    } else if repo.contains('/') {
+    } else {
+        // Accept only short-form "owner/repo" with exactly one slash
+        let slash_count = repo.chars().filter(|&c| c == '/').count();
+        if slash_count != 1 {
+            return None;
+        }
         let mut parts = repo.splitn(2, '/');
         match (parts.next(), parts.next()) {
-            (Some(owner), Some(name_part)) => Some(RepoInfo {
-                owner: owner.to_owned(),
-                name: strip_git_suffix(name_part).to_owned(),
-            }),
+            (Some(owner), Some(name_part)) if !owner.is_empty() && !name_part.is_empty() => {
+                Some(RepoInfo {
+                    owner: owner.to_owned(),
+                    name: strip_git_suffix(name_part).to_owned(),
+                })
+            }
             _ => None,
         }
-    } else {
-        None
     }
 }
 
@@ -240,6 +245,22 @@ pub fn parse_pr_reference<'a>(
     parse_reference(input, default_repo.into(), ResourceType::PullRequest)
 }
 
+/// Parse a discussion fragment from the input, returning the base string and optional comment ID.
+///
+/// If the input contains `#discussion_r`, splits at that point and parses the numeric ID.
+/// Returns the base URL/reference and `Some(comment_id)` when a valid fragment is present,
+/// or the original input and `None` when no fragment exists.
+fn parse_discussion_fragment(input: &str) -> Result<(&str, Option<u64>), VkError> {
+    match input.split_once(DISCUSSION_FRAGMENT) {
+        Some((base, id)) if !id.is_empty() => {
+            let cid = id.parse().map_err(|_| VkError::InvalidRef)?;
+            Ok((base, Some(cid)))
+        }
+        Some(_) => Err(VkError::InvalidRef),
+        None => Ok((input, None)),
+    }
+}
+
 /// Parse a pull request reference with an optional discussion fragment.
 ///
 /// Accepts either a full GitHub URL or a bare number (using `default_repo`),
@@ -266,15 +287,7 @@ pub fn parse_pr_thread_reference<'a>(
     input: &str,
     default_repo: impl Into<DefaultRepo<'a>>,
 ) -> Result<(RepoInfo, u64, Option<u64>), VkError> {
-    let default_repo = default_repo.into();
-    let (base, comment) = match input.split_once(DISCUSSION_FRAGMENT) {
-        Some((base, id)) if !id.is_empty() => {
-            let cid = id.parse().map_err(|_| VkError::InvalidRef)?;
-            (base, Some(cid))
-        }
-        Some(_) => return Err(VkError::InvalidRef),
-        None => (input, None),
-    };
+    let (base, comment) = parse_discussion_fragment(input)?;
     let (repo, number) = parse_pr_reference(base, default_repo)?;
     Ok((repo, number, comment))
 }

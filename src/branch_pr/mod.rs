@@ -45,6 +45,13 @@ pub(crate) struct Owner {
     pub(crate) login: String,
 }
 
+/// Check if a PR's head repository owner matches the given owner (case-insensitive).
+pub(crate) fn head_owner_matches(pr: &PrNode, owner: &str) -> bool {
+    pr.head_repository
+        .as_ref()
+        .is_some_and(|hr| hr.owner.login.eq_ignore_ascii_case(owner))
+}
+
 /// Look up the pull request number for a branch via the GitHub API.
 ///
 /// Queries for open or merged PRs with the given branch as the head ref. When
@@ -106,13 +113,7 @@ pub async fn fetch_pr_for_branch(
     // When no head owner is provided, fall back to the first PR (backward compatible).
     let matching_pr = head_owner.map_or_else(
         || prs.first(),
-        |owner| {
-            prs.iter().find(|pr| {
-                pr.head_repository
-                    .as_ref()
-                    .is_some_and(|hr| hr.owner.login.eq_ignore_ascii_case(owner))
-            })
-        },
+        |owner| prs.iter().find(|pr| head_owner_matches(pr, owner)),
     );
 
     matching_pr
