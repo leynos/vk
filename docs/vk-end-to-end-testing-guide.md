@@ -152,14 +152,14 @@ predicates = "3.1"
 
 The table below outlines the purpose of each dependency within the test suite.
 
-| Crate       | Recommended Version | Purpose in Test Suite                                                                                                                                   |
+| Crate | Recommended Version | Purpose in Test Suite |
 | ----------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| assert_cmd  | ~2.0                | The core test orchestrator for executing the vk binary and asserting on its behaviour.[^8]                                                              |
-| insta       | ~1.34               | For snapshot testing of the styled terminal output, handling the complexity of termimad.[^17] The redactions feature is enabled to handle dynamic data. |
-| third-wheel | ~0.6                | An embedded MITM proxy to intercept and mock GitHub API calls, ensuring deterministic tests.[^18]                                                       |
-| tokio       | ~1.0                | An async runtime required to run the third-wheel mock server concurrently with the test logic. The full feature flag is recommended for simplicity.     |
-| serde_json  | ~1.0                | A utility for loading and manipulating the JSON fixture files used as mock API responses.                                                               |
-| tempfile    | ~3.8                | For creating temporary configuration files and directories to test vk's configuration logic in an isolated manner.[^19]                                 |
+| assert_cmd | ~2.0 | The core test orchestrator for executing the vk binary and asserting on its behaviour.[^8] |
+| insta | ~1.34 | For snapshot testing of the styled terminal output, handling the complexity of termimad.[^17] The redactions feature is enabled to handle dynamic data. |
+| third-wheel | ~0.6 | An embedded MITM proxy to intercept and mock GitHub API calls, ensuring deterministic tests.[^18] |
+| tokio | ~1.0 | An async runtime required to run the third-wheel mock server concurrently with the test logic. The full feature flag is recommended for simplicity. |
+| serde_json | ~1.0 | A utility for loading and manipulating the JSON fixture files used as mock API responses. |
+| tempfile | ~3.8 | For creating temporary configuration files and directories to test vk's configuration logic in an isolated manner.[^19] |
 
 ### Test File Organization: Following Rust Conventions
 
@@ -244,11 +244,11 @@ this test provides high confidence that:
 
 1. The `[dev-dependencies]` are correctly configured.
 
-2. Cargo's test runner can find and compile the `tests/e2e.rs` file.
+1. Cargo's test runner can find and compile the `tests/e2e.rs` file.
 
-3. `assert_cmd` is able to locate the `vk` binary produced by the build process.
+1. `assert_cmd` is able to locate the `vk` binary produced by the build process.
 
-4. The basic assertion mechanism is working as expected.
+1. The basic assertion mechanism is working as expected.
 
 With this foundation in place, the next step is to introduce the complexity of
 API mocking.
@@ -632,7 +632,7 @@ developer to:
 
 1. Quickly identify an unintended change (a regression).
 
-2. Consciously "approve" an intentional change, causing the snapshot to be
+1. Consciously "approve" an intentional change, causing the snapshot to be
    updated with the new, correct output.
 
 ### Integrating insta with assert_cmd
@@ -673,12 +673,12 @@ intuitive, revolving around the `cargo-insta` command-line tool.[^13]
    creates a new file, for example, `tests/snapshots/e2e__my_test_name.snap`.
    This file contains the raw `stdout` captured during the test run.
 
-2. **Reviewing the Snapshot:** The developer's next step is to open the newly
+1. **Reviewing the Snapshot:** The developer's next step is to open the newly
    created `.snap` file and inspect its contents. This is the "approval" step
    of approval testing. The developer verifies that the output, including all
    styling, is correct.
 
-3. **Interactive Review and Acceptance with** `cargo insta review`**:** Instead
+1. **Interactive Review and Acceptance with** `cargo insta review`**:** Instead
    of manually managing files, the recommended workflow is to use the
    interactive review tool. After running the tests, the developer runs
    `cargo insta review`. This tool will find all pending (new or changed)
@@ -695,7 +695,7 @@ intuitive, revolving around the `cargo-insta` command-line tool.[^13]
    - **Skip (**`s` **or** `Space`**):** Skips reviewing this snapshot for now,
      leaving it in a pending state.
 
-4. **Non-Interactive Updates (for CI/CD):** The `INSTA_UPDATE` environment
+1. **Non-Interactive Updates (for CI/CD):** The `INSTA_UPDATE` environment
    variable controls `insta`'s behaviour in non-interactive environments like
    CI pipelines.[^13]
 
@@ -1015,83 +1015,87 @@ foundation of quality and confidence for future development.
 
 ## Works cited
 
-[^1]: People following @[vee.cool](http://vee.cool) — Bluesky, accessed on July
-    20, 2025, <https://web-cdn.bsky.app/profile/vee.cool/followers>
+\[^1\]: People following @[vee.cool](http://vee.cool) — Bluesky, accessed on July
+20, 2025, <https://web-cdn.bsky.app/profile/vee.cool/followers>
 
-[^2]: Canop/termimad: A library to display rich (Markdown) snippets and texts in
-    a rust terminal application - GitHub, accessed on July 20, 2025,
-    <https://github.com/Canop/termimad>
+\[^2\]: Canop/termimad: A library to display rich (Markdown) snippets and texts in
+a rust terminal application - GitHub, accessed on July 20, 2025,
+<https://github.com/Canop/termimad>
 
-[^3]: Termimad: use Markdown to display rich text in a terminal application -
-    Rust Users Forum, accessed on July 20, 2025,
-    <https://users.rust-lang.org/t/termimad-use-markdown-to-display-rich-text-in-a-terminal-application/29386>
+\[^3\]: Termimad: use Markdown to display rich text in a terminal application -
+Rust Users Forum, accessed on July 20, 2025,
+<https://users.rust-lang.org/t/termimad-use-markdown-to-display-rich-text-in-a-terminal-application/29386>
 
-    <https://docs.rs/termimad>
+```
+<https://docs.rs/termimad>
+```
 
-[^5]: The Hitchhiker's Guide to E2E Testing | by Tally Barak - Medium, accessed
-    on July 20, 2025,
-    <https://tally-b.medium.com/the-hitchhikers-guide-to-e2e-testing-b2a9eebeeb27>
+\[^5\]: The Hitchhiker's Guide to E2E Testing | by Tally Barak - Medium, accessed
+on July 20, 2025,
+<https://tally-b.medium.com/the-hitchhikers-guide-to-e2e-testing-b2a9eebeeb27>
 
-[^6]: How to Write Tests - The Rust Programming Language - Rust Documentation,
-    accessed on July 20, 2025,
-    <https://doc.rust-lang.org/book/ch11-01-writing-tests.html>
+\[^6\]: How to Write Tests - The Rust Programming Language - Rust Documentation,
+accessed on July 20, 2025,
+<https://doc.rust-lang.org/book/ch11-01-writing-tests.html>
 
-[^7]: termimad - [crates.io](http://crates.io): Rust Package Registry, accessed
-    on July 20, 2025, <https://crates.io/crates/termimad/0.9.7>
+\[^7\]: termimad - [crates.io](http://crates.io): Rust Package Registry, accessed
+on July 20, 2025, <https://crates.io/crates/termimad/0.9.7>
 
-[^8]: assert_cmd - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
-    <https://docs.rs/assert_cmd>
+\[^8\]: assert_cmd - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+<https://docs.rs/assert_cmd>
 
-[^9]: assert_cmd - [crates.io](http://crates.io): Rust Package Registry,
-      accessed on July 20, 2025, <https://crates.io/crates/assert_cmd>
+\[^9\]: assert_cmd - [crates.io](http://crates.io): Rust Package Registry,
+accessed on July 20, 2025, <https://crates.io/crates/assert_cmd>
 
-    <https://github.com/assert-rs/assert_cmd>
+```
+<https://github.com/assert-rs/assert_cmd>
+```
 
-[^11]: campbellC/third-wheel: A rust implementation of a man-in … - GitHub,
-    accessed on July 20, 2025, <https://github.com/campbellC/third-wheel>
+\[^11\]: campbellC/third-wheel: A rust implementation of a man-in … - GitHub,
+accessed on July 20, 2025, <https://github.com/campbellC/third-wheel>
 
-[^12]: Overview | Insta Snapshots, accessed on July 20, 2025,
-    <https://insta.rs/docs/>
+\[^12\]: Overview | Insta Snapshots, accessed on July 20, 2025,
+<https://insta.rs/docs/>
 
-[^13]: insta - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
-    <https://docs.rs/insta>
+\[^13\]: insta - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+<https://docs.rs/insta>
 
-[^14]: Insta Snapshots, accessed on July 20, 2025, <https://insta.rs/>
+\[^14\]: Insta Snapshots, accessed on July 20, 2025, <https://insta.rs/>
 
-[^15]: Testing - Command Line Applications in Rust, accessed on July 20, 2025,
-    <https://rust-cli.github.io/book/tutorial/testing.html>
+\[^15\]: Testing - Command Line Applications in Rust, accessed on July 20, 2025,
+<https://rust-cli.github.io/book/tutorial/testing.html>
 
-[^16]: Test Organization - The Rust Programming Language, accessed on July 20,
-    2025, <https://doc.rust-lang.org/book/ch11-03-test-organization.html>
+\[^16\]: Test Organization - The Rust Programming Language, accessed on July 20,
+2025, <https://doc.rust-lang.org/book/ch11-03-test-organization.html>
 
-[^17]: insta - [crates.io](http://crates.io): Rust Package Registry, accessed on
-    July 20, 2025, <https://crates.io/crates/insta>
+\[^17\]: insta - [crates.io](http://crates.io): Rust Package Registry, accessed on
+July 20, 2025, <https://crates.io/crates/insta>
 
-[^18]: third-wheel - [crates.io](http://crates.io): Rust Package Registry,
-    accessed on July 20, 2025, <https://crates.io/crates/third-wheel>
+\[^18\]: third-wheel - [crates.io](http://crates.io): Rust Package Registry,
+accessed on July 20, 2025, <https://crates.io/crates/third-wheel>
 
-[^19]: tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
-    <https://docs.rs/tempfile>
+\[^19\]: tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20, 2025,
+<https://docs.rs/tempfile>
 
-[^20]: Should unit tests really be put in the same file as the source? - Rust
-    Users Forum, accessed on July 20, 2025,
-    <https://users.rust-lang.org/t/should-unit-tests-really-be-put-in-the-same-file-as-the-source/62153>
+\[^20\]: Should unit tests really be put in the same file as the source? - Rust
+Users Forum, accessed on July 20, 2025,
+<https://users.rust-lang.org/t/should-unit-tests-really-be-put-in-the-same-file-as-the-source/62153>
 
-[^21]: Skeleton And Principles For A Maintainable Test Suite | Luca Palmieri,
-    accessed on July 20, 2025,
-    <https://lpalmieri.com/posts/skeleton-and-principles-for-a-maintainable-test-suite/>
+\[^21\]: Skeleton And Principles For A Maintainable Test Suite | Luca Palmieri,
+accessed on July 20, 2025,
+<https://lpalmieri.com/posts/skeleton-and-principles-for-a-maintainable-test-suite/>
 
-[^22]: Command in assert_cmd::cmd - Rust - [Docs.rs](http://Docs.rs), accessed
-       on July 20, 2025,
-       <https://docs.rs/assert_cmd/latest/assert_cmd/cmd/struct.Command.html>
+\[^22\]: Command in assert_cmd::cmd - Rust - [Docs.rs](http://Docs.rs), accessed
+on July 20, 2025,
+<https://docs.rs/assert_cmd/latest/assert_cmd/cmd/struct.Command.html>
 
-[^23]: How I test Rust command-line apps with assert_cmd - alexwlchan, accessed
-       on July 20, 2025,
-       <https://alexwlchan.net/2025/testing-rust-cli-apps-with-assert-cmd/>
+\[^23\]: How I test Rust command-line apps with assert_cmd - alexwlchan, accessed
+on July 20, 2025,
+<https://alexwlchan.net/2025/testing-rust-cli-apps-with-assert-cmd/>
 
-[^24]: assert_cmd for n00bs : r/rust - Reddit, accessed on July 20, 2025,
-    <https://www.reddit.com/r/rust/comments/e2kfsr/assert_cmd_for_n00bs/>
+\[^24\]: assert_cmd for n00bs : r/rust - Reddit, accessed on July 20, 2025,
+<https://www.reddit.com/r/rust/comments/e2kfsr/assert_cmd_for_n00bs/>
 
-[^25]: Ultimate Guide to Testing and Debugging Rust Code | 2024 - Rapid
-    Innovation, accessed on July 20, 2025,
-    <https://www.rapidinnovation.io/post/testing-and-debugging-rust-code>
+\[^25\]: Ultimate Guide to Testing and Debugging Rust Code | 2024 - Rapid
+Innovation, accessed on July 20, 2025,
+<https://www.rapidinnovation.io/post/testing-and-debugging-rust-code>

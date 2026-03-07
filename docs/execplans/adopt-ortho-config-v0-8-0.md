@@ -27,8 +27,10 @@ tests, and documentation with the v0.8.0 migration requirements.
 - The code imports the runtime crate as `ortho_config` everywhere; no crate
   alias is currently in use.
 - The repository already uses a recent nightly toolchain in
-  `rust-toolchain.toml`, so the Rust 1.88 floor should be satisfied in
-  practice. The crate manifest does not currently declare `rust-version`.
+  `rust-toolchain.toml`, and `ortho_config` v0.8.0 requires Rust 1.89.0. The
+  repository currently enforces that floor via `Cargo.toml`
+  `rust-version = "1.89"` and also builds on the newer nightly declared in
+  `rust-toolchain.toml`.
 - Configuration merge behaviour is covered by integration tests in
   `tests/cli_args_merge.rs` and helpers under `tests/support/`.
 - Documentation still advertises `ortho-config` v0.6.0 in `README.md` and in
@@ -98,9 +100,10 @@ tests, and documentation with the v0.8.0 migration requirements.
 - Run a lockfile refresh so the generated dependency graph matches v0.8.0.
 - Inspect the resolved `ortho_config` and transitive parser crates in
   `Cargo.lock` to confirm the expected versions landed.
-- Decide whether to add `rust-version = "1.88"` to `Cargo.toml`. The nightly
-  toolchain likely satisfies the compiler requirement already, but adding the
-  manifest floor would make the compatibility contract explicit.
+- Set `rust-version = "1.89"` in `Cargo.toml` to match the published
+  `ortho_config` v0.8.0 minimum supported Rust version (MSRV). The nightly
+  toolchain in `rust-toolchain.toml` exceeds that floor, but the manifest entry
+  keeps the compatibility contract explicit for stable builds and tooling.
 
 ### 3. Reconcile the v0.7.0 and v0.8.0 API surface
 

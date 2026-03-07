@@ -1013,7 +1013,7 @@ Missing required values:
 
 ### Preserving `clap` display exits
 
-When a user passes `--help` or `--version`, `clap` surfaces specialised
+When a user passes `--help` or `--version`, `clap` surfaces specialized
 `ErrorKind::DisplayHelp` / `DisplayVersion` errors so applications can print
 usage text and exit successfully. Deriving `OrthoConfig` often goes hand in
 hand with `Cli::try_parse()` so applications can map errors into their own

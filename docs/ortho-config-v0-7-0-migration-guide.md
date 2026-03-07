@@ -1,4 +1,4 @@
-<!-- markdownlint-disable MD013 -->
+<!-- markdownlint-disable MD013 MD052 -->
 
 # Migration guide: v0.6.0 to v0.7.0
 
@@ -9,7 +9,7 @@
 - [1. Update versions](#1-update-crate-versions-and-feature-flags)
 - [2. Compose layers separately](#2-compose-layers-separately-from-merging)
 - [3. Add post-merge hooks where needed](#3-add-post-merge-hooks-where-needed)
-- [4. Localise CLI copy and errors](#4-localise-cli-copy-and-errors)
+- [4. Localize CLI copy and errors](#4-localize-cli-copy-and-errors)
 - [5. Treat clap defaults](#5-treat-clap-defaults-as-absent)
 - [6. Refresh error handling](#6-refresh-error-handling-and-tests)
 
@@ -17,7 +17,7 @@
 
 This guide describes how to upgrade applications from `ortho-config` v0.6.0 to
 v0.7.0. The release is additive: it introduces layer composition helpers,
-post-merge hooks, localised CLI output, and additional error-handling
+post-merge hooks, localized CLI output, and additional error-handling
 utilities, without changing the core configuration model. Use the sections
 below to adopt the new helpers where they match your configuration style and
 testing setup.
@@ -53,7 +53,7 @@ ortho_config_macros = "0.7.0"
    default feature set already enables it.
 1. Expect new transitive dependencies (`fluent-bundle`, `fluent-syntax`,
    `unic-langid`, and `tracing`) to land with v0.7.0, as they power CLI
-   localisation support.[^deps-0-7]
+   localization support.[^deps-0-7]
 
 ## 2. Compose layers separately from merging
 
@@ -83,7 +83,7 @@ on merged data, implement `PostMergeHook` and enable it with
 `#[ortho_config(post_merge_hook)]`. The hook receives a `PostMergeContext`
 containing the prefix, loaded file paths, and a flag for CLI input.
 
-### Example: normalise a derived field
+### Example: normalize a derived field
 
 ```rust
 use ortho_config::{OrthoConfig, OrthoResult, PostMergeContext, PostMergeHook};
@@ -111,15 +111,15 @@ Use hooks sparingly. Prefer field-level attributes where possible, and only
 reach for `PostMergeHook` when behaviour depends on multiple merged fields.
 [^post-merge]
 
-## 4. Localise CLI copy and errors
+## 4. Localize CLI copy and errors
 
 v0.7.0 introduces a `Localizer` trait plus a Fluent-backed `FluentLocalizer`
-implementation. This lets applications localise `clap` usage strings while
+implementation. This lets applications localize `clap` usage strings while
 falling back to the stock English copy when a translation is missing. Use
 `localize_clap_error_with_command` to rewrite `clap` errors with the same
-localiser.
+localizer.
 
-### Example: build a Fluent localiser and attach it to clap
+### Example: build a Fluent localizer and attach it to clap
 
 ```rust
 use clap::CommandFactory;
@@ -185,41 +185,42 @@ step. Variants that depend on `cli_default_as_absent` should be annotated with
   old runner, update them to use the `rstest-bdd` macros and compile-time tag
   filters (for example, gating YAML scenarios).[^rstest-bdd]
 
-<!-- mdformat-off -->
-
-\[^deps-0-7\]: v0.7.0 adds Fluent and localisation dependencies alongside the
-existing feature flags in the runtime crate and macro crate metadata.
-【F:ortho_config/Cargo.toml†L1-L49】 【F:ortho_config_macros/Cargo.toml†L1-L29】
-\[^compose-layers\]: Derived configuration structs now expose `compose_layers()`
-and `compose_layers_from_iter(...)` and return `LayerComposition` for staged
-merging and error aggregation.
-【F:ortho_config_macros/src/derive/load_impl.rs†L281-L339】
-【F:ortho_config/src/declarative.rs†L236-L305】
+\[^deps-0-7\]: v0.7.0 adds Fluent and localization dependencies alongside the
+existing feature flags in the runtime crate and macro crate metadata. See
+[`ortho_config/Cargo.toml`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/Cargo.toml)
+and
+[`ortho_config_macros/Cargo.toml`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config_macros/Cargo.toml).
+\[^compose-layers\]: Derived configuration structs now expose
+`compose_layers()` and `compose_layers_from_iter(...)` and return
+`LayerComposition` for staged merging and error aggregation. See
+[`ortho_config_macros/src/derive/load_impl.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config_macros/src/derive/load_impl.rs)
+and
+[`ortho_config/src/declarative.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/declarative.rs).
 \[^post-merge\]: `PostMergeHook` and `PostMergeContext` enable post-merge
-adjustments and are invoked when `#[ortho_config(post_merge_hook)]` is present.
-【F:ortho_config/src/post_merge.rs†L1-L64】
-【F:ortho_config/src/post_merge.rs†L67-L159】
-[^localizer]: `Localizer`, `LocalizationArgs`, and `FluentLocalizer` define the
-CLI localisation surface and provide a Fluent-backed implementation.
-【F:ortho_config/src/localizer/mod.rs†L1-L215】
-[^localizeclap]: `localize_clap_error_with_command` rewrites clap error
-messages while keeping the existing rendered tail intact.
-【F:ortho_config/src/localizer/clap_error.rs†L1-L90】
+adjustments and are invoked when `#[ortho_config(post_merge_hook)]` is
+present. See
+[`ortho_config/src/post_merge.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/post_merge.rs).
+\[^localizer\]: `Localizer`, `LocalizationArgs`, and `FluentLocalizer` define
+the CLI localization surface and provide a Fluent-backed implementation.
+See
+[`ortho_config/src/localizer/mod.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/localizer/mod.rs).
+\[^localizeclap\]: `localize_clap_error_with_command` rewrites clap error
+messages while keeping the existing rendered tail intact. See
+[`ortho_config/src/localizer/clap_error.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/localizer/clap_error.rs).
 \[^cli-defaults\]: `cli_default_as_absent` is implemented via the
-`CliValueExtractor` trait to exclude clap defaults from the CLI layer unless
-explicitly provided. 【F:ortho_config/src/merge.rs†L134-L181】
-[^selectedsubcommand]: `SelectedSubcommandMerge` and
-`load_globals_and_merge_selected_subcommand` let you merge the chosen
-subcommand without manual `match` scaffolding.
-【F:ortho_config/src/subcommand/selected.rs†L1-L191】
-\[^display-request\]: `is_display_request` preserves clap's help and version exit
-behaviour when callers use `try_parse()`.
-【F:ortho_config/src/error.rs†L59-L73】
-\[^json-merge\]: `OrthoJsonMergeExt` maps `serde_json::Error` into merge failures
-while preserving detailed diagnostics.
-【F:ortho_config/src/result_ext.rs†L71-L112】
-\[^rstest-bdd\]: The behavioural suites moved from `cucumber-rs` to `rstest-bdd`,
-including tag-aware filtering for YAML scenarios.
-【F:docs/adr-002-replace-cucumber-with-rstest-bdd.md†L9-L47】
-
-<!-- mdformat-on -->
+`CliValueExtractor` trait to exclude clap defaults from the CLI layer
+unless explicitly provided. See
+[`ortho_config/src/merge.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/merge.rs).
+\[^selectedsubcommand\]: `SelectedSubcommandMerge` and
+`load_globals_and_merge_selected_subcommand` let the chosen subcommand be
+merged without manual `match` scaffolding. See
+[`ortho_config/src/subcommand/selected.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/subcommand/selected.rs).
+\[^display-request\]: `is_display_request` preserves clap's help and version
+exit behaviour when callers use `try_parse()`. See
+[`ortho_config/src/error.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/error.rs).
+\[^json-merge\]: `OrthoJsonMergeExt` maps `serde_json::Error` into merge
+failures while preserving detailed diagnostics. See
+[`ortho_config/src/result_ext.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/result_ext.rs).
+\[^rstest-bdd\]: The behavioural suites moved from `cucumber-rs` to
+`rstest-bdd`, including tag-aware filtering for YAML scenarios. See
+[`docs/adr-002-replace-cucumber-with-rstest-bdd.md`](https://github.com/leynos/ortho-config/blob/v0.8.0/docs/adr-002-replace-cucumber-with-rstest-bdd.md).

@@ -41,7 +41,7 @@ pub use review_threads::{
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs, ResolveArgs};
 use clap::{Parser, Subcommand};
 use ortho_config::{
-    SubcmdConfigMerge,
+    OrthoJsonMergeExt, SubcmdConfigMerge,
     declarative::{LayerComposition, MergeLayer, MergeProvenance},
 };
 use regex::Regex;
@@ -180,9 +180,8 @@ fn load_global_args_without_cli_overrides() -> ortho_config::OrthoResult<GlobalA
     let composition = GlobalArgs::compose_layers_from_iter(std::iter::once(OsString::from("vk")));
     let (layers, errors) = composition.into_parts();
     let mut filtered_layers = Vec::with_capacity(layers.len() + 1);
-    filtered_layers.push(MergeLayer::defaults(Cow::Owned(
-        serde_json::to_value(GlobalArgs::default()).expect("GlobalArgs default is serializable"),
-    )));
+    let default_globals = serde_json::to_value(GlobalArgs::default()).into_ortho_merge_json()?;
+    filtered_layers.push(MergeLayer::defaults(Cow::Owned(default_globals)));
 
     for layer in layers {
         if layer.provenance() == MergeProvenance::Cli {
