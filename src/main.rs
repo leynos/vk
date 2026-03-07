@@ -40,9 +40,14 @@ pub use review_threads::{
 
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs, ResolveArgs};
 use clap::{Parser, Subcommand};
-use ortho_config::{OrthoConfig, SubcmdConfigMerge};
+use ortho_config::{
+    SubcmdConfigMerge,
+    declarative::{LayerComposition, MergeLayer, MergeProvenance},
+};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::ffi::OsString;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use thiserror::Error;
@@ -169,6 +174,31 @@ impl From<ortho_config::OrthoError> for VkError {
 pub(crate) static UTF8_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").expect("valid regex"));
 
+/// Load global configuration layers without letting an empty CLI flatten group
+/// overwrite file or environment values.
+fn load_global_args_without_cli_overrides() -> ortho_config::OrthoResult<GlobalArgs> {
+    let composition = GlobalArgs::compose_layers_from_iter(std::iter::once(OsString::from("vk")));
+    let (layers, errors) = composition.into_parts();
+    let mut filtered_layers = Vec::with_capacity(layers.len() + 1);
+    filtered_layers.push(MergeLayer::defaults(Cow::Owned(
+        serde_json::to_value(GlobalArgs::default()).expect("GlobalArgs default is serializable"),
+    )));
+
+    for layer in layers {
+        if layer.provenance() == MergeProvenance::Cli {
+            let value = layer.into_value();
+            if value.is_null() {
+                continue;
+            }
+            filtered_layers.push(MergeLayer::cli(Cow::Owned(value)));
+        } else {
+            filtered_layers.push(layer);
+        }
+    }
+
+    LayerComposition::new(filtered_layers, errors).into_merge_result(GlobalArgs::merge_from_layers)
+}
+
 #[tokio::main]
 async fn main() -> Result<(), VkError> {
     tracing_subscriber::fmt()
@@ -181,7 +211,7 @@ async fn main() -> Result<(), VkError> {
     } = Cli::parse();
 
     let result: Result<(), VkError> = async {
-        let mut global = GlobalArgs::load_from_iter(std::env::args_os().take(1))?;
+        let mut global = load_global_args_without_cli_overrides()?;
         let cli_token = global_cli.github_token.clone();
         global.merge(global_cli);
 
@@ -221,8 +251,8 @@ mod tests {
     use crate::reviews::PullRequestReview;
     use crate::test_utils::{remove_var, set_var};
     use chrono::Utc;
+    use ortho_config::OrthoConfig;
     use serial_test::serial;
-    use std::ffi::OsString;
     use std::sync::Arc;
     use termimad::MadSkin;
     use vk::environment;
@@ -251,6 +281,32 @@ mod tests {
             Cli::try_parse_from(["vk", "--github-token", "token", "pr", "1"]).expect("parse cli");
         assert_eq!(cli.global.github_token.as_deref(), Some("token"));
     }
+
+    #[test]
+    #[serial]
+    fn load_global_args_without_cli_overrides_defaults_cleanly() {
+        let old_repo = environment::var("VK_REPO").ok();
+        let old_token = environment::var("VK_GITHUB_TOKEN").ok();
+        remove_var("VK_REPO");
+        remove_var("VK_GITHUB_TOKEN");
+
+        let global = load_global_args_without_cli_overrides().expect("load global args");
+        assert!(global.repo.is_none());
+        assert!(global.github_token.is_none());
+        assert!(global.transcript.is_none());
+        assert!(global.http_timeout.is_none());
+        assert!(global.connect_timeout.is_none());
+
+        match old_repo {
+            Some(value) => set_var("VK_REPO", value),
+            None => remove_var("VK_REPO"),
+        }
+        match old_token {
+            Some(value) => set_var("VK_GITHUB_TOKEN", value),
+            None => remove_var("VK_GITHUB_TOKEN"),
+        }
+    }
+
     fn assert_is_send_sync<T: Send + Sync>() {}
     #[test]
     fn vk_error_is_send_and_sync() {
