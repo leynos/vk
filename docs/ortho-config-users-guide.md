@@ -549,10 +549,10 @@ resulting in environment variables such as `APP_DB_URL`. The `features` field
 is a `Vec<String>` and accumulates values from multiple sources rather than
 overwriting them.
 
-### Customising configuration discovery
+### Customizing configuration discovery
 
 Configuration discovery can be tailored per struct using the `discovery(...)`
-attribute. The keys recognised today include:
+attribute. The keys recognized today include:
 
 - `app_name`: directory name used under XDG and application data folders.
 - `env_var`: override for the environment variable consulted before discovery
@@ -621,11 +621,11 @@ following steps:
 
 ### Config path override
 
-The derive macro always recognises a configuration override flag and the
+The derive macro always recognizes a configuration override flag and the
 associated environment variables even when no field is declared explicitly. By
 default a hidden `--config-path` flag is accepted alongside
 `<PREFIX>CONFIG_PATH` and the unprefixed `CONFIG_PATH`. Applying the
-struct-level `discovery(...)` attribute customises this behaviour, allowing the
+struct-level `discovery(...)` attribute customizes this behaviour, allowing the
 CLI flag to be renamed or exposed and the filenames searched during discovery
 to be adjusted:
 

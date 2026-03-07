@@ -249,7 +249,7 @@ mod tests {
     use super::*;
     use crate::printer::{write_comment_body, write_review, write_thread};
     use crate::reviews::PullRequestReview;
-    use crate::test_utils::{remove_var, set_var};
+    use crate::test_utils::{remove_var, restore_optional_env, set_var};
     use chrono::Utc;
     use ortho_config::OrthoConfig;
     use serial_test::serial;
@@ -285,10 +285,20 @@ mod tests {
     #[test]
     #[serial]
     fn load_global_args_without_cli_overrides_defaults_cleanly() {
+        let config_sandbox = tempfile::tempdir().expect("create config sandbox");
+        let sandbox = config_sandbox.path().to_string_lossy().into_owned();
         let old_repo = environment::var("VK_REPO").ok();
         let old_token = environment::var("VK_GITHUB_TOKEN").ok();
+        let old_config_path = environment::var("VK_CONFIG_PATH").ok();
+        let old_home = environment::var("HOME").ok();
+        let old_xdg_config_home = environment::var("XDG_CONFIG_HOME").ok();
+        let old_xdg_config_dirs = environment::var("XDG_CONFIG_DIRS").ok();
         remove_var("VK_REPO");
         remove_var("VK_GITHUB_TOKEN");
+        remove_var("VK_CONFIG_PATH");
+        set_var("HOME", &sandbox);
+        set_var("XDG_CONFIG_HOME", &sandbox);
+        set_var("XDG_CONFIG_DIRS", &sandbox);
 
         let global = load_global_args_without_cli_overrides().expect("load global args");
         assert!(global.repo.is_none());
@@ -305,6 +315,10 @@ mod tests {
             Some(value) => set_var("VK_GITHUB_TOKEN", value),
             None => remove_var("VK_GITHUB_TOKEN"),
         }
+        restore_optional_env("VK_CONFIG_PATH", old_config_path);
+        restore_optional_env("HOME", old_home);
+        restore_optional_env("XDG_CONFIG_HOME", old_xdg_config_home);
+        restore_optional_env("XDG_CONFIG_DIRS", old_xdg_config_dirs);
     }
 
     fn assert_is_send_sync<T: Send + Sync>() {}
