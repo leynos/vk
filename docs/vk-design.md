@@ -1,3 +1,5 @@
+<!-- markdownlint-disable MD013 -->
+
 # vk Design
 
 This document describes the design and functionality of the `vk` command line
@@ -67,7 +69,7 @@ even when multiple comments reference the same code.
 - **Configurable timeouts**: `--http-timeout` and `--connect-timeout`
   override the default 10 s request and 5 s connection limits for REST replies.
 
-\[^github-link\]: GitHub Docs. "Linking to a pull request comment."
+[^github-link]: GitHub Docs. "Linking to a pull request comment."
 <https://docs.github.com/en/articles/linking-to-a-pull-request-comment>
 
 ## Architecture

@@ -71,7 +71,7 @@ tests, and documentation with the v0.8.0 migration requirements.
   changes during implementation.
 - `cli_default_as_absent`: no current use was found in the application code.
   Confirm this remains true across the full tree before implementation.
-- Post-merge hooks and localisation: the v0.7.0 guide makes these available,
+- Post-merge hooks and localization: the v0.7.0 guide makes these available,
   but they are optional unless the repository chooses to adopt them for current
   `vk` behaviour or documentation examples.
 - Documentation artifact generation: no existing use of `cargo orthohelp`,
@@ -117,7 +117,7 @@ tests, and documentation with the v0.8.0 migration requirements.
   bespoke merge scaffolding as part of the upgrade.
 - If any cross-field normalization or validation currently happens outside the
   merge pipeline, decide whether a `PostMergeHook` would simplify that logic.
-- If CLI localisation is in scope for `vk`, capture that as an explicit follow-
+- If CLI localization is in scope for `vk`, capture that as an explicit follow-
   on decision rather than leaving the new v0.7.0 surface undocumented.
 
 ### 4. Reconcile derive and import changes

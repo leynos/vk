@@ -1,3 +1,5 @@
+<!-- markdownlint-disable MD013 -->
+
 # Migration guide: v0.5.0 to v0.6.0
 
 ## Table of contents
@@ -220,38 +222,46 @@ announcements.[^changelog]
 Once everything compiles and tests pass, the upgraded configuration experience
 is ready for release.
 
-\[^forwarded-features\]: Optional parser features on `ortho_config` automatically
-enable matching flags on the macro crate, keeping generated code in sync with
-runtime capabilities.【F:ortho_config/Cargo.toml†L41-L45】
-\[^hello-world-cargo\]: The `hello_world` crate forwards its parser feature flags
+[^forwarded-features]: Optional parser features on `ortho_config`
+automatically enable matching flags on the macro crate, keeping generated
+code in sync with runtime capabilities. See
+[`ortho_config/Cargo.toml`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/Cargo.toml).
+[^hello-world-cargo]: The `hello_world` crate forwards its parser feature flags
 to `ortho_config`, so enabling a format once covers both runtime and macro
-usage.【F:examples/hello_world/Cargo.toml†L23-L33】
-\[^reexports\]: `ortho_config` re-exports Figment, optional parser crates, and
+usage. See
+[`examples/hello_world/Cargo.toml`](https://github.com/leynos/ortho-config/blob/v0.8.0/examples/hello_world/Cargo.toml).
+[^reexports]: `ortho_config` re-exports Figment, optional parser crates, and
 supporting utilities for consumers, eliminating redundant direct
-dependencies.【F:ortho_config/src/lib.rs†L11-L61】
-\[^hello-world-figment\]: The `hello_world` example pulls Figment providers from
-the `ortho_config` namespace when layering configuration data.
-【F:examples/hello_world/src/cli/config_loading.rs†L1-L60】 It reuses the same
-imports in tests to assert behaviour under YAML overrides.
-【F:examples/hello_world/src/cli/tests/overrides.rs†L125-L155】
-\[^discovery-attr\]: The derive macro accepts a `discovery(...)` attribute on
-config structs, enabling declarative discovery
-policies.【F:examples/hello_world/src/cli/mod.rs†L174-L211】
-\[^hello-world-discovery\]: The CLI struct uses the discovery attribute to define
+dependencies. See
+[`ortho_config/src/lib.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/lib.rs).
+[^hello-world-figment]: The `hello_world` example pulls Figment providers from
+the `ortho_config` namespace when layering configuration data, and reuses
+the same imports in tests to assert behaviour under YAML overrides. See
+[`examples/hello_world/src/cli/config_loading.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/examples/hello_world/src/cli/config_loading.rs)
+and
+[`examples/hello_world/src/cli/tests/overrides.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/examples/hello_world/src/cli/tests/overrides.rs).
+[^discovery-attr]: The derive macro accepts a `discovery(...)` attribute on
+config structs, enabling declarative discovery policies. See
+[`examples/hello_world/src/cli/mod.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/examples/hello_world/src/cli/mod.rs).
+[^hello-world-discovery]: The CLI struct uses the discovery attribute to define
 file names, CLI flags, and environment overrides without manual builder
-plumbing.【F:examples/hello_world/src/cli/mod.rs†L174-L211】
-\[^discovery-errors\]: `ConfigDiscovery::load_first` now aggregates discovery
-errors, returning `Err` whenever every candidate fails but at least one error
-occurred.【F:ortho_config/src/discovery/mod.rs†L305-L318】
-\[^hello-world-discover-config\]: The shared discovery helper wraps
-`ConfigDiscovery::load_first` and maps aggregated errors into `HelloWorldError`
-for callers.【F:examples/hello_world/src/cli/discovery.rs†L1-L36】
-\[^saphyr\]: The `SaphyrYaml` provider reads files with strict YAML 1.2 semantics
-and backs the format-specific branch of `parse_config_by_format`.
-【F:ortho_config/src/file/mod.rs†L34-L86】
-【F:ortho_config/src/file/mod.rs†L253-L296】
-\[^hello-world-yaml\]: Behavioural tests in `hello_world` create YAML fixtures,
-load them through `ortho_config::load_config_file`, and assert strict parsing
-behaviour.【F:examples/hello_world/src/cli/tests/overrides.rs†L125-L155】
-\[^changelog\]: The Unreleased changelog summarises the v0.6.0 additions and
-behaviour changes discussed in this guide.【F:CHANGELOG.md†L6-L26】
+plumbing. See
+[`examples/hello_world/src/cli/mod.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/examples/hello_world/src/cli/mod.rs).
+[^discovery-errors]: `ConfigDiscovery::load_first` now aggregates discovery
+errors, returning `Err` whenever every candidate fails but at least one
+error occurred. See
+[`ortho_config/src/discovery/mod.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/discovery/mod.rs).
+[^hello-world-discover-config]: The shared discovery helper wraps
+`ConfigDiscovery::load_first` and maps aggregated errors into
+`HelloWorldError` for callers. See
+[`examples/hello_world/src/cli/discovery.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/examples/hello_world/src/cli/discovery.rs).
+[^saphyr]: The `SaphyrYaml` provider reads files with strict YAML 1.2 semantics
+and backs the format-specific branch of `parse_config_by_format`. See
+[`ortho_config/src/file/mod.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/ortho_config/src/file/mod.rs).
+[^hello-world-yaml]: Behavioural tests in `hello_world` create YAML fixtures,
+load them through `ortho_config::load_config_file`, and assert strict
+parsing behaviour. See
+[`examples/hello_world/src/cli/tests/overrides.rs`](https://github.com/leynos/ortho-config/blob/v0.8.0/examples/hello_world/src/cli/tests/overrides.rs).
+[^changelog]: The Unreleased changelog summarises the v0.6.0 additions and
+behaviour changes discussed in this guide. See
+[`CHANGELOG.md`](https://github.com/leynos/ortho-config/blob/v0.8.0/CHANGELOG.md).
