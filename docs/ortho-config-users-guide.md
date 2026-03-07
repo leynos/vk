@@ -854,7 +854,7 @@ expression, use `load_globals_and_merge_selected_subcommand` and supply a
 global loader as a closure.
 
 ```rust
-use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use ortho_config::{SelectedSubcommandMerge, load_globals_and_merge_selected_subcommand};
 
 #[derive(Parser)]
@@ -872,7 +872,9 @@ enum Commands {
 
 // Placeholder types for the example; real subcommands define fields and derive
 // `OrthoConfig`.
+#[derive(Args)]
 struct GreetArgs;
+#[derive(Args)]
 struct RunArgs;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

@@ -100,10 +100,11 @@ tests, and documentation with the v0.8.0 migration requirements.
 - Run a lockfile refresh so the generated dependency graph matches v0.8.0.
 - Inspect the resolved `ortho_config` and transitive parser crates in
   `Cargo.lock` to confirm the expected versions landed.
-- Set `rust-version = "1.89"` in `Cargo.toml` to match the published
-  `ortho_config` v0.8.0 minimum supported Rust version (MSRV). The nightly
-  toolchain in `rust-toolchain.toml` exceeds that floor, but the manifest entry
-  keeps the compatibility contract explicit for stable builds and tooling.
+- Confirm that `Cargo.toml` declares `rust-version = "1.89"` and that it
+  matches the published `ortho_config` v0.8.0 minimum supported Rust version
+  (MSRV). The nightly toolchain in `rust-toolchain.toml` exceeds that floor,
+  but the manifest entry keeps the compatibility contract explicit for stable
+  builds and tooling.
 
 ### 3. Reconcile the v0.7.0 and v0.8.0 API surface
 

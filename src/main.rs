@@ -231,9 +231,7 @@ where
     T: Into<OsString>,
 {
     let mut args = args.into_iter();
-    let mut filtered = vec![args
-        .next()
-        .map_or_else(|| OsString::from("vk"), Into::into)];
+    let mut filtered = vec![args.next().map_or_else(|| OsString::from("vk"), Into::into)];
 
     while let Some(raw_arg) = args.next() {
         let arg = raw_arg.into();
