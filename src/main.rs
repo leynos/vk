@@ -12,10 +12,13 @@ mod commands;
 // configuration helpers have been folded into `ortho_config`
 mod auth;
 mod branch_pr;
+mod config_loader;
 mod diff;
 mod graphql_queries;
 mod html;
 mod issues;
+#[cfg(test)]
+mod main_tests;
 mod printer;
 mod ref_parser;
 mod resolve;
@@ -40,14 +43,9 @@ pub use review_threads::{
 
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs, ResolveArgs};
 use clap::{Parser, Subcommand};
-use ortho_config::{
-    OrthoJsonMergeExt, SubcmdConfigMerge,
-    declarative::{LayerComposition, MergeLayer, MergeProvenance},
-};
+use ortho_config::SubcmdConfigMerge;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::ffi::OsString;
 use std::sync::Arc;
 use std::sync::LazyLock;
 use thiserror::Error;
@@ -174,86 +172,6 @@ impl From<ortho_config::OrthoError> for VkError {
 pub(crate) static UTF8_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").expect("valid regex"));
 
-/// Load global configuration layers without letting an empty CLI flatten group
-/// overwrite file or environment values.
-fn load_global_args_without_cli_overrides() -> ortho_config::OrthoResult<GlobalArgs> {
-    load_global_args_without_cli_overrides_from_process_args(std::env::args_os())
-}
-
-/// Preserve generated discovery overrides from the process argv while
-/// excluding subcommand tokens that `GlobalArgs` cannot parse on its own.
-fn load_global_args_without_cli_overrides_from_process_args<I, T>(
-    args: I,
-) -> ortho_config::OrthoResult<GlobalArgs>
-where
-    I: IntoIterator<Item = T>,
-    T: Into<OsString> + Clone,
-{
-    load_global_args_without_cli_overrides_from_iter(global_discovery_args_from_iter(args))
-}
-
-/// Compose and merge global configuration layers while filtering out an empty
-/// CLI layer that would otherwise flatten grouped values to `null`.
-fn load_global_args_without_cli_overrides_from_iter<I, T>(
-    args: I,
-) -> ortho_config::OrthoResult<GlobalArgs>
-where
-    I: IntoIterator<Item = T>,
-    T: Into<OsString> + Clone,
-{
-    let composition = GlobalArgs::compose_layers_from_iter(args);
-    let (layers, errors) = composition.into_parts();
-    let mut filtered_layers = Vec::with_capacity(layers.len() + 1);
-    let default_globals = serde_json::to_value(GlobalArgs::default()).into_ortho_merge_json()?;
-    filtered_layers.push(MergeLayer::defaults(Cow::Owned(default_globals)));
-
-    for layer in layers {
-        if layer.provenance() == MergeProvenance::Cli {
-            let value = layer.into_value();
-            if value.is_null() {
-                continue;
-            }
-            filtered_layers.push(MergeLayer::cli(Cow::Owned(value)));
-        } else {
-            filtered_layers.push(layer);
-        }
-    }
-
-    LayerComposition::new(filtered_layers, errors).into_merge_result(GlobalArgs::merge_from_layers)
-}
-
-/// Extract the generated `--config-path` discovery override from full process
-/// argv so the global loader can honour explicit config-file selection without
-/// trying to parse subcommand tokens.
-fn global_discovery_args_from_iter<I, T>(args: I) -> Vec<OsString>
-where
-    I: IntoIterator<Item = T>,
-    T: Into<OsString>,
-{
-    let mut args = args.into_iter();
-    let mut filtered = vec![args.next().map_or_else(|| OsString::from("vk"), Into::into)];
-
-    while let Some(raw_arg) = args.next() {
-        let arg = raw_arg.into();
-        if arg == "--config-path" {
-            filtered.push(arg);
-            if let Some(value) = args.next() {
-                filtered.push(value.into());
-            }
-            continue;
-        }
-
-        let Some(arg_str) = arg.to_str() else {
-            continue;
-        };
-        if arg_str.starts_with("--config-path=") {
-            filtered.push(arg);
-        }
-    }
-
-    filtered
-}
-
 #[tokio::main]
 async fn main() -> Result<(), VkError> {
     tracing_subscriber::fmt()
@@ -266,7 +184,7 @@ async fn main() -> Result<(), VkError> {
     } = Cli::parse();
 
     let result: Result<(), VkError> = async {
-        let mut global = load_global_args_without_cli_overrides()?;
+        let mut global = config_loader::load_global_args_without_cli_overrides()?;
         let cli_token = global_cli.github_token.clone();
         global.merge(global_cli);
 
@@ -297,311 +215,4 @@ async fn main() -> Result<(), VkError> {
         std::process::exit(code);
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::printer::{write_comment_body, write_review, write_thread};
-    use crate::reviews::PullRequestReview;
-    use crate::test_utils::{remove_var, restore_optional_env, set_var};
-    use chrono::Utc;
-    use ortho_config::OrthoConfig;
-    use serial_test::serial;
-    use std::sync::Arc;
-    use termimad::MadSkin;
-    use vk::environment;
-
-    /// Parse CLI arguments and extract `PrArgs` from the `Pr` subcommand.
-    ///
-    /// # Panics
-    ///
-    /// Panics if parsing fails or if the command is not `Commands::Pr`.
-    fn parse_pr_args(args: &[&str]) -> PrArgs {
-        let cli = Cli::try_parse_from(args).expect("parse cli");
-        match cli.command {
-            Commands::Pr(pr_args) => pr_args,
-            _ => panic!("expected Pr command, got different variant"),
-        }
-    }
-
-    #[test]
-    fn cli_loads_repo_from_flag() {
-        let cli = Cli::try_parse_from(["vk", "--repo", "foo/bar", "pr", "1"]).expect("parse cli");
-        assert_eq!(cli.global.repo.as_deref(), Some("foo/bar"));
-    }
-    #[test]
-    fn cli_loads_github_token_from_flag() {
-        let cli =
-            Cli::try_parse_from(["vk", "--github-token", "token", "pr", "1"]).expect("parse cli");
-        assert_eq!(cli.global.github_token.as_deref(), Some("token"));
-    }
-
-    #[test]
-    #[serial]
-    fn load_global_args_without_cli_overrides_defaults_cleanly() {
-        let config_sandbox = tempfile::tempdir().expect("create config sandbox");
-        let sandbox = config_sandbox.path().to_string_lossy().into_owned();
-        let old_repo = environment::var("VK_REPO").ok();
-        let old_token = environment::var("VK_GITHUB_TOKEN").ok();
-        let old_config_path = environment::var("VK_CONFIG_PATH").ok();
-        let old_home = environment::var("HOME").ok();
-        let old_xdg_config_home = environment::var("XDG_CONFIG_HOME").ok();
-        let old_xdg_config_dirs = environment::var("XDG_CONFIG_DIRS").ok();
-        remove_var("VK_REPO");
-        remove_var("VK_GITHUB_TOKEN");
-        remove_var("VK_CONFIG_PATH");
-        set_var("HOME", &sandbox);
-        set_var("XDG_CONFIG_HOME", &sandbox);
-        set_var("XDG_CONFIG_DIRS", &sandbox);
-
-        let global = load_global_args_without_cli_overrides_from_iter([OsString::from("vk")])
-            .expect("load global args");
-        assert!(global.repo.is_none());
-        assert!(global.github_token.is_none());
-        assert!(global.transcript.is_none());
-        assert!(global.http_timeout.is_none());
-        assert!(global.connect_timeout.is_none());
-
-        match old_repo {
-            Some(value) => set_var("VK_REPO", value),
-            None => remove_var("VK_REPO"),
-        }
-        match old_token {
-            Some(value) => set_var("VK_GITHUB_TOKEN", value),
-            None => remove_var("VK_GITHUB_TOKEN"),
-        }
-        restore_optional_env("VK_CONFIG_PATH", old_config_path);
-        restore_optional_env("HOME", old_home);
-        restore_optional_env("XDG_CONFIG_HOME", old_xdg_config_home);
-        restore_optional_env("XDG_CONFIG_DIRS", old_xdg_config_dirs);
-    }
-
-    #[test]
-    #[serial]
-    fn load_global_args_without_cli_overrides_honours_config_path_override() {
-        let config_sandbox = tempfile::tempdir().expect("create config sandbox");
-        let sandbox = config_sandbox.path().to_string_lossy().into_owned();
-        let config_path = config_sandbox.path().join("override.toml");
-        std::fs::write(&config_path, "repo = \"from-config-path\"\n").expect("write config");
-
-        let old_repo = environment::var("VK_REPO").ok();
-        let old_token = environment::var("VK_GITHUB_TOKEN").ok();
-        let old_config_path = environment::var("VK_CONFIG_PATH").ok();
-        let old_home = environment::var("HOME").ok();
-        let old_xdg_config_home = environment::var("XDG_CONFIG_HOME").ok();
-        let old_xdg_config_dirs = environment::var("XDG_CONFIG_DIRS").ok();
-        remove_var("VK_REPO");
-        remove_var("VK_GITHUB_TOKEN");
-        remove_var("VK_CONFIG_PATH");
-        set_var("HOME", &sandbox);
-        set_var("XDG_CONFIG_HOME", &sandbox);
-        set_var("XDG_CONFIG_DIRS", &sandbox);
-
-        let global = load_global_args_without_cli_overrides_from_process_args([
-            OsString::from("vk"),
-            OsString::from("--config-path"),
-            config_path.into_os_string(),
-            OsString::from("pr"),
-            OsString::from("1"),
-        ])
-        .expect("load global args");
-
-        assert_eq!(global.repo.as_deref(), Some("from-config-path"));
-
-        match old_repo {
-            Some(value) => set_var("VK_REPO", value),
-            None => remove_var("VK_REPO"),
-        }
-        match old_token {
-            Some(value) => set_var("VK_GITHUB_TOKEN", value),
-            None => remove_var("VK_GITHUB_TOKEN"),
-        }
-        restore_optional_env("VK_CONFIG_PATH", old_config_path);
-        restore_optional_env("HOME", old_home);
-        restore_optional_env("XDG_CONFIG_HOME", old_xdg_config_home);
-        restore_optional_env("XDG_CONFIG_DIRS", old_xdg_config_dirs);
-    }
-
-    fn assert_is_send_sync<T: Send + Sync>() {}
-    #[test]
-    fn vk_error_is_send_and_sync() {
-        assert_is_send_sync::<VkError>();
-    }
-    #[test]
-    #[serial]
-    fn vk_error_config_from_arc_preserves_allocation() {
-        let old_timeout = environment::var("VK_HTTP_TIMEOUT").ok();
-        remove_var("VK_HTTP_TIMEOUT");
-        set_var("VK_HTTP_TIMEOUT", "not-a-number");
-        let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
-            .expect_err("invalid VK_HTTP_TIMEOUT should fail");
-        let original = err.clone();
-        let converted: VkError = err.into();
-        match converted {
-            VkError::Config(stored) => assert!(
-                Arc::ptr_eq(&stored, &original),
-                "conversion from Arc should preserve the original allocation"
-            ),
-            other => panic!("expected VkError::Config, got {other:?}"),
-        }
-        match old_timeout {
-            Some(v) => set_var("VK_HTTP_TIMEOUT", v),
-            None => remove_var("VK_HTTP_TIMEOUT"),
-        }
-    }
-    #[test]
-    #[serial]
-    fn vk_error_config_from_owned_ortho_error_wraps_in_arc() {
-        let old_timeout = environment::var("VK_HTTP_TIMEOUT").ok();
-        remove_var("VK_HTTP_TIMEOUT");
-        set_var("VK_HTTP_TIMEOUT", "not-a-number");
-        let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
-            .expect_err("invalid VK_HTTP_TIMEOUT should fail");
-        let err = Arc::try_unwrap(err).expect("unique ortho_config error Arc");
-        let converted: VkError = err.into();
-        match converted {
-            VkError::Config(stored) => assert_eq!(
-                Arc::strong_count(&stored),
-                1,
-                "owned OrthoError conversion should produce a single-owner Arc"
-            ),
-            other => panic!("expected VkError::Config, got {other:?}"),
-        }
-        match old_timeout {
-            Some(v) => set_var("VK_HTTP_TIMEOUT", v),
-            None => remove_var("VK_HTTP_TIMEOUT"),
-        }
-    }
-    #[test]
-    fn cli_requires_subcommand() {
-        assert!(Cli::try_parse_from(["vk"]).is_err());
-    }
-    #[test]
-    fn pr_subcommand_parses() {
-        let args = parse_pr_args(&["vk", "pr", "123"]);
-        assert_eq!(args.reference.as_deref(), Some("123"));
-        assert!(args.files.is_empty());
-    }
-    #[test]
-    fn pr_subcommand_parses_files() {
-        let args = parse_pr_args(&["vk", "pr", "123", "src/lib.rs", "README.md"]);
-        assert_eq!(args.reference.as_deref(), Some("123"));
-        assert_eq!(args.files, ["src/lib.rs", "README.md"]);
-    }
-    #[test]
-    fn pr_subcommand_parses_without_reference() {
-        let args = parse_pr_args(&["vk", "pr"]);
-        assert!(args.reference.is_none());
-        assert!(args.files.is_empty());
-    }
-    #[test]
-    fn pr_subcommand_parses_fragment_only() {
-        let args = parse_pr_args(&["vk", "pr", "#discussion_r123"]);
-        assert_eq!(args.reference.as_deref(), Some("#discussion_r123"));
-    }
-    #[test]
-    fn pr_subcommand_parses_url() {
-        let args = parse_pr_args(&[
-            "vk",
-            "pr",
-            "https://github.com/owner/repo/pull/42#discussion_r99",
-        ]);
-        assert_eq!(
-            args.reference.as_deref(),
-            Some("https://github.com/owner/repo/pull/42#discussion_r99")
-        );
-    }
-    #[test]
-    fn issue_subcommand_parses() {
-        let cli = Cli::try_parse_from(["vk", "issue", "123"]).expect("parse cli");
-        match cli.command {
-            Commands::Issue(args) => assert_eq!(args.reference.as_deref(), Some("123")),
-            _ => panic!("wrong variant"),
-        }
-    }
-    #[test]
-    fn resolve_subcommand_parses() {
-        let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1"]).expect("parse cli");
-        match cli.command {
-            Commands::Resolve(args) => {
-                assert_eq!(args.reference, "83#discussion_r1");
-                assert!(args.message.is_none());
-            }
-            _ => panic!("wrong variant"),
-        }
-    }
-    #[test]
-    fn resolve_subcommand_parses_message() {
-        let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1", "-m", "done"])
-            .expect("parse cli");
-        match cli.command {
-            Commands::Resolve(args) => {
-                assert_eq!(args.reference, "83#discussion_r1");
-                assert_eq!(args.message.as_deref(), Some("done"));
-            }
-            _ => panic!("wrong variant"),
-        }
-    }
-    #[test]
-    fn version_flag_displays_version() {
-        let err = Cli::try_parse_from(["vk", "--version"]).expect_err("display version");
-        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
-        assert!(err.to_string().contains(env!("CARGO_PKG_VERSION")));
-    }
-    #[test]
-    fn write_thread_emits_diff_once() {
-        let diff = "@@ -1 +1 @@\n-old\n+new\n";
-        let c1 = ReviewComment {
-            diff_hunk: diff.into(),
-            url: "http://u1".into(),
-            ..Default::default()
-        };
-        let c2 = ReviewComment {
-            diff_hunk: diff.into(),
-            url: "http://u2".into(),
-            ..Default::default()
-        };
-        let thread = ReviewThread {
-            comments: CommentConnection {
-                nodes: vec![c1, c2],
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let skin = MadSkin::default();
-        let mut buf = Vec::new();
-        write_thread(&mut buf, &skin, &thread).expect("write thread");
-        let out = String::from_utf8(buf).expect("utf8");
-        assert_eq!(out.matches("|-old").count(), 1);
-        assert_eq!(out.matches("wrote:").count(), 2);
-    }
-    #[test]
-    fn comment_body_collapses_details() {
-        let comment = ReviewComment {
-            body: "<details><summary>note</summary>hidden</details>".into(),
-            ..Default::default()
-        };
-        let skin = MadSkin::default();
-        let mut buf = Vec::new();
-        write_comment_body(&mut buf, &skin, &comment).expect("write comment");
-        let out = String::from_utf8(buf).expect("utf8");
-        assert!(out.contains("\u{25B6} note"));
-        assert!(!out.contains("hidden"));
-    }
-    #[test]
-    fn review_body_collapses_details() {
-        let review = PullRequestReview {
-            body: "<details><summary>hello</summary>bye</details>".into(),
-            submitted_at: Some(Utc::now()),
-            state: "APPROVED".into(),
-            author: None,
-        };
-        let skin = MadSkin::default();
-        let mut buf = Vec::new();
-        write_review(&mut buf, &skin, &review).expect("write review");
-        let out = String::from_utf8(buf).expect("utf8");
-        assert!(out.contains("\u{25B6} hello"));
-        assert!(!out.contains("bye"));
-    }
 }
