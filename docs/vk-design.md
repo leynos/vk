@@ -1,5 +1,3 @@
-<!-- markdownlint-disable MD013 -->
-
 # vk Design
 
 This document describes the design and functionality of the `vk` command line
@@ -72,6 +70,9 @@ even when multiple comments reference the same code.
 <!-- mdformat off -->
 
 \[^github-link\]: GitHub Docs. "Linking to a pull request comment."
+
+<!-- markdownlint-disable-next-line MD013 -->
+
 <https://docs.github.com/en/articles/linking-to-a-pull-request-comment>
 
 <!-- mdformat on -->
@@ -287,7 +288,9 @@ flowchart TD
     NEED_REPO --> FETCH_THREADS
 
     FETCH_THREADS[Fetch review threads] --> DISPLAY[Display comments]
-    FETCH_WITH_FRAG[Fetch threads<br/>filter by fragment] --> FIND_THREAD[Find thread containing<br/>discussion comment]
+    FETCH_WITH_FRAG[Threads by<br/>fragment]
+    FIND_THREAD[Find thread<br/>with comment]
+    FETCH_WITH_FRAG --> FIND_THREAD
     FIND_THREAD --> DISPLAY
 ```
 

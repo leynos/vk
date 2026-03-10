@@ -6,7 +6,6 @@ use crate::reviews::PullRequestReview;
 use crate::test_utils::{remove_var, set_var};
 use chrono::Utc;
 use ortho_config::OrthoConfig;
-use rstest::{fixture, rstest};
 use serial_test::serial;
 use std::ffi::OsString;
 use std::sync::Arc;
@@ -25,6 +24,20 @@ fn parse_pr_args(args: &[&str]) -> PrArgs {
     }
 }
 
+/// Parse CLI arguments and extract `ResolveArgs` from the `Resolve`
+/// subcommand.
+///
+/// # Panics
+///
+/// Panics if parsing fails or if the command is not `Commands::Resolve`.
+fn parse_resolve_args(args: &[&str]) -> ResolveArgs {
+    let cli = Cli::try_parse_from(args).expect("parse cli");
+    match cli.command {
+        Commands::Resolve(resolve_args) => resolve_args,
+        _ => panic!("expected Resolve command, got different variant"),
+    }
+}
+
 #[test]
 fn cli_loads_repo_from_flag() {
     let cli = Cli::try_parse_from(["vk", "--repo", "foo/bar", "pr", "1"]).expect("parse cli");
@@ -39,27 +52,25 @@ fn cli_loads_github_token_from_flag() {
 
 fn assert_is_send_sync<T: Send + Sync>() {}
 
-struct EnvGuard {
-    key: &'static str,
-    original: Option<String>,
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        match self.original.take() {
-            Some(value) => set_var(self.key, value),
-            None => remove_var(self.key),
-        }
-    }
-}
-
-#[fixture]
-fn invalid_http_timeout() -> EnvGuard {
-    let original = environment::var("VK_HTTP_TIMEOUT").ok();
+/// Load `GlobalArgs` with an invalid `VK_HTTP_TIMEOUT` so tests can exercise
+/// the resulting configuration error.
+///
+/// # Panics
+///
+/// Panics if `GlobalArgs::load_from_iter` unexpectedly succeeds.
+fn with_invalid_http_timeout_error<F>(f: F)
+where
+    F: FnOnce(Arc<ortho_config::OrthoError>),
+{
+    let old_timeout = environment::var("VK_HTTP_TIMEOUT").ok();
+    remove_var("VK_HTTP_TIMEOUT");
     set_var("VK_HTTP_TIMEOUT", "not-a-number");
-    EnvGuard {
-        key: "VK_HTTP_TIMEOUT",
-        original,
+    let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
+        .expect_err("invalid VK_HTTP_TIMEOUT should fail");
+    f(err);
+    match old_timeout {
+        Some(value) => set_var("VK_HTTP_TIMEOUT", value),
+        None => remove_var("VK_HTTP_TIMEOUT"),
     }
 }
 
@@ -68,39 +79,37 @@ fn vk_error_is_send_and_sync() {
     assert_is_send_sync::<VkError>();
 }
 
-#[rstest]
 #[serial]
-fn vk_error_config_from_arc_preserves_allocation(invalid_http_timeout: EnvGuard) {
-    let _guard = invalid_http_timeout;
-    let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
-        .expect_err("invalid VK_HTTP_TIMEOUT should fail");
-    let original = err.clone();
-    let converted: VkError = err.into();
-    match converted {
-        VkError::Config(stored) => assert!(
-            Arc::ptr_eq(&stored, &original),
-            "conversion from Arc should preserve the original allocation"
-        ),
-        other => panic!("expected VkError::Config, got {other:?}"),
-    }
+#[test]
+fn vk_error_config_from_arc_preserves_allocation() {
+    with_invalid_http_timeout_error(|err| {
+        let original = err.clone();
+        let converted: VkError = err.into();
+        match converted {
+            VkError::Config(stored) => assert!(
+                Arc::ptr_eq(&stored, &original),
+                "conversion from Arc should preserve the original allocation"
+            ),
+            other => panic!("expected VkError::Config, got {other:?}"),
+        }
+    });
 }
 
-#[rstest]
 #[serial]
-fn vk_error_config_from_owned_ortho_error_wraps_in_arc(invalid_http_timeout: EnvGuard) {
-    let _guard = invalid_http_timeout;
-    let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
-        .expect_err("invalid VK_HTTP_TIMEOUT should fail");
-    let err = Arc::try_unwrap(err).expect("unique ortho_config error Arc");
-    let converted: VkError = err.into();
-    match converted {
-        VkError::Config(stored) => assert_eq!(
-            Arc::strong_count(&stored),
-            1,
-            "owned OrthoError conversion should produce a single-owner Arc"
-        ),
-        other => panic!("expected VkError::Config, got {other:?}"),
-    }
+#[test]
+fn vk_error_config_from_owned_ortho_error_wraps_in_arc() {
+    with_invalid_http_timeout_error(|err| {
+        let err = Arc::try_unwrap(err).expect("unique ortho_config error Arc");
+        let converted: VkError = err.into();
+        match converted {
+            VkError::Config(stored) => assert_eq!(
+                Arc::strong_count(&stored),
+                1,
+                "owned OrthoError conversion should produce a single-owner Arc"
+            ),
+            other => panic!("expected VkError::Config, got {other:?}"),
+        }
+    });
 }
 
 #[test]
@@ -159,27 +168,16 @@ fn issue_subcommand_parses() {
 
 #[test]
 fn resolve_subcommand_parses() {
-    let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1"]).expect("parse cli");
-    match cli.command {
-        Commands::Resolve(args) => {
-            assert_eq!(args.reference, "83#discussion_r1");
-            assert!(args.message.is_none());
-        }
-        _ => panic!("wrong variant"),
-    }
+    let args = parse_resolve_args(&["vk", "resolve", "83#discussion_r1"]);
+    assert_eq!(args.reference, "83#discussion_r1");
+    assert!(args.message.is_none());
 }
 
 #[test]
 fn resolve_subcommand_parses_message() {
-    let cli = Cli::try_parse_from(["vk", "resolve", "83#discussion_r1", "-m", "done"])
-        .expect("parse cli");
-    match cli.command {
-        Commands::Resolve(args) => {
-            assert_eq!(args.reference, "83#discussion_r1");
-            assert_eq!(args.message.as_deref(), Some("done"));
-        }
-        _ => panic!("wrong variant"),
-    }
+    let args = parse_resolve_args(&["vk", "resolve", "83#discussion_r1", "-m", "done"]);
+    assert_eq!(args.reference, "83#discussion_r1");
+    assert_eq!(args.message.as_deref(), Some("done"));
 }
 
 #[test]
