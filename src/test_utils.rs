@@ -6,8 +6,11 @@
 use crate::api::{GraphQLClient, RetryConfig};
 use vk::environment;
 
+use std::env;
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc,
+    Arc, Mutex, MutexGuard, OnceLock,
     atomic::{AtomicUsize, Ordering},
 };
 use third_wheel::hyper::{
@@ -115,4 +118,115 @@ pub fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, val
 /// The global mutex serialises modifications so parallel tests do not race.
 pub fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
     environment::remove_var(key);
+}
+
+static ENV_SANDBOX_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+const SANDBOXED_ENV_KEYS: &[&str] = &[
+    "VK_REPO",
+    "VK_GITHUB_TOKEN",
+    "VK_TRANSCRIPT",
+    "VK_HTTP_TIMEOUT",
+    "VK_CONNECT_TIMEOUT",
+    "VK_CONFIG_PATH",
+    "CONFIG_PATH",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_CONFIG_DIRS",
+];
+
+fn env_sandbox_lock() -> MutexGuard<'static, ()> {
+    ENV_SANDBOX_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("environment sandbox lock poisoned")
+}
+
+/// RAII guard that isolates configuration discovery inputs for a test.
+///
+/// The sandbox snapshots relevant configuration environment variables and the
+/// current working directory, points discovery-related paths at an empty
+/// temporary directory, and restores everything on drop.
+///
+/// # Examples
+///
+/// ```ignore
+/// let sandbox = vk::test_utils::EnvSandbox::new();
+/// let config_path = sandbox.path().join("vk.toml");
+/// ```
+pub struct EnvSandbox {
+    current_dir: PathBuf,
+    original_env: Vec<(&'static str, Option<OsString>)>,
+    sandbox_dir: tempfile::TempDir,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl EnvSandbox {
+    /// Create a new isolated environment and working-directory sandbox.
+    #[must_use]
+    pub fn new() -> Self {
+        let guard = env_sandbox_lock();
+        let sandbox_dir = tempfile::tempdir().expect("create environment sandbox");
+        let sandbox_path = sandbox_dir.path().to_path_buf();
+        let current_dir = environment::with_lock(env::current_dir).expect("capture current dir");
+        let original_env = environment::with_lock(|| {
+            SANDBOXED_ENV_KEYS
+                .iter()
+                .map(|key| (*key, env::var_os(key)))
+                .collect::<Vec<_>>()
+        });
+
+        environment::with_lock(|| {
+            for key in SANDBOXED_ENV_KEYS {
+                // SAFETY: `environment::with_lock` serialises process-wide env access.
+                unsafe { env::remove_var(key) };
+            }
+            for key in [
+                "APPDATA",
+                "LOCALAPPDATA",
+                "HOME",
+                "XDG_CONFIG_HOME",
+                "XDG_CONFIG_DIRS",
+            ] {
+                // SAFETY: `environment::with_lock` serialises process-wide env access.
+                unsafe { env::set_var(key, &sandbox_path) };
+            }
+        });
+        env::set_current_dir(&sandbox_path).expect("switch to environment sandbox");
+
+        Self {
+            current_dir,
+            original_env,
+            sandbox_dir,
+            _guard: guard,
+        }
+    }
+
+    /// Return the root path of the temporary discovery sandbox.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        self.sandbox_dir.path()
+    }
+}
+
+impl Drop for EnvSandbox {
+    fn drop(&mut self) {
+        env::set_current_dir(&self.current_dir).expect("restore current dir");
+        environment::with_lock(|| {
+            for (key, value) in &self.original_env {
+                match value {
+                    Some(saved) => {
+                        // SAFETY: `environment::with_lock` serialises process-wide env access.
+                        unsafe { env::set_var(OsStr::new(key), saved) };
+                    }
+                    None => {
+                        // SAFETY: `environment::with_lock` serialises process-wide env access.
+                        unsafe { env::remove_var(OsStr::new(key)) };
+                    }
+                }
+            }
+        });
+    }
 }

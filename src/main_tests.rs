@@ -6,6 +6,7 @@ use crate::reviews::PullRequestReview;
 use crate::test_utils::{remove_var, set_var};
 use chrono::Utc;
 use ortho_config::OrthoConfig;
+use rstest::{fixture, rstest};
 use serial_test::serial;
 use std::ffi::OsString;
 use std::sync::Arc;
@@ -38,17 +39,39 @@ fn cli_loads_github_token_from_flag() {
 
 fn assert_is_send_sync<T: Send + Sync>() {}
 
+struct EnvGuard {
+    key: &'static str,
+    original: Option<String>,
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match self.original.take() {
+            Some(value) => set_var(self.key, value),
+            None => remove_var(self.key),
+        }
+    }
+}
+
+#[fixture]
+fn invalid_http_timeout() -> EnvGuard {
+    let original = environment::var("VK_HTTP_TIMEOUT").ok();
+    set_var("VK_HTTP_TIMEOUT", "not-a-number");
+    EnvGuard {
+        key: "VK_HTTP_TIMEOUT",
+        original,
+    }
+}
+
 #[test]
 fn vk_error_is_send_and_sync() {
     assert_is_send_sync::<VkError>();
 }
 
-#[test]
+#[rstest]
 #[serial]
-fn vk_error_config_from_arc_preserves_allocation() {
-    let old_timeout = environment::var("VK_HTTP_TIMEOUT").ok();
-    remove_var("VK_HTTP_TIMEOUT");
-    set_var("VK_HTTP_TIMEOUT", "not-a-number");
+fn vk_error_config_from_arc_preserves_allocation(invalid_http_timeout: EnvGuard) {
+    let _guard = invalid_http_timeout;
     let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
         .expect_err("invalid VK_HTTP_TIMEOUT should fail");
     let original = err.clone();
@@ -60,18 +83,12 @@ fn vk_error_config_from_arc_preserves_allocation() {
         ),
         other => panic!("expected VkError::Config, got {other:?}"),
     }
-    match old_timeout {
-        Some(v) => set_var("VK_HTTP_TIMEOUT", v),
-        None => remove_var("VK_HTTP_TIMEOUT"),
-    }
 }
 
-#[test]
+#[rstest]
 #[serial]
-fn vk_error_config_from_owned_ortho_error_wraps_in_arc() {
-    let old_timeout = environment::var("VK_HTTP_TIMEOUT").ok();
-    remove_var("VK_HTTP_TIMEOUT");
-    set_var("VK_HTTP_TIMEOUT", "not-a-number");
+fn vk_error_config_from_owned_ortho_error_wraps_in_arc(invalid_http_timeout: EnvGuard) {
+    let _guard = invalid_http_timeout;
     let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
         .expect_err("invalid VK_HTTP_TIMEOUT should fail");
     let err = Arc::try_unwrap(err).expect("unique ortho_config error Arc");
@@ -83,10 +100,6 @@ fn vk_error_config_from_owned_ortho_error_wraps_in_arc() {
             "owned OrthoError conversion should produce a single-owner Arc"
         ),
         other => panic!("expected VkError::Config, got {other:?}"),
-    }
-    match old_timeout {
-        Some(v) => set_var("VK_HTTP_TIMEOUT", v),
-        None => remove_var("VK_HTTP_TIMEOUT"),
     }
 }
 

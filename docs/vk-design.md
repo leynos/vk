@@ -69,17 +69,25 @@ even when multiple comments reference the same code.
 - **Configurable timeouts**: `--http-timeout` and `--connect-timeout`
   override the default 10 s request and 5 s connection limits for REST replies.
 
+<!-- mdformat off -->
+
 \[^github-link\]: GitHub Docs. "Linking to a pull request comment."
 <https://docs.github.com/en/articles/linking-to-a-pull-request-comment>
+
+<!-- mdformat on -->
 
 ## Architecture
 
 The code centres on three printing helpers:
 
+<!-- mdformat off -->
+
 1. `write_comment_body` formats a single comment body to any `Write`
    implementation.
 1. `write_comment` includes the diff for the first comment in a thread.
 1. `write_thread` iterates over a thread and prints each comment body in turn.
+
+<!-- mdformat on -->
 
 `run_pr` fetches the latest review from each reviewer and all unresolved
 threads. The helper `fetch_review_threads_with_options` accepts a

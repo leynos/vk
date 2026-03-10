@@ -244,6 +244,8 @@ fn test_help_output_is_displayed_successfully() {
 To run this test, execute `cargo test` in the terminal. A successful run of
 this test provides high confidence that:
 
+<!-- mdformat off -->
+
 1. The `[dev-dependencies]` are correctly configured.
 
 1. Cargo's test runner can find and compile the `tests/e2e.rs` file.
@@ -251,6 +253,8 @@ this test provides high confidence that:
 1. `assert_cmd` is able to locate the `vk` binary produced by the build process.
 
 1. The basic assertion mechanism is working as expected.
+
+<!-- mdformat on -->
 
 With this foundation in place, the next step is to introduce the complexity of
 API mocking.
@@ -632,6 +636,8 @@ saved snapshot. If there is any difference, the test fails, and the library
 presents a "diff" that clearly highlights the changes.[^13] This allows the
 developer to:
 
+<!-- mdformat off -->
+
 1. Quickly identify an unintended change (a regression).
 
 1. Consciously "approve" an intentional change, causing the snapshot to be
@@ -701,19 +707,21 @@ intuitive, revolving around the `cargo-insta` command-line tool.[^13]
    variable controls `insta`'s behaviour in non-interactive environments like
    CI pipelines.[^13]
 
-   - `INSTA_UPDATE=no`: This is the default behaviour in most CI environments.
-     If a snapshot mismatch is found, the test fails, and no files are written.
-     This is the correct setting for CI, as it should only verify, not update,
-     tests.
+<!-- mdformat on -->
 
-   - `INSTA_UPDATE=always`: This mode will cause `insta` to automatically
-     overwrite any mismatched snapshots with the new output. This can be useful
-     for bulk-updating many snapshots after a large, intentional change, but it
-     should be used with extreme caution as it bypasses the crucial review step.
+- `INSTA_UPDATE=no`: This is the default behaviour in most CI environments.
+  If a snapshot mismatch is found, the test fails, and no files are written.
+  This is the correct setting for CI, as it should only verify, not update,
+  tests.
 
-   - `INSTA_UPDATE=new`: This is the default for local runs. It writes new or
-     changed snapshots to files with a `.new` extension, marking them as
-     pending for review with `cargo insta review`.
+- `INSTA_UPDATE=always`: This mode will cause `insta` to automatically
+  overwrite any mismatched snapshots with the new output. This can be useful
+  for bulk-updating many snapshots after a large, intentional change, but it
+  should be used with extreme caution as it bypasses the crucial review step.
+
+- `INSTA_UPDATE=new`: This is the default for local runs. It writes new or
+  changed snapshots to files with a `.new` extension, marking them as
+  pending for review with `cargo insta review`.
 
 ### Handling Non-Deterministic Data with Redactions
 
@@ -1017,6 +1025,8 @@ foundation of quality and confidence for future development.
 
 ## Works cited
 
+<!-- mdformat off -->
+
 \[^1\]: People following @[vee.cool](http://vee.cool) — Bluesky, accessed on July
 20, 2025, <https://web-cdn.bsky.app/profile/vee.cool/followers>
 
@@ -1099,3 +1109,5 @@ accessed on July 20, 2025,
 \[^25\]: Ultimate Guide to Testing and Debugging Rust Code | 2024 - Rapid
 Innovation, accessed on July 20, 2025,
 <https://www.rapidinnovation.io/post/testing-and-debugging-rust-code>
+
+<!-- mdformat on -->

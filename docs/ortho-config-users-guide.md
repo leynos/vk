@@ -580,6 +580,8 @@ apply.
 The `load_from_iter` method (used by the convenience `load`) performs the
 following steps:
 
+<!-- mdformat off -->
+
 1. Builds a `figment` configuration profile. A defaults provider constructed
    from the `#[ortho_config(default = …)]` attributes is added first.
 
@@ -618,6 +620,8 @@ following steps:
 1. Attempts to extract the merged configuration into the concrete struct. On
    success it returns the completed configuration; otherwise an `OrthoError` is
    returned.
+
+<!-- mdformat on -->
 
 ### Config path override
 
@@ -663,6 +667,8 @@ and `CONFIG_PATH`, and the automatically derived dotfile names—remain in effec
 Values are loaded from each layer in a specific order. Later layers override
 earlier ones. The precedence, from lowest to highest, is:
 
+<!-- mdformat off -->
+
 1. **Application‑defined defaults** – values provided via `default` attributes
    or `Option<T>` fields are considered defaults.
 
@@ -674,6 +680,8 @@ earlier ones. The precedence, from lowest to highest, is:
 
 1. **Command‑line arguments** – values parsed by `clap` override all other
    sources.
+
+<!-- mdformat on -->
 
 Nested structs are flattened in the environment namespace by joining field
 names with double underscores. For example, if `AppConfig` has a nested
@@ -960,10 +968,14 @@ remains available for generated defaults/documentation metadata.
 
 **Precedence with the attribute (lowest to highest):**
 
+<!-- mdformat off -->
+
 1. Struct default (`#[ortho_config(default = ...)]` or inferred from clap)
 1. Configuration file
 1. Environment variable
 1. Explicit CLI override (e.g. `--punctuation "?"`)
+
+<!-- mdformat on -->
 
 Without `cli_default_as_absent`, the clap default would always beat the file
 and environment layers. With the attribute, calling `greet` without
@@ -1189,6 +1201,8 @@ cargo orthohelp --format man --out-dir target/man --locale en-US
 
 The generator produces standard man page sections in the canonical order:
 
+<!-- mdformat off -->
+
 1. **NAME** – binary name and one-line description
 1. **SYNOPSIS** – usage pattern with flags
 1. **DESCRIPTION** – expanded about text
@@ -1199,6 +1213,8 @@ The generator produces standard man page sections in the canonical order:
 1. **EXAMPLES** – usage examples from the IR
 1. **SEE ALSO** – related commands and documentation links
 1. **EXIT STATUS** – standard exit codes
+
+<!-- mdformat on -->
 
 Additional options:
 

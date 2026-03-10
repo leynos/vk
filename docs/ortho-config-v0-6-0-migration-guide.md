@@ -48,6 +48,8 @@ ortho_config = { version = "0.6.0", features = ["yaml"] }
 ortho_config_macros = "0.6.0"
 ```
 
+<!-- mdformat off -->
+
 1. Change every `ortho_config` dependency (workspace metadata, application
    crates, and supporting tools) to `"0.6.0"`. This keeps the runtime crate and
    the derive macro in lockstep, ensuring generated code matches the new
@@ -58,6 +60,8 @@ ortho_config_macros = "0.6.0"
    `ortho_config_macros`.[^forwarded-features]
 1. Rebuild the project to confirm the upgraded macro compiles cleanly before
    proceeding with behavioural changes.
+
+<!-- mdformat on -->
 
 The `hello_world` example continues to expose feature toggles via the parent
 crate so that enabling `json5`, `yaml`, or `toml` automatically propagates to
@@ -222,6 +226,8 @@ announcements.[^changelog]
 Once everything compiles and tests pass, the upgraded configuration experience
 is ready for release.
 
+<!-- mdformat off -->
+
 \[^forwarded-features\]: Optional parser features on `ortho_config`
 automatically enable matching flags on the macro crate, keeping generated
 code in sync with runtime capabilities. See
@@ -265,3 +271,5 @@ parsing behaviour. See
 \[^changelog\]: The Unreleased changelog summarizes the v0.6.0 additions and
 behaviour changes discussed in this guide. See
 [`CHANGELOG.md`](https://github.com/leynos/ortho-config/blob/v0.6.0/CHANGELOG.md).
+
+<!-- mdformat on -->

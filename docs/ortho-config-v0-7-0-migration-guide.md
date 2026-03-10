@@ -45,6 +45,8 @@ ortho_config = { version = "0.7.0", features = ["yaml"] }
 ortho_config_macros = "0.7.0"
 ```
 
+<!-- mdformat off -->
+
 1. Update every `ortho_config` and `ortho_config_macros` dependency to `0.7.0`.
 1. Keep format features (`toml`, `json5`, `yaml`) on `ortho_config` as before.
 1. When default features are disabled, enable `serde_json` explicitly whenever
@@ -53,6 +55,8 @@ ortho_config_macros = "0.7.0"
 1. Expect new transitive dependencies (`fluent-bundle`, `fluent-syntax`,
    `unic-langid`, and `tracing`) to land with v0.7.0, as they power CLI
    localization support.[^deps-0-7]
+
+<!-- mdformat on -->
 
 ## 2. Compose layers separately from merging
 
@@ -184,6 +188,8 @@ step. Variants that depend on `cli_default_as_absent` should be annotated with
   updated to use the `rstest-bdd` macros and compile-time tag filters (for
   example, gating YAML scenarios).[^rstest-bdd]
 
+<!-- mdformat off -->
+
 \[^deps-0-7\]: v0.7.0 adds Fluent and localization dependencies alongside the
 existing feature flags in the runtime crate and macro crate metadata. See
 [`ortho_config/Cargo.toml`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/Cargo.toml)
@@ -223,3 +229,5 @@ failures while preserving detailed diagnostics. See
 \[^rstest-bdd\]: The behavioural suites moved from `cucumber-rs` to
 `rstest-bdd`, including tag-aware filtering for YAML scenarios. See
 [`docs/adr-002-replace-cucumber-with-rstest-bdd.md`](https://github.com/leynos/ortho-config/blob/v0.7.0/docs/adr-002-replace-cucumber-with-rstest-bdd.md).
+
+<!-- mdformat on -->

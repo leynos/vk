@@ -100,28 +100,14 @@ mod tests {
         load_global_args_without_cli_overrides_from_iter,
         load_global_args_without_cli_overrides_from_process_args,
     };
-    use crate::test_utils::{remove_var, restore_optional_env, set_var};
+    use crate::test_utils::EnvSandbox;
     use serial_test::serial;
     use std::ffi::OsString;
-    use vk::environment;
 
     #[test]
     #[serial]
     fn load_global_args_without_cli_overrides_defaults_cleanly() {
-        let config_sandbox = tempfile::tempdir().expect("create config sandbox");
-        let sandbox = config_sandbox.path().to_string_lossy().into_owned();
-        let old_repo = environment::var("VK_REPO").ok();
-        let old_token = environment::var("VK_GITHUB_TOKEN").ok();
-        let old_config_path = environment::var("VK_CONFIG_PATH").ok();
-        let old_home = environment::var("HOME").ok();
-        let old_xdg_config_home = environment::var("XDG_CONFIG_HOME").ok();
-        let old_xdg_config_dirs = environment::var("XDG_CONFIG_DIRS").ok();
-        remove_var("VK_REPO");
-        remove_var("VK_GITHUB_TOKEN");
-        remove_var("VK_CONFIG_PATH");
-        set_var("HOME", &sandbox);
-        set_var("XDG_CONFIG_HOME", &sandbox);
-        set_var("XDG_CONFIG_DIRS", &sandbox);
+        let _sandbox = EnvSandbox::new();
 
         let global = load_global_args_without_cli_overrides_from_iter([OsString::from("vk")])
             .expect("load global args");
@@ -130,41 +116,14 @@ mod tests {
         assert!(global.transcript.is_none());
         assert!(global.http_timeout.is_none());
         assert!(global.connect_timeout.is_none());
-
-        match old_repo {
-            Some(value) => set_var("VK_REPO", value),
-            None => remove_var("VK_REPO"),
-        }
-        match old_token {
-            Some(value) => set_var("VK_GITHUB_TOKEN", value),
-            None => remove_var("VK_GITHUB_TOKEN"),
-        }
-        restore_optional_env("VK_CONFIG_PATH", old_config_path);
-        restore_optional_env("HOME", old_home);
-        restore_optional_env("XDG_CONFIG_HOME", old_xdg_config_home);
-        restore_optional_env("XDG_CONFIG_DIRS", old_xdg_config_dirs);
     }
 
     #[test]
     #[serial]
     fn load_global_args_without_cli_overrides_honours_config_path_override() {
-        let config_sandbox = tempfile::tempdir().expect("create config sandbox");
-        let sandbox = config_sandbox.path().to_string_lossy().into_owned();
-        let config_path = config_sandbox.path().join("override.toml");
+        let sandbox = EnvSandbox::new();
+        let config_path = sandbox.path().join("override.toml");
         std::fs::write(&config_path, "repo = \"from-config-path\"\n").expect("write config");
-
-        let old_repo = environment::var("VK_REPO").ok();
-        let old_token = environment::var("VK_GITHUB_TOKEN").ok();
-        let old_config_path = environment::var("VK_CONFIG_PATH").ok();
-        let old_home = environment::var("HOME").ok();
-        let old_xdg_config_home = environment::var("XDG_CONFIG_HOME").ok();
-        let old_xdg_config_dirs = environment::var("XDG_CONFIG_DIRS").ok();
-        remove_var("VK_REPO");
-        remove_var("VK_GITHUB_TOKEN");
-        remove_var("VK_CONFIG_PATH");
-        set_var("HOME", &sandbox);
-        set_var("XDG_CONFIG_HOME", &sandbox);
-        set_var("XDG_CONFIG_DIRS", &sandbox);
 
         let global = load_global_args_without_cli_overrides_from_process_args([
             OsString::from("vk"),
@@ -176,18 +135,5 @@ mod tests {
         .expect("load global args");
 
         assert_eq!(global.repo.as_deref(), Some("from-config-path"));
-
-        match old_repo {
-            Some(value) => set_var("VK_REPO", value),
-            None => remove_var("VK_REPO"),
-        }
-        match old_token {
-            Some(value) => set_var("VK_GITHUB_TOKEN", value),
-            None => remove_var("VK_GITHUB_TOKEN"),
-        }
-        restore_optional_env("VK_CONFIG_PATH", old_config_path);
-        restore_optional_env("HOME", old_home);
-        restore_optional_env("XDG_CONFIG_HOME", old_xdg_config_home);
-        restore_optional_env("XDG_CONFIG_DIRS", old_xdg_config_dirs);
     }
 }
