@@ -31,6 +31,8 @@ mod test_utils;
 mod environment {
     //! Environment helpers for the binary crate.
     pub(crate) use vk::environment::var;
+    #[cfg(test)]
+    pub(crate) use vk::environment::{set_var_os, var_os};
 }
 
 pub use crate::api::{GraphQLClient, paginate};

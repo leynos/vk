@@ -39,29 +39,36 @@ fn parse_resolve_args(args: &[&str]) -> ResolveArgs {
     }
 }
 
-#[test]
-fn cli_loads_repo_from_flag() {
-    let cli = Cli::try_parse_from(["vk", "--repo", "foo/bar", "pr", "1"]).expect("parse cli");
-    assert_eq!(cli.global.repo.as_deref(), Some("foo/bar"));
-}
-
-#[test]
-fn cli_loads_github_token_from_flag() {
-    let cli = Cli::try_parse_from(["vk", "--github-token", "token", "pr", "1"]).expect("parse cli");
-    assert_eq!(cli.global.github_token.as_deref(), Some("token"));
+#[rstest(
+    flag,
+    value,
+    expected_repo,
+    expected_github_token,
+    case("--repo", "foo/bar", Some("foo/bar"), None),
+    case("--github-token", "token", None, Some("token"))
+)]
+fn cli_loads_global_flags(
+    flag: &str,
+    value: &str,
+    expected_repo: Option<&str>,
+    expected_github_token: Option<&str>,
+) {
+    let cli = Cli::try_parse_from(["vk", flag, value, "pr", "1"]).expect("parse cli");
+    assert_eq!(cli.global.repo.as_deref(), expected_repo);
+    assert_eq!(cli.global.github_token.as_deref(), expected_github_token);
 }
 
 fn assert_is_send_sync<T: Send + Sync>() {}
 
 struct EnvGuard {
     key: &'static str,
-    original: Option<String>,
+    original: Option<OsString>,
 }
 
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         match self.original.take() {
-            Some(value) => set_var(self.key, value),
+            Some(value) => environment::set_var_os(self.key, value),
             None => remove_var(self.key),
         }
     }
@@ -69,7 +76,7 @@ impl Drop for EnvGuard {
 
 #[fixture]
 fn invalid_http_timeout() -> EnvGuard {
-    let original = environment::var("VK_HTTP_TIMEOUT").ok();
+    let original = environment::var_os("VK_HTTP_TIMEOUT");
     set_var("VK_HTTP_TIMEOUT", "not-a-number");
     EnvGuard {
         key: "VK_HTTP_TIMEOUT",
