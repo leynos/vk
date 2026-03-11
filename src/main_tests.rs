@@ -6,6 +6,7 @@ use crate::reviews::PullRequestReview;
 use crate::test_utils::{remove_var, set_var};
 use chrono::Utc;
 use ortho_config::OrthoConfig;
+use rstest::{fixture, rstest};
 use serial_test::serial;
 use std::ffi::OsString;
 use std::sync::Arc;
@@ -52,25 +53,49 @@ fn cli_loads_github_token_from_flag() {
 
 fn assert_is_send_sync<T: Send + Sync>() {}
 
-/// Load `GlobalArgs` with an invalid `VK_HTTP_TIMEOUT` so tests can exercise
-/// the resulting configuration error.
+struct EnvGuard {
+    key: &'static str,
+    original: Option<String>,
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match self.original.take() {
+            Some(value) => set_var(self.key, value),
+            None => remove_var(self.key),
+        }
+    }
+}
+
+#[fixture]
+fn invalid_http_timeout() -> EnvGuard {
+    let original = environment::var("VK_HTTP_TIMEOUT").ok();
+    set_var("VK_HTTP_TIMEOUT", "not-a-number");
+    EnvGuard {
+        key: "VK_HTTP_TIMEOUT",
+        original,
+    }
+}
+
+/// Holds the invalid-timeout guard alongside the resulting configuration error.
+struct InvalidTimeoutError {
+    _guard: EnvGuard,
+    error: Arc<ortho_config::OrthoError>,
+}
+
+/// Load `GlobalArgs` while the invalid-timeout fixture keeps
+/// `VK_HTTP_TIMEOUT` invalid.
 ///
 /// # Panics
 ///
 /// Panics if `GlobalArgs::load_from_iter` unexpectedly succeeds.
-fn with_invalid_http_timeout_error<F>(f: F)
-where
-    F: FnOnce(Arc<ortho_config::OrthoError>),
-{
-    let old_timeout = environment::var("VK_HTTP_TIMEOUT").ok();
-    remove_var("VK_HTTP_TIMEOUT");
-    set_var("VK_HTTP_TIMEOUT", "not-a-number");
-    let err = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
+#[fixture]
+fn invalid_http_timeout_error(invalid_http_timeout: EnvGuard) -> InvalidTimeoutError {
+    let error = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
         .expect_err("invalid VK_HTTP_TIMEOUT should fail");
-    f(err);
-    match old_timeout {
-        Some(value) => set_var("VK_HTTP_TIMEOUT", value),
-        None => remove_var("VK_HTTP_TIMEOUT"),
+    InvalidTimeoutError {
+        _guard: invalid_http_timeout,
+        error,
     }
 }
 
@@ -79,37 +104,37 @@ fn vk_error_is_send_and_sync() {
     assert_is_send_sync::<VkError>();
 }
 
+#[rstest]
 #[serial]
-#[test]
-fn vk_error_config_from_arc_preserves_allocation() {
-    with_invalid_http_timeout_error(|err| {
-        let original = err.clone();
-        let converted: VkError = err.into();
-        match converted {
-            VkError::Config(stored) => assert!(
-                Arc::ptr_eq(&stored, &original),
-                "conversion from Arc should preserve the original allocation"
-            ),
-            other => panic!("expected VkError::Config, got {other:?}"),
-        }
-    });
+fn vk_error_config_from_arc_preserves_allocation(invalid_http_timeout_error: InvalidTimeoutError) {
+    let err = invalid_http_timeout_error.error;
+    let original = err.clone();
+    let converted: VkError = err.into();
+    match converted {
+        VkError::Config(stored) => assert!(
+            Arc::ptr_eq(&stored, &original),
+            "conversion from Arc should preserve the original allocation"
+        ),
+        other => panic!("expected VkError::Config, got {other:?}"),
+    }
 }
 
+#[rstest]
 #[serial]
-#[test]
-fn vk_error_config_from_owned_ortho_error_wraps_in_arc() {
-    with_invalid_http_timeout_error(|err| {
-        let err = Arc::try_unwrap(err).expect("unique ortho_config error Arc");
-        let converted: VkError = err.into();
-        match converted {
-            VkError::Config(stored) => assert_eq!(
-                Arc::strong_count(&stored),
-                1,
-                "owned OrthoError conversion should produce a single-owner Arc"
-            ),
-            other => panic!("expected VkError::Config, got {other:?}"),
-        }
-    });
+fn vk_error_config_from_owned_ortho_error_wraps_in_arc(
+    invalid_http_timeout_error: InvalidTimeoutError,
+) {
+    let err =
+        Arc::try_unwrap(invalid_http_timeout_error.error).expect("unique ortho_config error Arc");
+    let converted: VkError = err.into();
+    match converted {
+        VkError::Config(stored) => assert_eq!(
+            Arc::strong_count(&stored),
+            1,
+            "owned OrthoError conversion should produce a single-owner Arc"
+        ),
+        other => panic!("expected VkError::Config, got {other:?}"),
+    }
 }
 
 #[test]
