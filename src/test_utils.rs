@@ -99,35 +99,35 @@ pub fn start_server(responses: Vec<String>) -> TestClient {
 pub struct EnvGuard {
     key: &'static str,
     original: Option<OsString>,
+    _guard: MutexGuard<'static, ()>,
 }
 
 impl Drop for EnvGuard {
     fn drop(&mut self) {
-        environment::with_lock(|| match self.original.take() {
+        match self.original.take() {
             Some(value) => {
-                // SAFETY: `environment::with_lock` serialises process-wide env access.
+                // SAFETY: `EnvGuard` holds `env_sandbox_lock()` for its lifetime.
                 unsafe { env::set_var(self.key, value) };
             }
             None => {
-                // SAFETY: `environment::with_lock` serialises process-wide env access.
+                // SAFETY: `EnvGuard` holds `env_sandbox_lock()` for its lifetime.
                 unsafe { env::remove_var(self.key) };
             }
-        });
+        }
     }
 }
 
 /// Set `VK_HTTP_TIMEOUT` to an invalid value and restore it on drop.
 #[must_use]
 pub fn invalid_http_timeout_guard() -> EnvGuard {
-    let original = environment::with_lock(|| {
-        let original = env::var_os("VK_HTTP_TIMEOUT");
-        // SAFETY: `environment::with_lock` serialises process-wide env access.
-        unsafe { env::set_var("VK_HTTP_TIMEOUT", "not-a-number") };
-        original
-    });
+    let guard = env_sandbox_lock();
+    let original = env::var_os("VK_HTTP_TIMEOUT");
+    // SAFETY: `EnvGuard` keeps `env_sandbox_lock()` held until drop.
+    unsafe { env::set_var("VK_HTTP_TIMEOUT", "not-a-number") };
     EnvGuard {
         key: "VK_HTTP_TIMEOUT",
         original,
+        _guard: guard,
     }
 }
 
@@ -189,6 +189,7 @@ impl EnvSandbox {
                 .collect::<Vec<_>>()
         });
 
+        env::set_current_dir(&sandbox_path).expect("switch to environment sandbox");
         environment::with_lock(|| {
             for key in SANDBOXED_ENV_KEYS {
                 // SAFETY: `environment::with_lock` serialises process-wide env access.
@@ -205,7 +206,6 @@ impl EnvSandbox {
                 unsafe { env::set_var(key, &sandbox_path) };
             }
         });
-        env::set_current_dir(&sandbox_path).expect("switch to environment sandbox");
 
         Self {
             current_dir,
