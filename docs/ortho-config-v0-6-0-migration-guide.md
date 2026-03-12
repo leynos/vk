@@ -48,20 +48,16 @@ ortho_config = { version = "0.6.0", features = ["yaml"] }
 ortho_config_macros = "0.6.0"
 ```
 
-<!-- mdformat off -->
-
 1. Change every `ortho_config` dependency (workspace metadata, application
    crates, and supporting tools) to `"0.6.0"`. This keeps the runtime crate and
    the derive macro in lockstep, ensuring generated code matches the new
    library behaviour.
-1. Retain any optional features (such as `json5`, `yaml`, or `toml`) on the
+2. Retain any optional features (such as `json5`, `yaml`, or `toml`) on the
    main `ortho_config` dependency. The macro crate now inherits those flags,
    removing the need for duplicate feature declarations on
    `ortho_config_macros`.[^forwarded-features]
-1. Rebuild the project to confirm the upgraded macro compiles cleanly before
+3. Rebuild the project to confirm the upgraded macro compiles cleanly before
    proceeding with behavioural changes.
-
-<!-- mdformat on -->
 
 The `hello_world` example continues to expose feature toggles via the parent
 crate so that enabling `json5`, `yaml`, or `toml` automatically propagates to
