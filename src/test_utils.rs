@@ -224,7 +224,6 @@ impl EnvSandbox {
 
 impl Drop for EnvSandbox {
     fn drop(&mut self) {
-        env::set_current_dir(&self.current_dir).expect("restore current dir");
         environment::with_lock(|| {
             for (key, value) in &self.original_env {
                 match value {
@@ -239,5 +238,6 @@ impl Drop for EnvSandbox {
                 }
             }
         });
+        let _ = env::set_current_dir(&self.current_dir);
     }
 }
