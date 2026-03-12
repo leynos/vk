@@ -95,29 +95,40 @@ pub fn start_server(responses: Vec<String>) -> TestClient {
     }
 }
 
-/// Set an environment variable for testing.
-///
-/// Environment manipulation is process-wide and therefore not thread-safe.
-/// A global mutex serialises modifications so parallel tests do not race.
-///
-/// # Examples
-///
-/// ```ignore
-/// use vk::test_utils::{set_var, remove_var};
-///
-/// set_var("MY_VAR", "1");
-/// assert_eq!(std::env::var("MY_VAR"), Ok("1".into()));
-/// remove_var("MY_VAR");
-/// ```
-pub fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
-    environment::set_var(key, value);
+/// Guard that restores an environment variable to its original value on drop.
+pub struct EnvGuard {
+    key: &'static str,
+    original: Option<OsString>,
 }
 
-/// Remove an environment variable set during testing.
-///
-/// The global mutex serialises modifications so parallel tests do not race.
-pub fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
-    environment::remove_var(key);
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        environment::with_lock(|| match self.original.take() {
+            Some(value) => {
+                // SAFETY: `environment::with_lock` serialises process-wide env access.
+                unsafe { env::set_var(self.key, value) };
+            }
+            None => {
+                // SAFETY: `environment::with_lock` serialises process-wide env access.
+                unsafe { env::remove_var(self.key) };
+            }
+        });
+    }
+}
+
+/// Set `VK_HTTP_TIMEOUT` to an invalid value and restore it on drop.
+#[must_use]
+pub fn invalid_http_timeout_guard() -> EnvGuard {
+    let original = environment::with_lock(|| {
+        let original = env::var_os("VK_HTTP_TIMEOUT");
+        // SAFETY: `environment::with_lock` serialises process-wide env access.
+        unsafe { env::set_var("VK_HTTP_TIMEOUT", "not-a-number") };
+        original
+    });
+    EnvGuard {
+        key: "VK_HTTP_TIMEOUT",
+        original,
+    }
 }
 
 static ENV_SANDBOX_LOCK: OnceLock<Mutex<()>> = OnceLock::new();

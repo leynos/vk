@@ -3,7 +3,7 @@
 use super::*;
 use crate::printer::{write_comment_body, write_review, write_thread};
 use crate::reviews::PullRequestReview;
-use crate::test_utils::{remove_var, set_var};
+use crate::test_utils::{EnvGuard, invalid_http_timeout_guard};
 use chrono::Utc;
 use ortho_config::OrthoConfig;
 use rstest::{fixture, rstest};
@@ -60,28 +60,9 @@ fn cli_loads_global_flags(
 
 fn assert_is_send_sync<T: Send + Sync>() {}
 
-struct EnvGuard {
-    key: &'static str,
-    original: Option<OsString>,
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        match self.original.take() {
-            Some(value) => environment::set_var_os(self.key, value),
-            None => remove_var(self.key),
-        }
-    }
-}
-
 #[fixture]
 fn invalid_http_timeout() -> EnvGuard {
-    let original = environment::var_os("VK_HTTP_TIMEOUT");
-    set_var("VK_HTTP_TIMEOUT", "not-a-number");
-    EnvGuard {
-        key: "VK_HTTP_TIMEOUT",
-        original,
-    }
+    invalid_http_timeout_guard()
 }
 
 /// Holds the invalid-timeout guard alongside the resulting configuration error.
@@ -198,18 +179,13 @@ fn issue_subcommand_parses() {
     }
 }
 
-#[test]
-fn resolve_subcommand_parses() {
-    let args = parse_resolve_args(&["vk", "resolve", "83#discussion_r1"]);
+#[rstest]
+#[case(&["vk", "resolve", "83#discussion_r1"], None)]
+#[case(&["vk", "resolve", "83#discussion_r1", "-m", "done"], Some("done"))]
+fn resolve_subcommand_parses(#[case] argv: &[&str], #[case] expected_message: Option<&str>) {
+    let args = parse_resolve_args(argv);
     assert_eq!(args.reference, "83#discussion_r1");
-    assert!(args.message.is_none());
-}
-
-#[test]
-fn resolve_subcommand_parses_message() {
-    let args = parse_resolve_args(&["vk", "resolve", "83#discussion_r1", "-m", "done"]);
-    assert_eq!(args.reference, "83#discussion_r1");
-    assert_eq!(args.message.as_deref(), Some("done"));
+    assert_eq!(args.message.as_deref(), expected_message);
 }
 
 #[test]

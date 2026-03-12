@@ -26,14 +26,6 @@ pub fn set_var<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
     unsafe { env::set_var(key, value) };
 }
 
-/// Set an environment variable using an `OsStr` value while holding the global
-/// lock.
-pub fn set_var_os<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
-    let _guard = lock();
-    // SAFETY: the mutex serialises access to the unsynchronised std env calls.
-    unsafe { env::set_var(key, value) };
-}
-
 /// Remove an environment variable while holding the global lock.
 pub fn remove_var<K: AsRef<OsStr>>(key: K) {
     let _guard = lock();
