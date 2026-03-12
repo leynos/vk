@@ -104,7 +104,7 @@ pub struct EnvGuard {
 
 impl Drop for EnvGuard {
     fn drop(&mut self) {
-        match self.original.take() {
+        environment::with_lock(|| match self.original.take() {
             Some(value) => {
                 // SAFETY: `EnvGuard` holds `env_sandbox_lock()` for its lifetime.
                 unsafe { env::set_var(self.key, value) };
@@ -113,7 +113,7 @@ impl Drop for EnvGuard {
                 // SAFETY: `EnvGuard` holds `env_sandbox_lock()` for its lifetime.
                 unsafe { env::remove_var(self.key) };
             }
-        }
+        });
     }
 }
 
@@ -121,9 +121,12 @@ impl Drop for EnvGuard {
 #[must_use]
 pub fn invalid_http_timeout_guard() -> EnvGuard {
     let guard = env_sandbox_lock();
-    let original = env::var_os("VK_HTTP_TIMEOUT");
-    // SAFETY: `EnvGuard` keeps `env_sandbox_lock()` held until drop.
-    unsafe { env::set_var("VK_HTTP_TIMEOUT", "not-a-number") };
+    let original = environment::with_lock(|| {
+        let original = env::var_os("VK_HTTP_TIMEOUT");
+        // SAFETY: `EnvGuard` keeps `env_sandbox_lock()` held until drop.
+        unsafe { env::set_var("VK_HTTP_TIMEOUT", "not-a-number") };
+        original
+    });
     EnvGuard {
         key: "VK_HTTP_TIMEOUT",
         original,
@@ -164,7 +167,7 @@ fn env_sandbox_lock() -> MutexGuard<'static, ()> {
 /// # Examples
 ///
 /// ```ignore
-/// let sandbox = vk::test_utils::EnvSandbox::new();
+/// let sandbox = vk::test_utils::EnvSandbox::new().expect("create sandbox");
 /// let config_path = sandbox.path().join("vk.toml");
 /// ```
 pub struct EnvSandbox {
@@ -176,12 +179,16 @@ pub struct EnvSandbox {
 
 impl EnvSandbox {
     /// Create a new isolated environment and working-directory sandbox.
-    #[must_use]
-    pub fn new() -> Self {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the temporary directory or current working
+    /// directory cannot be created or switched.
+    pub fn new() -> std::io::Result<Self> {
         let guard = env_sandbox_lock();
-        let sandbox_dir = tempfile::tempdir().expect("create environment sandbox");
+        let sandbox_dir = tempfile::tempdir()?;
         let sandbox_path = sandbox_dir.path().to_path_buf();
-        let current_dir = environment::with_lock(env::current_dir).expect("capture current dir");
+        let current_dir = environment::with_lock(env::current_dir)?;
         let original_env = environment::with_lock(|| {
             SANDBOXED_ENV_KEYS
                 .iter()
@@ -189,7 +196,7 @@ impl EnvSandbox {
                 .collect::<Vec<_>>()
         });
 
-        env::set_current_dir(&sandbox_path).expect("switch to environment sandbox");
+        env::set_current_dir(&sandbox_path)?;
         environment::with_lock(|| {
             for key in SANDBOXED_ENV_KEYS {
                 // SAFETY: `environment::with_lock` serialises process-wide env access.
@@ -207,12 +214,12 @@ impl EnvSandbox {
             }
         });
 
-        Self {
+        Ok(Self {
             current_dir,
             original_env,
             sandbox_dir,
             _guard: guard,
-        }
+        })
     }
 
     /// Return the root path of the temporary discovery sandbox.

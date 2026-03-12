@@ -107,7 +107,7 @@ mod tests {
     #[test]
     #[serial]
     fn load_global_args_without_cli_overrides_defaults_cleanly() {
-        let _sandbox = EnvSandbox::new();
+        let _sandbox = EnvSandbox::new().expect("create config sandbox");
 
         let global = load_global_args_without_cli_overrides_from_iter([OsString::from("vk")])
             .expect("load global args");
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     #[serial]
     fn load_global_args_without_cli_overrides_honours_config_path_override() {
-        let sandbox = EnvSandbox::new();
+        let sandbox = EnvSandbox::new().expect("create config sandbox");
         let config_path = sandbox.path().join("override.toml");
         std::fs::write(&config_path, "repo = \"from-config-path\"\n").expect("write config");
 
