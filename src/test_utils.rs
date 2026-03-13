@@ -7,7 +7,7 @@ use crate::api::{GraphQLClient, RetryConfig};
 use vk::environment;
 
 use std::env;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex, MutexGuard, OnceLock,
@@ -104,16 +104,7 @@ pub struct EnvGuard {
 
 impl Drop for EnvGuard {
     fn drop(&mut self) {
-        environment::with_lock(|| match self.original.take() {
-            Some(value) => {
-                // SAFETY: `EnvGuard` holds `env_sandbox_lock()` for its lifetime.
-                unsafe { env::set_var(self.key, value) };
-            }
-            None => {
-                // SAFETY: `EnvGuard` holds `env_sandbox_lock()` for its lifetime.
-                unsafe { env::remove_var(self.key) };
-            }
-        });
+        restore_env_key(self.key, self.original.take());
     }
 }
 
@@ -156,6 +147,19 @@ fn env_sandbox_lock() -> MutexGuard<'static, ()> {
         .get_or_init(|| Mutex::new(()))
         .lock()
         .expect("environment sandbox lock poisoned")
+}
+
+fn restore_env_key(key: &str, original: Option<OsString>) {
+    environment::with_lock(|| match original {
+        Some(value) => {
+            // SAFETY: `environment::with_lock` serialises process-wide env access.
+            unsafe { env::set_var(key, value) };
+        }
+        None => {
+            // SAFETY: `environment::with_lock` serialises process-wide env access.
+            unsafe { env::remove_var(key) };
+        }
+    });
 }
 
 /// RAII guard that isolates configuration discovery inputs for a test.
@@ -231,20 +235,9 @@ impl EnvSandbox {
 
 impl Drop for EnvSandbox {
     fn drop(&mut self) {
-        environment::with_lock(|| {
-            for (key, value) in &self.original_env {
-                match value {
-                    Some(saved) => {
-                        // SAFETY: `environment::with_lock` serialises process-wide env access.
-                        unsafe { env::set_var(OsStr::new(key), saved) };
-                    }
-                    None => {
-                        // SAFETY: `environment::with_lock` serialises process-wide env access.
-                        unsafe { env::remove_var(OsStr::new(key)) };
-                    }
-                }
-            }
-        });
+        for (key, value) in self.original_env.drain(..) {
+            restore_env_key(key, value);
+        }
         let _ = env::set_current_dir(&self.current_dir);
     }
 }

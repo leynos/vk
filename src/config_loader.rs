@@ -96,21 +96,28 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        load_global_args_without_cli_overrides_from_iter,
-        load_global_args_without_cli_overrides_from_process_args,
-    };
+    use super::load_global_args_without_cli_overrides_from_process_args;
+    use crate::cli_args::GlobalArgs;
     use crate::test_utils::EnvSandbox;
     use serial_test::serial;
     use std::ffi::OsString;
 
+    fn setup_global_args_without_cli_overrides<I, F>(configure: F) -> (EnvSandbox, GlobalArgs)
+    where
+        I: IntoIterator<Item = OsString>,
+        F: FnOnce(&EnvSandbox) -> I,
+    {
+        let sandbox = EnvSandbox::new().expect("create config sandbox");
+        let global = load_global_args_without_cli_overrides_from_process_args(configure(&sandbox))
+            .expect("load global args");
+        (sandbox, global)
+    }
+
     #[test]
     #[serial]
     fn load_global_args_without_cli_overrides_defaults_cleanly() {
-        let _sandbox = EnvSandbox::new().expect("create config sandbox");
-
-        let global = load_global_args_without_cli_overrides_from_iter([OsString::from("vk")])
-            .expect("load global args");
+        let (_sandbox, global) =
+            setup_global_args_without_cli_overrides(|_| [OsString::from("vk")]);
         assert!(global.repo.is_none());
         assert!(global.github_token.is_none());
         assert!(global.transcript.is_none());
@@ -121,18 +128,18 @@ mod tests {
     #[test]
     #[serial]
     fn load_global_args_without_cli_overrides_honours_config_path_override() {
-        let sandbox = EnvSandbox::new().expect("create config sandbox");
-        let config_path = sandbox.path().join("override.toml");
-        std::fs::write(&config_path, "repo = \"from-config-path\"\n").expect("write config");
+        let (_sandbox, global) = setup_global_args_without_cli_overrides(|sandbox| {
+            let config_path = sandbox.path().join("override.toml");
+            std::fs::write(&config_path, "repo = \"from-config-path\"\n").expect("write config");
 
-        let global = load_global_args_without_cli_overrides_from_process_args([
-            OsString::from("vk"),
-            OsString::from("--config-path"),
-            config_path.into_os_string(),
-            OsString::from("pr"),
-            OsString::from("1"),
-        ])
-        .expect("load global args");
+            [
+                OsString::from("vk"),
+                OsString::from("--config-path"),
+                config_path.into_os_string(),
+                OsString::from("pr"),
+                OsString::from("1"),
+            ]
+        });
 
         assert_eq!(global.repo.as_deref(), Some("from-config-path"));
     }
