@@ -15,23 +15,31 @@ even when multiple comments reference the same code.
 
 - **Simple invocation**: `vk pr <url-or-number>` prints unresolved comments with
   colourful formatting.
+
 - **Targeted review**: append file paths after the pull request to show only
   comments for those files.
+
 - **Focused thread**: include a `#discussion_r<ID>` fragment in the pull
   request reference to view a single thread starting from that comment.
+
 - **Fragment semantics**: when a `#discussion_r<ID>` fragment is supplied,
   file filters are ignored and both resolved and unresolved threads are
   searched. If the discussion lacks comments, the tool prints an explicit
   message.
+
 - **Permalink format**: GitHub review comment links always end with a
   `#discussion_r<ID>` fragment as documented in GitHub's guide to linking to
   pull request comments.[^github-link]
+
 - **Concise output**: Each thread shows the diff once followed by all comments,
   reducing clutter when multiple remarks target the same line.
+
 - **Outdated threads**: hidden by default; pass `-o` (`--show-outdated`) to
   include them when needed.
+
 - **Error visibility**: Failures encountered while printing a thread are logged
   to stderr instead of being silently discarded.
+
 - **Banners**: Output opens with a `code review` banner
   (`========== code review ==========`) and ends with an `end of code review`
   banner (`========== end of code review ==========`). A `review comments`
@@ -55,20 +63,32 @@ even when multiple comments reference the same code.
   binary initialises `tracing_subscriber::fmt()` with an environment filter, so
   running with `RUST_LOG=vk=debug` (or a more specific filter) surfaces the
   spans on stderr.
+
 - **Configurable timeouts**: `--http-timeout` and `--connect-timeout`
   override the default 10 s request and 5 s connection limits for REST replies.
 
-[^github-link]: GitHub Docs. "Linking to a pull request comment."
-    <https://docs.github.com/en/articles/linking-to-a-pull-request-comment>
+<!-- mdformat off -->
+
+\[^github-link\]: GitHub Docs. "Linking to a pull request comment."
+
+<!-- markdownlint-disable-next-line MD013 -->
+
+<https://docs.github.com/en/articles/linking-to-a-pull-request-comment>
+
+<!-- mdformat on -->
 
 ## Architecture
 
 The code centres on three printing helpers:
 
+<!-- mdformat off -->
+
 1. `write_comment_body` formats a single comment body to any `Write`
    implementation.
-2. `write_comment` includes the diff for the first comment in a thread.
-3. `write_thread` iterates over a thread and prints each comment body in turn.
+1. `write_comment` includes the diff for the first comment in a thread.
+1. `write_thread` iterates over a thread and prints each comment body in turn.
+
+<!-- mdformat on -->
 
 `run_pr` fetches the latest review from each reviewer and all unresolved
 threads. The helper `fetch_review_threads_with_options` accepts a
@@ -268,7 +288,9 @@ flowchart TD
     NEED_REPO --> FETCH_THREADS
 
     FETCH_THREADS[Fetch review threads] --> DISPLAY[Display comments]
-    FETCH_WITH_FRAG[Fetch threads<br/>filter by fragment] --> FIND_THREAD[Find thread containing<br/>discussion comment]
+    FETCH_WITH_FRAG[Threads by<br/>fragment]
+    FIND_THREAD[Find thread<br/>with comment]
+    FETCH_WITH_FRAG --> FIND_THREAD
     FIND_THREAD --> DISPLAY
 ```
 

@@ -6,8 +6,11 @@
 use crate::api::{GraphQLClient, RetryConfig};
 use vk::environment;
 
+use std::env;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 use std::sync::{
-    Arc,
+    Arc, Mutex, MutexGuard, OnceLock,
     atomic::{AtomicUsize, Ordering},
 };
 use third_wheel::hyper::{
@@ -92,27 +95,149 @@ pub fn start_server(responses: Vec<String>) -> TestClient {
     }
 }
 
-/// Set an environment variable for testing.
+/// Guard that restores an environment variable to its original value on drop.
+pub struct EnvGuard {
+    key: &'static str,
+    original: Option<OsString>,
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        restore_env_key(self.key, self.original.take());
+    }
+}
+
+/// Set `VK_HTTP_TIMEOUT` to an invalid value and restore it on drop.
+#[must_use]
+pub fn invalid_http_timeout_guard() -> EnvGuard {
+    let guard = env_sandbox_lock();
+    let original = environment::with_lock(|| {
+        let original = env::var_os("VK_HTTP_TIMEOUT");
+        // SAFETY: `EnvGuard` keeps `env_sandbox_lock()` held until drop.
+        unsafe { env::set_var("VK_HTTP_TIMEOUT", "not-a-number") };
+        original
+    });
+    EnvGuard {
+        key: "VK_HTTP_TIMEOUT",
+        original,
+        _guard: guard,
+    }
+}
+
+static ENV_SANDBOX_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+const SANDBOXED_ENV_KEYS: &[&str] = &[
+    "VK_REPO",
+    "VK_GITHUB_TOKEN",
+    "VK_TRANSCRIPT",
+    "VK_HTTP_TIMEOUT",
+    "VK_CONNECT_TIMEOUT",
+    "VK_CONFIG_PATH",
+    "CONFIG_PATH",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_CONFIG_DIRS",
+];
+
+fn env_sandbox_lock() -> MutexGuard<'static, ()> {
+    ENV_SANDBOX_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("environment sandbox lock poisoned")
+}
+
+fn restore_env_key(key: &str, original: Option<OsString>) {
+    environment::with_lock(|| match original {
+        Some(value) => {
+            // SAFETY: `environment::with_lock` serialises process-wide env access.
+            unsafe { env::set_var(key, value) };
+        }
+        None => {
+            // SAFETY: `environment::with_lock` serialises process-wide env access.
+            unsafe { env::remove_var(key) };
+        }
+    });
+}
+
+/// RAII guard that isolates configuration discovery inputs for a test.
 ///
-/// Environment manipulation is process-wide and therefore not thread-safe.
-/// A global mutex serialises modifications so parallel tests do not race.
+/// The sandbox snapshots relevant configuration environment variables and the
+/// current working directory, points discovery-related paths at an empty
+/// temporary directory, and restores everything on drop.
 ///
 /// # Examples
 ///
 /// ```ignore
-/// use vk::test_utils::{set_var, remove_var};
-///
-/// set_var("MY_VAR", "1");
-/// assert_eq!(std::env::var("MY_VAR"), Ok("1".into()));
-/// remove_var("MY_VAR");
+/// let sandbox = vk::test_utils::EnvSandbox::new().expect("create sandbox");
+/// let config_path = sandbox.path().join("vk.toml");
 /// ```
-pub fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
-    environment::set_var(key, value);
+pub struct EnvSandbox {
+    current_dir: PathBuf,
+    original_env: Vec<(&'static str, Option<OsString>)>,
+    sandbox_dir: tempfile::TempDir,
+    _guard: MutexGuard<'static, ()>,
 }
 
-/// Remove an environment variable set during testing.
-///
-/// The global mutex serialises modifications so parallel tests do not race.
-pub fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
-    environment::remove_var(key);
+impl EnvSandbox {
+    /// Create a new isolated environment and working-directory sandbox.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the temporary directory or current working
+    /// directory cannot be created or switched.
+    pub fn new() -> std::io::Result<Self> {
+        let guard = env_sandbox_lock();
+        let sandbox_dir = tempfile::tempdir()?;
+        let sandbox_path = sandbox_dir.path().to_path_buf();
+        let current_dir = environment::with_lock(env::current_dir)?;
+        let original_env = environment::with_lock(|| {
+            SANDBOXED_ENV_KEYS
+                .iter()
+                .map(|key| (*key, env::var_os(key)))
+                .collect::<Vec<_>>()
+        });
+
+        env::set_current_dir(&sandbox_path)?;
+        environment::with_lock(|| {
+            for key in SANDBOXED_ENV_KEYS {
+                // SAFETY: `environment::with_lock` serialises process-wide env access.
+                unsafe { env::remove_var(key) };
+            }
+            for key in [
+                "APPDATA",
+                "LOCALAPPDATA",
+                "HOME",
+                "XDG_CONFIG_HOME",
+                "XDG_CONFIG_DIRS",
+            ] {
+                // SAFETY: `environment::with_lock` serialises process-wide env access.
+                unsafe { env::set_var(key, &sandbox_path) };
+            }
+        });
+
+        Ok(Self {
+            current_dir,
+            original_env,
+            sandbox_dir,
+            _guard: guard,
+        })
+    }
+
+    /// Return the root path of the temporary discovery sandbox.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        self.sandbox_dir.path()
+    }
+}
+
+impl Drop for EnvSandbox {
+    fn drop(&mut self) {
+        for (key, value) in self.original_env.drain(..) {
+            restore_env_key(key, value);
+        }
+        let _ = env::set_current_dir(&self.current_dir);
+    }
 }

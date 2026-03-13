@@ -4,7 +4,7 @@
 //! runtime code serialise access through a shared mutex.
 
 use std::env;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -42,6 +42,14 @@ pub fn remove_var<K: AsRef<OsStr>>(key: K) {
 pub fn var<K: AsRef<OsStr>>(key: K) -> Result<String, env::VarError> {
     let _guard = lock();
     env::var(key)
+}
+
+/// Read an environment variable as an `OsString` while holding the global
+/// lock.
+#[must_use]
+pub fn var_os<K: AsRef<OsStr>>(key: K) -> Option<OsString> {
+    let _guard = lock();
+    env::var_os(key)
 }
 
 /// Run `op` while the environment mutex is held.
