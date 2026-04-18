@@ -8,13 +8,7 @@
       "tables": false,
       "headings": false
     },
-    "MD029": { "style": "ordered" },
-    "MD046": { "style": "fenced" }
+    "MD029": { "style": "ordered" }
   },
-  "ignores": [
-    "**/.git/**",
-    "**/.venv/**",
-    "**/node_modules/**",
-    "**/target/**"
-  ]
+  "ignores": ["**/.venv/**", "**/node_modules/**", "**/.uv-cache/**", "**/target/**"]
 }

@@ -4,6 +4,9 @@ version = "0.5.0"
 edition = "2024"
 rust-version = "1.89"
 license = "ISC"
+description = "View unresolved GitHub pull request review comments in the terminal"
+readme = "README.md"
+repository = "https://github.com/leynos/vk"
 
 [dependencies]
 clap = { version = "4.5.47", features = ["derive"] }
@@ -53,6 +56,11 @@ insta = { version = "1.43", features = ["redactions"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }-v{ version }{ archive-suffix }"
+bin-dir = "{ name }-{ target }-v{ version }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

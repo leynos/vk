@@ -23,11 +23,11 @@ map the new helpers to matching configuration styles and test setups.
 
 ## At-a-glance breaking changes
 
-| Area | Impact | Section |
+| Area              | Impact                                                                                                             | Section                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
-| Core API | No mandatory breaking changes; v0.7.0 is additive for typical usage. | N/A |
-| CLI defaults | `cli_default_as_absent` is opt-in and changes precedence for `default_value_t` fields when used with `ArgMatches`. | [5](#5-treat-clap-defaults-as-absent) |
-| Behavioural tests | The `hello_world` behavioural suite now uses `rstest-bdd` instead of `cucumber-rs`. | [6](#6-refresh-error-handling-and-tests) |
+| Core API          | No mandatory breaking changes; v0.7.0 is additive for typical usage.                                               | N/A                                      |
+| CLI defaults      | `cli_default_as_absent` is opt-in and changes precedence for `default_value_t` fields when used with `ArgMatches`. | [5](#5-treat-clap-defaults-as-absent)    |
+| Behavioural tests | The `hello_world` behavioural suite now uses `rstest-bdd` instead of `cucumber-rs`.                                | [6](#6-refresh-error-handling-and-tests) |
 
 ## 1. Update crate versions and feature flags
 
@@ -48,11 +48,11 @@ ortho_config_macros = "0.7.0"
 <!-- mdformat off -->
 
 1. Update every `ortho_config` and `ortho_config_macros` dependency to `0.7.0`.
-1. Keep format features (`toml`, `json5`, `yaml`) on `ortho_config` as before.
-1. When default features are disabled, enable `serde_json` explicitly whenever
-   `cli_default_as_absent` or selected-subcommand merging helpers are
-   required. The default feature set already enables it.
-1. Expect new transitive dependencies (`fluent-bundle`, `fluent-syntax`,
+2. Keep format features (`toml`, `json5`, `yaml`) on `ortho_config` as before.
+3. When default features are disabled, enable `serde_json` explicitly whenever
+   `cli_default_as_absent` or selected-subcommand merging helpers are required.
+   The default feature set already enables it.
+4. Expect new transitive dependencies (`fluent-bundle`, `fluent-syntax`,
    `unic-langid`, and `tracing`) to land with v0.7.0, as they power CLI
    localization support.[^deps-0-7]
 
@@ -159,8 +159,8 @@ in those cases.
 or an explicit `#[ortho_config(default = ...)]`. Parser-faithful
 `default_value` inference is planned as a day-2 follow-up.
 
-When this attribute is in use, pass `ArgMatches` so `value_source()` can
-detect which fields were truly provided:
+When this attribute is in use, pass `ArgMatches` so `value_source()` can detect
+which fields were truly provided:
 
 ```rust
 let matches = GreetArgs::command().get_matches();
@@ -193,40 +193,39 @@ step. Variants that depend on `cli_default_as_absent` should be annotated with
 \[^deps-0-7\]: v0.7.0 adds Fluent and localization dependencies alongside the
 existing feature flags in the runtime crate and macro crate metadata. See
 [`ortho_config/Cargo.toml`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/Cargo.toml)
-and
+ and
 [`ortho_config_macros/Cargo.toml`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config_macros/Cargo.toml).
-\[^compose-layers\]: Derived configuration structs now expose
+ \[^compose-layers\]: Derived configuration structs now expose
 `compose_layers()` and `compose_layers_from_iter(...)` and return
 `LayerComposition` for staged merging and error aggregation. See
 [`ortho_config_macros/src/derive/load_impl.rs`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config_macros/src/derive/load_impl.rs)
-and
+ and
 [`ortho_config/src/declarative.rs`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/src/declarative.rs).
-\[^post-merge\]: `PostMergeHook` and `PostMergeContext` enable post-merge
-adjustments and are invoked when `#[ortho_config(post_merge_hook)]` is
-present. See
-[`ortho_config/src/post_merge.rs`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/src/post_merge.rs).
-\[^localizer\]: `Localizer`, `LocalizationArgs`, and `FluentLocalizer` define
-the CLI localization surface and provide a Fluent-backed implementation.
+ \[^post-merge\]: `PostMergeHook` and `PostMergeContext` enable post-merge
+adjustments and are invoked when `#[ortho_config(post_merge_hook)]` is present.
 See
+[`ortho_config/src/post_merge.rs`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/src/post_merge.rs).
+ \[^localizer\]: `Localizer`, `LocalizationArgs`, and `FluentLocalizer` define
+the CLI localization surface and provide a Fluent-backed implementation. See
 [`ortho_config/src/localizer/mod.rs`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/src/localizer/mod.rs).
-\[^localizeclap\]: `localize_clap_error_with_command` rewrites clap error
+ \[^localizeclap\]: `localize_clap_error_with_command` rewrites clap error
 messages while keeping the existing rendered tail intact. See
 [`ortho_config/src/localizer/clap_error.rs`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/src/localizer/clap_error.rs).
-\[^cli-defaults\]: `cli_default_as_absent` is implemented via the
-`CliValueExtractor` trait to exclude clap defaults from the CLI layer
-unless explicitly provided. See
+ \[^cli-defaults\]: `cli_default_as_absent` is implemented via the
+`CliValueExtractor` trait to exclude clap defaults from the CLI layer unless
+explicitly provided. See
 [`ortho_config/src/merge.rs`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/src/merge.rs).
-\[^selectedsubcommand\]: `SelectedSubcommandMerge` and
+ \[^selectedsubcommand\]: `SelectedSubcommandMerge` and
 `load_globals_and_merge_selected_subcommand` let the chosen subcommand be
 merged without manual `match` scaffolding. See
 [`ortho_config/src/subcommand/selected.rs`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/src/subcommand/selected.rs).
-\[^display-request\]: `is_display_request` preserves clap's help and version
+ \[^display-request\]: `is_display_request` preserves clap's help and version
 exit behaviour when callers use `try_parse()`. See
 [`ortho_config/src/error.rs`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/src/error.rs).
-\[^json-merge\]: `OrthoJsonMergeExt` maps `serde_json::Error` into merge
+ \[^json-merge\]: `OrthoJsonMergeExt` maps `serde_json::Error` into merge
 failures while preserving detailed diagnostics. See
 [`ortho_config/src/result_ext.rs`](https://github.com/leynos/ortho-config/blob/v0.7.0/ortho_config/src/result_ext.rs).
-\[^rstest-bdd\]: The behavioural suites moved from `cucumber-rs` to
+ \[^rstest-bdd\]: The behavioural suites moved from `cucumber-rs` to
 `rstest-bdd`, including tag-aware filtering for YAML scenarios. See
 [`docs/adr-002-replace-cucumber-with-rstest-bdd.md`](https://github.com/leynos/ortho-config/blob/v0.7.0/docs/adr-002-replace-cucumber-with-rstest-bdd.md).
 

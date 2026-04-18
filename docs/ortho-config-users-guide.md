@@ -52,7 +52,7 @@ The workspace bundles an executable Hello World example under
 `examples/hello_world`. It layers defaults, environment variables, and CLI
 flags via the derive macro; see its
 [README](https://github.com/leynos/ortho-config/blob/v0.8.0/examples/hello_world/README.md)
-for a step-by-step walkthrough and the `rstest-bdd` (Behaviour-Driven
+ for a step-by-step walkthrough and the `rstest-bdd` (Behaviour-Driven
 Development) scenarios that validate behaviour end-to-end.
 
 Run `make test` to execute the example’s coverage. The unit suite uses `rstest`
@@ -438,13 +438,13 @@ environment variables like `APP_PORT` and file names such as `.app.toml`.
 
 Field attributes modify how a field is sourced or merged:
 
-| Attribute | Behaviour |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `default = expr` | Supplies a default value when no source provides one. The expression can be a literal or a function path. |
-| `cli_long = "name"` | Overrides the automatically generated long CLI flag (kebab-case). |
-| `cli_short = 'c'` | Adds a single-letter short flag for the field. |
+| Attribute                   | Behaviour                                                                                                                                                                                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `default = expr`            | Supplies a default value when no source provides one. The expression can be a literal or a function path.                                                                                                                                                                      |
+| `cli_long = "name"`         | Overrides the automatically generated long CLI flag (kebab-case).                                                                                                                                                                                                              |
+| `cli_short = 'c'`           | Adds a single-letter short flag for the field.                                                                                                                                                                                                                                 |
 | `merge_strategy = "append"` | Controls how collections merge. `append` concatenates `Vec<T>` values and is the default for vector fields. `replace` is available for vectors and maps and makes later sources override earlier ones. `keyed` merges map-like types by key and is the default for map fields. |
-| `cli_default_as_absent` | Treats typed clap defaults (`default_value_t`, `default_values_t`) as absent during configuration merging. File and environment values take precedence, while explicit CLI overrides still win. |
+| `cli_default_as_absent`     | Treats typed clap defaults (`default_value_t`, `default_values_t`) as absent during configuration merging. File and environment values take precedence, while explicit CLI overrides still win.                                                                                |
 
 Unrecognized keys are ignored by the derive macro for forwards compatibility.
 Unknown keys will therefore silently do nothing. Developers who require
@@ -463,12 +463,12 @@ and a short flag. The macro chooses the short flag using these rules:
 - If both are unavailable, no short flag is assigned; specify `cli_short` to
   resolve the collision.
 
-| Scenario | Result |
+| Scenario                          | Result                 |
 | --------------------------------- | ---------------------- |
-| First letter free | `-p` |
-| Lowercase taken; uppercase free | `-P` |
-| Both cases taken | none (set `cli_short`) |
-| Explicit override via `cli_short` | `-r` |
+| First letter free                 | `-p`                   |
+| Lowercase taken; uppercase free   | `-P`                   |
+| Both cases taken                  | none (set `cli_short`) |
+| Explicit override via `cli_short` | `-r`                   |
 
 Collisions are evaluated against short flags already assigned within the same
 parser, and reserved characters such as clap's `-h` and `-V`. A character is
@@ -585,7 +585,7 @@ following steps:
 1. Builds a `figment` configuration profile. A defaults provider constructed
    from the `#[ortho_config(default = …)]` attributes is added first.
 
-1. Attempts to load a configuration file. Candidate file paths are searched in
+2. Attempts to load a configuration file. Candidate file paths are searched in
    the following order:
 
    1. If provided, a path supplied via the CLI flag generated by the
@@ -594,30 +594,30 @@ following steps:
       `APP_CONFIG_PATH` or `CONFIG_PATH`) takes precedence; see
       [Config path override](#config-path-override).
 
-   1. A dotfile named `.<prefix>.toml` in the current working directory.
+   2. A dotfile named `.<prefix>.toml` in the current working directory.
 
-   1. A dotfile of the same name in the user's home directory.
+   3. A dotfile of the same name in the user's home directory.
 
-   1. On Unix‑like systems, the XDG configuration directory (e.g.
+   4. On Unix‑like systems, the XDG configuration directory (e.g.
       `~/.config/app/config.toml`) is searched using the `xdg` crate; on
       Windows, the `%APPDATA%` and `%LOCALAPPDATA%` directories are checked.
 
-   1. If the `json5` or `yaml` features are enabled, files with `.json`,
+   5. If the `json5` or `yaml` features are enabled, files with `.json`,
       `.json5`, `.yaml`, or `.yml` extensions are also considered in these
       locations.
 
-1. Adds an environment provider using the prefix specified on the struct. Keys
+3. Adds an environment provider using the prefix specified on the struct. Keys
    are upper‑cased and nested fields use double underscores (`__`) to separate
    components.
 
-1. Adds a provider containing the CLI values (captured as `Option<T>` fields)
+4. Adds a provider containing the CLI values (captured as `Option<T>` fields)
    as the final layer.
 
-1. Merges collection fields according to the configured `merge_strategy`, using
+5. Merges collection fields according to the configured `merge_strategy`, using
    `append` by default for vectors, `keyed` by default for maps, and `replace`
    when later sources should override earlier ones.
 
-1. Attempts to extract the merged configuration into the concrete struct. On
+6. Attempts to extract the merged configuration into the concrete struct. On
    success it returns the completed configuration; otherwise an `OrthoError` is
    returned.
 
@@ -672,13 +672,13 @@ earlier ones. The precedence, from lowest to highest, is:
 1. **Application‑defined defaults** – values provided via `default` attributes
    or `Option<T>` fields are considered defaults.
 
-1. **Configuration file** – values from a TOML (or JSON5/YAML) file loaded from
+2. **Configuration file** – values from a TOML (or JSON5/YAML) file loaded from
    one of the paths listed above.
 
-1. **Environment variables** – variables prefixed with the struct's `prefix`
+3. **Environment variables** – variables prefixed with the struct's `prefix`
    (e.g. `APP_PORT`, `APP_DATABASE__URL`) override file values.
 
-1. **Command‑line arguments** – values parsed by `clap` override all other
+4. **Command‑line arguments** – values parsed by `clap` override all other
    sources.
 
 <!-- mdformat on -->
@@ -971,9 +971,9 @@ remains available for generated defaults/documentation metadata.
 <!-- mdformat off -->
 
 1. Struct default (`#[ortho_config(default = ...)]` or inferred from clap)
-1. Configuration file
-1. Environment variable
-1. Explicit CLI override (e.g. `--punctuation "?"`)
+2. Configuration file
+3. Environment variable
+4. Explicit CLI override (e.g. `--punctuation "?"`)
 
 <!-- mdformat on -->
 
@@ -1004,7 +1004,7 @@ action to perform. An enum of subcommands is annotated with
 function can be called on each variant before dispatching. See the
 `Subcommand Configuration` section of the `OrthoConfig`
 [README](https://github.com/leynos/ortho-config/blob/v0.8.0/README.md#subcommand-configuration)
-for a complete example.
+ for a complete example.
 
 ## Error handling
 
@@ -1204,15 +1204,15 @@ The generator produces standard man page sections in the canonical order:
 <!-- mdformat off -->
 
 1. **NAME** – binary name and one-line description
-1. **SYNOPSIS** – usage pattern with flags
-1. **DESCRIPTION** – expanded about text
-1. **OPTIONS** – CLI flags with types, defaults, and possible values
-1. **ENVIRONMENT** – environment variables mapped to fields
-1. **FILES** – configuration file paths and discovery locations
-1. **PRECEDENCE** – source priority order (defaults → file → env → CLI)
-1. **EXAMPLES** – usage examples from the IR
-1. **SEE ALSO** – related commands and documentation links
-1. **EXIT STATUS** – standard exit codes
+2. **SYNOPSIS** – usage pattern with flags
+3. **DESCRIPTION** – expanded about text
+4. **OPTIONS** – CLI flags with types, defaults, and possible values
+5. **ENVIRONMENT** – environment variables mapped to fields
+6. **FILES** – configuration file paths and discovery locations
+7. **PRECEDENCE** – source priority order (defaults → file → env → CLI)
+8. **EXAMPLES** – usage examples from the IR
+9. **SEE ALSO** – related commands and documentation links
+10. **EXIT STATUS** – standard exit codes
 
 <!-- mdformat on -->
 

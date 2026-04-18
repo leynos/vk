@@ -84,7 +84,18 @@ accordingly. `vk` prints a warning when it detects a non UTF-8 locale.
 
 ## Installing
 
-Build from source using Cargo:
+Install the pre-built Linux release artifact with `cargo-binstall`:
+
+```bash
+cargo binstall vk
+```
+
+Release archives are published for:
+
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu`
+
+Other targets can still build from source using Cargo:
 
 ```bash
 cargo install --path .
