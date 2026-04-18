@@ -12,8 +12,8 @@ tests, and documentation with the v0.8.0 migration requirements.
   <https://raw.githubusercontent.com/leynos/ortho-config/refs/tags/v0.8.0/docs/users-guide.md>.
 - Apply the v0.7.0 migration guidance from
   <https://raw.githubusercontent.com/leynos/ortho-config/refs/tags/v0.8.0/docs/v0-7-0-migration-guide.md>
-  before closing the v0.8.0 migration work, because this repository is still on
-  v0.6.x today.
+   before closing the v0.8.0 migration work, because this repository is still
+  on v0.6.x today.
 - Apply the v0.8.0 migration notes for dependency versions, crate aliasing,
   clap defaults, YAML parsing, re-export usage, and optional `cargo orthohelp`
   metadata.
@@ -48,10 +48,9 @@ tests, and documentation with the v0.8.0 migration requirements.
 - Confirm that the active toolchain remains compatible with the new minimum
   Rust version.
 - Review the additive v0.7.0 APIs and behaviours:
-  `compose_layers()` / `compose_layers_from_iter(...)`,
-  `PostMergeHook`, `FluentLocalizer`,
-  `localize_clap_error_with_command`, and `cli_default_as_absent` flows that
-  require `ArgMatches`.
+  `compose_layers()` / `compose_layers_from_iter(...)`, `PostMergeHook`,
+  `FluentLocalizer`, `localize_clap_error_with_command`, and
+  `cli_default_as_absent` flows that require `ArgMatches`.
 - Audit YAML-backed tests and sample configuration for YAML 1.2 compatibility,
   especially any unquoted `yes`, `on`, or `off` literals and any duplicate
   mapping keys.
@@ -109,9 +108,8 @@ tests, and documentation with the v0.8.0 migration requirements.
 ### 3. Reconcile the v0.7.0 and v0.8.0 API surface
 
 - Search for code paths that would benefit from or depend on the v0.7.0
-  additions:
-  `compose_layers()`, `compose_layers_from_iter(...)`, `PostMergeHook`,
-  `FluentLocalizer`, `localize_clap_error_with_command`,
+  additions: `compose_layers()`, `compose_layers_from_iter(...)`,
+  `PostMergeHook`, `FluentLocalizer`, `localize_clap_error_with_command`,
   `SelectedSubcommandMerge`, and `cli_default_as_absent`.
 - Where the repository manually inspects or synthesizes layers in tests,
   evaluate whether `compose_layers()` or `merge_from_layers()` should replace

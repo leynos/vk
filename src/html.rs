@@ -55,21 +55,21 @@ pub fn collapse_details(input: &str) -> String {
 
 fn collapse_node(node: &Handle, out: &mut String, in_details: bool) {
     match &node.data {
-        NodeData::Element { name, .. } if name.local.eq_str_ignore_ascii_case("details") => {
-            if should_collapse_details(node, in_details) {
-                write_collapsed_summary(node, out);
-            }
+        NodeData::Element { name, .. }
+            if name.local.eq_str_ignore_ascii_case("details")
+                && should_collapse_details(node, in_details) =>
+        {
+            write_collapsed_summary(node, out);
             // drop children entirely when collapsing
         }
+        NodeData::Element { name, .. } if name.local.eq_str_ignore_ascii_case("details") => {}
         NodeData::Element { .. } => {
             for child in node.children.borrow().iter() {
                 collapse_node(child, out, in_details);
             }
         }
-        NodeData::Text { contents } => {
-            if !in_details {
-                out.push_str(&contents.borrow());
-            }
+        NodeData::Text { contents } if !in_details => {
+            out.push_str(&contents.borrow());
         }
         _ => {}
     }

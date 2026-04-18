@@ -13,6 +13,12 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+          - target: aarch64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v5
       - name: Setup Python 3.11
@@ -38,6 +44,11 @@ jobs:
           echo "Release tag $tag matches Cargo.toml version."
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@69f9c29d18a28b6bdf4b02dcd743ef416817ba18
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+      - name: Install AArch64 linker
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
@@ -45,16 +56,31 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
             ${{ runner.os }}-cargo-
       - name: Build release binary
-        run: cargo build --release
-      - name: Upload release artifact
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --locked --release --target ${{ matrix.target }} --bin ${{ env.REPO_NAME }}
+      - name: Package release artifact
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          archive_dir="${REPO_NAME}-${TARGET}-v${version}"
+          archive_name="${archive_dir}.tgz"
+          mkdir -p dist/"${archive_dir}"
+          install -m 0755 "target/${TARGET}/release/${REPO_NAME}" \
+            "dist/${archive_dir}/${REPO_NAME}"
+          tar -C dist -czf "${archive_name}" "${archive_dir}"
+      - name: Upload packaged artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.REPO_NAME }}
-          path: target/release/${{ env.REPO_NAME }}
+          name: ${{ env.REPO_NAME }}-${{ matrix.target }}
+          path: ${{ env.REPO_NAME }}-${{ matrix.target }}-${{ github.ref_name }}.tgz
 
   release:
     needs: build
@@ -66,7 +92,7 @@ jobs:
       - id: download
         uses: actions/download-artifact@v5
         with:
-          name: ${{ env.REPO_NAME }}
+          path: release-artifacts
       #- uses: softprops/action-gh-release@v2
       #  with:
       #    tag_name: ${{ github.ref_name }}
@@ -75,6 +101,8 @@ jobs:
       #    files: ${{ steps.download.outputs.download-path }}/${{ env.REPO_NAME }}
       - name: Upload release
         run: |
-          gh release upload "${{ github.ref_name }}" ${{ steps.download.outputs.download-path }}/${{ env.REPO_NAME }}
+          set -euo pipefail
+          mapfile -d '' assets < <(find "${{ steps.download.outputs.download-path }}" -type f -name '*.tgz' -print0)
+          gh release upload --clobber "${{ github.ref_name }}" "${assets[@]}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

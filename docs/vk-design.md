@@ -85,8 +85,8 @@ The code centres on three printing helpers:
 
 1. `write_comment_body` formats a single comment body to any `Write`
    implementation.
-1. `write_comment` includes the diff for the first comment in a thread.
-1. `write_thread` iterates over a thread and prints each comment body in turn.
+2. `write_comment` includes the diff for the first comment in a thread.
+3. `write_thread` iterates over a thread and prints each comment body in turn.
 
 <!-- mdformat on -->
 
