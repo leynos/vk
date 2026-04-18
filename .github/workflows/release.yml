@@ -99,9 +99,12 @@ jobs:
       #    generate_release_notes: true
       #    fail_on_unmatched_files: true
       #    files: ${{ steps.download.outputs.download-path }}/${{ env.REPO_NAME }}
-      - name: Upload release
+      - name: Create or update release
         run: |
           set -euo pipefail
+          if ! gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
+            gh release create "${{ github.ref_name }}" --verify-tag --generate-notes
+          fi
           mapfile -d '' assets < <(find "${{ steps.download.outputs.download-path }}" -type f -name '*.tgz' -print0)
           gh release upload --clobber "${{ github.ref_name }}" "${assets[@]}"
         env:
