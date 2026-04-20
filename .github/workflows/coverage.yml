@@ -12,7 +12,7 @@ jobs:
       CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
       CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@69f9c29d18a28b6bdf4b02dcd743ef416817ba18
       - name: Format
@@ -37,7 +37,7 @@ jobs:
   unstable-rest-resolve:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@69f9c29d18a28b6bdf4b02dcd743ef416817ba18
       - name: Install OpenSSL
