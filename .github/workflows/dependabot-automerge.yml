@@ -1,0 +1,19 @@
+name: Dependabot auto-merge
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, labeled]
+  workflow_dispatch:
+    inputs:
+      pull-request-number:
+        description: 'Pull request number to auto-merge'
+        required: true
+        type: number
+
+jobs:
+  dependabot-automerge:
+    if: ${{ github.actor == 'dependabot[bot]' || github.event_name == 'workflow_dispatch' }}
+    uses: leynos/shared-actions/.github/workflows/dependabot-automerge.yml@235d2d07b9a321364a742310873f6732d7228e72
+    with:
+      pull-request-number: ${{ github.event.pull_request.number || inputs.pull-request-number }}
+      repository: ${{ github.repository }}
