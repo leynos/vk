@@ -130,8 +130,8 @@ examples are placed in the `[dev-dependencies]` section of the `Cargo.toml`
 file.[^15] This ensures that testing libraries are not compiled into the final
 release binary, keeping it lean and free of unnecessary code.
 
-The following dependencies are required to build the complete E2E test suite
-for `vk`. Each one plays a specific, interconnected role within the test
+The following dependencies are required to build the complete E2E test suite for
+`vk`. Each one plays a specific, interconnected role within the test
 architecture. For instance, the `third-wheel` mock server is asynchronous and
 therefore requires the `tokio` runtime to execute. The mock server, in turn,
 needs to serve predefined JSON responses, which are loaded and handled using
@@ -297,8 +297,8 @@ standard for this in the Rust ecosystem. By annotating a test with
 running asynchronous code, such as starting and managing the mock server.
 
 The following code demonstrates a reusable helper function,
-`start_mock_server`, which encapsulates the logic for setting up and running
-the `third-wheel` proxy.
+`start_mock_server`, which encapsulates the logic for setting up and running the
+`third-wheel` proxy.
 
 ```rust
 // In tests/e2e.rs, or a new tests/helpers.rs module
@@ -704,8 +704,8 @@ intuitive, revolving around the `cargo-insta` command-line tool.[^13]
      leaving it in a pending state.
 
 4. **Non-Interactive Updates (for CI/CD):** The `INSTA_UPDATE` environment
-   variable controls `insta`'s behaviour in non-interactive environments like
-   CI pipelines.[^13]
+   variable controls `insta`'s behaviour in non-interactive environments like CI
+   pipelines.[^13]
 
 <!-- mdformat on -->
 
@@ -850,8 +850,8 @@ async fn test_pr_command_with_single_comment_renders_correctly() {
 }
 ```
 
-This complete example demonstrates the synergy of the testing stack. `tokio`
-and `third-wheel` create the controlled environment, `assert_cmd` executes the
+This complete example demonstrates the synergy of the testing stack. `tokio` and
+`third-wheel` create the controlled environment, `assert_cmd` executes the
 application within that environment, and `insta` provides the final, robust
 verification of the application's primary output. This structure forms a
 powerful and reusable pattern for all other E2E tests in the suite.
