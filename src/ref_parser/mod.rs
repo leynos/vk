@@ -26,7 +26,7 @@ pub struct RepoInfo {
 ///
 /// When parsing a bare number (e.g., "42"), the default repository provides
 /// the owner/repo context. If not provided, falls back to `FETCH_HEAD`, then
-/// to the `origin` remote URL.
+/// `origin`, for numeric refs.
 #[derive(Debug, Clone, Copy)]
 pub struct DefaultRepo<'a>(Option<&'a str>);
 
@@ -37,7 +37,8 @@ impl<'a> DefaultRepo<'a> {
         Self(Some(repo))
     }
 
-    /// No default repository; will fall back to `FETCH_HEAD` for numeric refs.
+    /// No default repository; will fall back to `FETCH_HEAD`, then `origin`,
+    /// for numeric refs.
     #[expect(dead_code, reason = "public API for callers to construct DefaultRepo")]
     pub const fn none() -> Self {
         Self(None)
@@ -102,8 +103,8 @@ pub fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
 /// Parse an issue reference into repository and issue number.
 ///
 /// Accepts either a full GitHub issue URL or a bare issue number (using
-/// `default_repo` for context, falling back to `FETCH_HEAD`, then to the
-/// `origin` remote URL).
+/// `default_repo` for context, falling back to `FETCH_HEAD`, then `origin`,
+/// for numeric refs).
 ///
 /// # Arguments
 ///
@@ -140,8 +141,8 @@ pub fn parse_issue_reference<'a>(
 /// Parse a pull request reference into repository and PR number.
 ///
 /// Accepts either a full GitHub pull request URL or a bare PR number (using
-/// `default_repo` for context, falling back to `FETCH_HEAD`, then to the
-/// `origin` remote URL).
+/// `default_repo` for context, falling back to `FETCH_HEAD`, then `origin`,
+/// for numeric refs).
 ///
 /// # Arguments
 ///
