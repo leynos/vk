@@ -178,9 +178,16 @@ struct BranchContext {
 
 /// Resolve the current branch and repository for PR auto-detection.
 ///
-/// Returns the target repository (from `--repo` flag or `FETCH_HEAD`), the
-/// current branch name, and optionally the head repository owner (from the
-/// `origin` remote URL) for disambiguating PRs from forks.
+/// Returns the target repository, the current branch name, and optionally the
+/// head repository owner (from the `origin` remote URL) for disambiguating PRs
+/// from forks.
+///
+/// The target repository is resolved from, in order: the `--repo` flag,
+/// `FETCH_HEAD`, then the `origin` remote URL. The `origin` fallback handles
+/// fresh worktrees where `git fetch` has not been run since creation, so
+/// `FETCH_HEAD` does not yet exist. `FETCH_HEAD` is consulted before `origin`
+/// because in fork workflows it points at the upstream repository (where PRs
+/// live) while `origin` points at the user's fork.
 ///
 /// # Errors
 ///
@@ -188,12 +195,15 @@ struct BranchContext {
 /// state, or `VkError::RepoNotFound` when the repository cannot be determined.
 fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<BranchContext, VkError> {
     let branch = current_branch().ok_or(VkError::DetachedHead)?;
+    // Resolve `origin` once so it can serve as both the repository fallback and
+    // the head-owner source without spawning git twice.
+    let origin = repo_from_origin();
     let repo = default_repo
         .and_then(parse_repo_str)
         .or_else(repo_from_fetch_head)
+        .or_else(|| origin.clone())
         .ok_or(VkError::RepoNotFound)?;
-    // Get the head owner from origin remote for fork disambiguation
-    let head_owner = repo_from_origin().map(|r| r.owner);
+    let head_owner = origin.map(|r| r.owner);
     Ok(BranchContext {
         repo,
         branch,

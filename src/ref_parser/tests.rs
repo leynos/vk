@@ -316,3 +316,58 @@ fn repo_from_origin_returns_none_without_remote() {
 
     assert!(repo_from_origin_impl(Some(fixture.path())).is_none());
 }
+
+/// RAII guard that switches the process cwd to `dir` and restores it on drop.
+///
+/// `parse_reference` resolves bare numeric refs via the public
+/// `repo_from_fetch_head` / `repo_from_origin` helpers, which read from the
+/// current working directory. These tests therefore need cwd manipulation and
+/// must run serially.
+struct CwdGuard {
+    original: std::path::PathBuf,
+}
+
+impl CwdGuard {
+    fn enter(dir: &std::path::Path) -> Self {
+        let original = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(dir).expect("chdir temp");
+        Self { original }
+    }
+}
+
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.original);
+    }
+}
+
+#[test]
+#[serial_test::serial]
+fn parse_pr_number_falls_back_to_origin_without_fetch_head() {
+    // Mirrors a fresh worktree where `git fetch` has not yet been run inside
+    // the worktree: no FETCH_HEAD, but `origin` is configured.
+    let fixture = GitRepoFixture::on_branch("feature-branch")
+        .with_origin("https://github.com/leynos/chutoro.git");
+    let _cwd = CwdGuard::enter(fixture.path());
+
+    let (repo, number) =
+        parse_pr_reference("17", None).expect("origin should resolve repo for bare number");
+    assert_eq!(repo.owner, "leynos");
+    assert_eq!(repo.name, "chutoro");
+    assert_eq!(number, 17);
+}
+
+#[test]
+#[serial_test::serial]
+fn parse_pr_number_prefers_fetch_head_over_origin() {
+    let fixture = GitRepoFixture::on_branch("feature-branch")
+        .with_origin("https://github.com/fork/repo.git")
+        .with_fetch_head(
+            "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
+        );
+    let _cwd = CwdGuard::enter(fixture.path());
+
+    let (repo, _) = parse_pr_reference("3", None).expect("FETCH_HEAD should win");
+    assert_eq!(repo.owner, "upstream");
+    assert_eq!(repo.name, "repo");
+}

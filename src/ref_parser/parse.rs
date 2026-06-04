@@ -72,10 +72,15 @@ pub(super) fn parse_reference(
         return res;
     }
     if let Ok(number) = input.parse::<u64>() {
+        // `origin` is a last-resort fallback: it covers fresh worktrees where
+        // `FETCH_HEAD` has not yet been written. `FETCH_HEAD` still takes
+        // precedence because in fork workflows it identifies the upstream
+        // repository while `origin` points at the user's fork.
         let repo = default_repo
             .as_option()
             .and_then(parse_repo_str)
             .or_else(super::repo_from_fetch_head)
+            .or_else(super::repo_from_origin)
             .ok_or(VkError::RepoNotFound)?;
         return Ok((repo, number));
     }

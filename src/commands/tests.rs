@@ -83,18 +83,19 @@ mod resolve_branch_and_repo_tests {
 
     /// A temporary Git repository directory for testing `resolve_branch_and_repo`.
     struct GitRepoFixture {
-        _dir: TempDir,
+        dir: TempDir,
         original_cwd: PathBuf,
     }
 
     impl GitRepoFixture {
-        /// Create a new fixture with a git repository on the specified branch
-        /// and with `FETCH_HEAD` containing the specified repo URL.
-        fn with_branch_and_fetch_head(branch: &str, fetch_head_content: &str) -> Self {
+        /// Create a new fixture with a git repository on the specified branch.
+        ///
+        /// The repository has no `FETCH_HEAD`, no origin remote, and no
+        /// commits; HEAD is a symbolic ref to the requested branch.
+        fn on_branch(branch: &str) -> Self {
             let dir = tempdir().expect("tempdir");
             let original_cwd = std::env::current_dir().expect("cwd");
 
-            // Initialize a real git repository so git rev-parse works
             // Use -c init.defaultBranch=main for compatibility with Git < 2.28
             let status = Command::new("git")
                 .args(["-c", "init.defaultBranch=main", "init"])
@@ -103,7 +104,6 @@ mod resolve_branch_and_repo_tests {
                 .expect("git init");
             assert!(status.status.success(), "git init failed");
 
-            // Use git symbolic-ref to set HEAD to desired branch
             let status = Command::new("git")
                 .args(["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])
                 .current_dir(dir.path())
@@ -111,15 +111,32 @@ mod resolve_branch_and_repo_tests {
                 .expect("git symbolic-ref");
             assert!(status.status.success(), "git symbolic-ref failed");
 
-            // Write FETCH_HEAD
-            let git_dir = dir.path().join(".git");
-            fs::write(git_dir.join("FETCH_HEAD"), fetch_head_content).expect("write FETCH_HEAD");
-
             std::env::set_current_dir(dir.path()).expect("chdir temp");
-            Self {
-                _dir: dir,
-                original_cwd,
-            }
+            Self { dir, original_cwd }
+        }
+
+        /// Write `FETCH_HEAD` content into the repository.
+        fn with_fetch_head(self, content: &str) -> Self {
+            let git_dir = self.dir.path().join(".git");
+            fs::write(git_dir.join("FETCH_HEAD"), content).expect("write FETCH_HEAD");
+            self
+        }
+
+        /// Add an `origin` remote pointing at `url`.
+        fn with_origin(self, url: &str) -> Self {
+            let status = Command::new("git")
+                .args(["remote", "add", "origin", url])
+                .current_dir(self.dir.path())
+                .output()
+                .expect("git remote add");
+            assert!(status.status.success(), "git remote add failed");
+            self
+        }
+
+        /// Create a new fixture with a git repository on the specified branch
+        /// and with `FETCH_HEAD` containing the specified repo URL.
+        fn with_branch_and_fetch_head(branch: &str, fetch_head_content: &str) -> Self {
+            Self::on_branch(branch).with_fetch_head(fetch_head_content)
         }
     }
 
@@ -205,6 +222,47 @@ mod resolve_branch_and_repo_tests {
             ctx.head_owner.as_deref(),
             Some("fork-owner"),
             "head owner from origin remote"
+        );
+    }
+
+    #[rstest]
+    #[serial]
+    fn prefers_fetch_head_over_origin_when_both_present(git_repo_with_fork_origin: GitRepoFixture) {
+        let _fixture = git_repo_with_fork_origin;
+        // FETCH_HEAD identifies the upstream in a fork workflow, so it must win
+        // over the user's `origin` remote.
+        let ctx = resolve_branch_and_repo(None).expect("should resolve successfully");
+        assert_eq!(ctx.repo.owner, "upstream", "FETCH_HEAD takes precedence");
+        assert_eq!(ctx.repo.name, "repo");
+        assert_eq!(
+            ctx.head_owner.as_deref(),
+            Some("fork-owner"),
+            "head owner still comes from origin"
+        );
+    }
+
+    /// Fixture for a fresh worktree: branch and origin set, but no `FETCH_HEAD`
+    /// yet. This mirrors the state of a `git worktree add` target where no
+    /// `git fetch` has been run from inside the worktree.
+    #[fixture]
+    fn git_repo_with_origin_only() -> GitRepoFixture {
+        GitRepoFixture::on_branch("feature-branch")
+            .with_origin("https://github.com/leynos/chutoro.git")
+    }
+
+    #[rstest]
+    #[serial]
+    fn falls_back_to_origin_when_fetch_head_missing(git_repo_with_origin_only: GitRepoFixture) {
+        let _fixture = git_repo_with_origin_only;
+        let ctx =
+            resolve_branch_and_repo(None).expect("origin must be used when FETCH_HEAD is absent");
+        assert_eq!(ctx.repo.owner, "leynos", "origin owner");
+        assert_eq!(ctx.repo.name, "chutoro", "origin repo name");
+        assert_eq!(ctx.branch, "feature-branch");
+        assert_eq!(
+            ctx.head_owner.as_deref(),
+            Some("leynos"),
+            "head owner still derived from origin"
         );
     }
 }

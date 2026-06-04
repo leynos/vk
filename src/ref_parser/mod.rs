@@ -25,7 +25,8 @@ pub struct RepoInfo {
 /// Optional default repository for resolving bare numeric references.
 ///
 /// When parsing a bare number (e.g., "42"), the default repository provides
-/// the owner/repo context. If not provided, falls back to `FETCH_HEAD`.
+/// the owner/repo context. If not provided, falls back to `FETCH_HEAD`, then
+/// to the `origin` remote URL.
 #[derive(Debug, Clone, Copy)]
 pub struct DefaultRepo<'a>(Option<&'a str>);
 
@@ -101,7 +102,8 @@ pub fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
 /// Parse an issue reference into repository and issue number.
 ///
 /// Accepts either a full GitHub issue URL or a bare issue number (using
-/// `default_repo` for context, falling back to `FETCH_HEAD`).
+/// `default_repo` for context, falling back to `FETCH_HEAD`, then to the
+/// `origin` remote URL).
 ///
 /// # Arguments
 ///
@@ -138,7 +140,8 @@ pub fn parse_issue_reference<'a>(
 /// Parse a pull request reference into repository and PR number.
 ///
 /// Accepts either a full GitHub pull request URL or a bare PR number (using
-/// `default_repo` for context, falling back to `FETCH_HEAD`).
+/// `default_repo` for context, falling back to `FETCH_HEAD`, then to the
+/// `origin` remote URL).
 ///
 /// # Arguments
 ///
