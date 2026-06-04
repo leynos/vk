@@ -189,21 +189,23 @@ struct BranchContext {
 /// because in fork workflows it points at the upstream repository (where PRs
 /// live) while `origin` points at the user's fork.
 ///
+/// `repo_from_origin` is called lazily so the happy path (a usable `--repo` or
+/// `FETCH_HEAD`) only spawns git once — for the head-owner lookup. The rare
+/// `origin` fallback pays for a second invocation to keep the fast path
+/// allocation-free.
+///
 /// # Errors
 ///
 /// Returns `VkError::DetachedHead` when the repository is in detached HEAD
 /// state, or `VkError::RepoNotFound` when the repository cannot be determined.
 fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<BranchContext, VkError> {
     let branch = current_branch().ok_or(VkError::DetachedHead)?;
-    // Resolve `origin` once so it can serve as both the repository fallback and
-    // the head-owner source without spawning git twice.
-    let origin = repo_from_origin();
     let repo = default_repo
         .and_then(parse_repo_str)
         .or_else(repo_from_fetch_head)
-        .or_else(|| origin.clone())
+        .or_else(repo_from_origin)
         .ok_or(VkError::RepoNotFound)?;
-    let head_owner = origin.map(|r| r.owner);
+    let head_owner = repo_from_origin().map(|r| r.owner);
     Ok(BranchContext {
         repo,
         branch,
