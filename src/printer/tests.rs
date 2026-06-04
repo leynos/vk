@@ -221,6 +221,23 @@ fn write_thread_frames_each_comment_with_single_blank_before_separator() {
 }
 
 #[test]
+fn write_thread_with_no_comments_produces_no_output() {
+    let thread = ReviewThread {
+        comments: CommentConnection {
+            nodes: Vec::new(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut buf = Vec::new();
+    write_thread(&mut buf, &MadSkin::default(), &thread).expect("write thread");
+    assert!(
+        buf.is_empty(),
+        "empty thread must produce no output: {buf:?}"
+    );
+}
+
+#[test]
 fn print_reviews_propagates_writer_errors() {
     let review = PullRequestReview {
         body: "Nice".into(),
