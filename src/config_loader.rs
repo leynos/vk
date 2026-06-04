@@ -5,6 +5,13 @@
 //! discovery. This module preserves generated discovery flags such as
 //! `--config-path` while filtering the empty CLI layer that would otherwise
 //! flatten grouped global values to `null`.
+//!
+//! It also surfaces parse errors for the explicit `VK_CONFIG_PATH` file. The
+//! `ortho_config` discovery pipeline treats env-provided paths as optional and
+//! silently swallows broken candidates when any other layer (such as
+//! `~/.config/vk/config.toml`) loads successfully. When the user has set
+//! `VK_CONFIG_PATH` explicitly the intent is unambiguous, so we validate that
+//! file up-front and refuse to proceed if it fails to parse.
 
 use crate::cli_args::GlobalArgs;
 use ortho_config::{
@@ -12,12 +19,41 @@ use ortho_config::{
     declarative::{LayerComposition, MergeLayer, MergeProvenance},
 };
 use std::borrow::Cow;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
+use std::path::Path;
+
+/// Environment variable that selects an explicit configuration file.
+const EXPLICIT_CONFIG_PATH_ENV: &str = "VK_CONFIG_PATH";
 
 /// Load global configuration layers without letting an empty CLI flatten group
 /// overwrite file or environment values.
 pub(crate) fn load_global_args_without_cli_overrides() -> ortho_config::OrthoResult<GlobalArgs> {
     load_global_args_without_cli_overrides_from_process_args(std::env::args_os())
+}
+
+/// Validate the file referenced by `VK_CONFIG_PATH`, if any is set.
+///
+/// Returns `Ok(())` when the variable is unset, empty, or points at a missing
+/// file. Returns the parse error when the file exists but cannot be parsed,
+/// so a misconfigured user-provided path surfaces a clear "configuration
+/// error" instead of being silently dropped by discovery's optional-layer
+/// fallback.
+fn validate_explicit_config_path() -> ortho_config::OrthoResult<()> {
+    validate_explicit_config_path_value(std::env::var_os(EXPLICIT_CONFIG_PATH_ENV).as_deref())
+}
+
+fn validate_explicit_config_path_value(raw: Option<&OsStr>) -> ortho_config::OrthoResult<()> {
+    let Some(raw) = raw else {
+        return Ok(());
+    };
+    if raw.is_empty() {
+        return Ok(());
+    }
+    // `load_config_file` returns `Ok(None)` when the file does not exist; we
+    // tolerate that case to mirror ortho_config's existing semantics. Parse
+    // failures, however, become `Err` and propagate.
+    ortho_config::file::load_config_file(Path::new(raw))?;
+    Ok(())
 }
 
 /// Preserve generated discovery overrides from the process argv while
@@ -41,6 +77,7 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
+    validate_explicit_config_path()?;
     let composition = GlobalArgs::compose_layers_from_iter(args);
     let (layers, errors) = composition.into_parts();
     let mut filtered_layers = Vec::with_capacity(layers.len() + 1);
@@ -96,11 +133,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::load_global_args_without_cli_overrides_from_process_args;
+    use super::{
+        EXPLICIT_CONFIG_PATH_ENV, load_global_args_without_cli_overrides_from_process_args,
+    };
     use crate::cli_args::GlobalArgs;
     use crate::test_utils::EnvSandbox;
     use serial_test::serial;
     use std::ffi::OsString;
+    use vk::environment;
 
     fn setup_global_args_without_cli_overrides<I, F>(configure: F) -> (EnvSandbox, GlobalArgs)
     where
@@ -142,5 +182,26 @@ mod tests {
         });
 
         assert_eq!(global.repo.as_deref(), Some("from-config-path"));
+    }
+
+    #[test]
+    #[serial]
+    fn load_global_args_without_cli_overrides_reports_broken_explicit_config() {
+        let sandbox = EnvSandbox::new().expect("create config sandbox");
+        let broken_path = sandbox.path().join("broken.toml");
+        std::fs::write(&broken_path, "not = [valid").expect("write broken config");
+        environment::set_var(EXPLICIT_CONFIG_PATH_ENV, &broken_path);
+
+        let result =
+            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")]);
+
+        let err = result.expect_err("broken explicit config must surface a configuration error");
+        let rendered = format!("{err}");
+        assert!(
+            !rendered.is_empty(),
+            "configuration error should describe the failure",
+        );
+        // `EnvSandbox` restores VK_CONFIG_PATH on drop.
+        drop(sandbox);
     }
 }
