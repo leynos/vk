@@ -74,90 +74,66 @@ fn handle_banner_logs_and_returns_false_on_other_errors() {
 
 mod resolve_branch_and_repo_tests {
     use super::super::resolve_branch_and_repo;
+    use crate::test_utils::{CwdGuard, GitRepoFixture};
     use rstest::{fixture, rstest};
     use serial_test::serial;
-    use std::fs;
-    use std::path::PathBuf;
-    use std::process::Command;
-    use tempfile::{TempDir, tempdir};
 
-    /// A temporary Git repository directory for testing `resolve_branch_and_repo`.
-    struct GitRepoFixture {
-        dir: TempDir,
-        original_cwd: PathBuf,
+    /// Pairs a [`GitRepoFixture`] with a [`CwdGuard`] so each test runs against
+    /// the fixture's working tree. `resolve_branch_and_repo` reads from the
+    /// current directory, so tests must hold this for their full duration and
+    /// be marked `#[serial]`.
+    struct ResolverFixture {
+        _repo: GitRepoFixture,
+        _cwd: CwdGuard,
     }
 
-    impl GitRepoFixture {
-        /// Create a new fixture with a git repository on the specified branch.
-        ///
-        /// The repository has no `FETCH_HEAD`, no origin remote, and no
-        /// commits; HEAD is a symbolic ref to the requested branch.
-        fn on_branch(branch: &str) -> Self {
-            let dir = tempdir().expect("tempdir");
-            let original_cwd = std::env::current_dir().expect("cwd");
-
-            // Use -c init.defaultBranch=main for compatibility with Git < 2.28
-            let status = Command::new("git")
-                .args(["-c", "init.defaultBranch=main", "init"])
-                .current_dir(dir.path())
-                .output()
-                .expect("git init");
-            assert!(status.status.success(), "git init failed");
-
-            let status = Command::new("git")
-                .args(["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])
-                .current_dir(dir.path())
-                .output()
-                .expect("git symbolic-ref");
-            assert!(status.status.success(), "git symbolic-ref failed");
-
-            std::env::set_current_dir(dir.path()).expect("chdir temp");
-            Self { dir, original_cwd }
-        }
-
-        /// Write `FETCH_HEAD` content into the repository.
-        fn with_fetch_head(self, content: &str) -> Self {
-            let git_dir = self.dir.path().join(".git");
-            fs::write(git_dir.join("FETCH_HEAD"), content).expect("write FETCH_HEAD");
-            self
-        }
-
-        /// Add an `origin` remote pointing at `url`.
-        fn with_origin(self, url: &str) -> Self {
-            let status = Command::new("git")
-                .args(["remote", "add", "origin", url])
-                .current_dir(self.dir.path())
-                .output()
-                .expect("git remote add");
-            assert!(status.status.success(), "git remote add failed");
-            self
-        }
-
-        /// Create a new fixture with a git repository on the specified branch
-        /// and with `FETCH_HEAD` containing the specified repo URL.
-        fn with_branch_and_fetch_head(branch: &str, fetch_head_content: &str) -> Self {
-            Self::on_branch(branch).with_fetch_head(fetch_head_content)
+    impl ResolverFixture {
+        fn enter(repo: GitRepoFixture) -> Self {
+            let cwd = CwdGuard::enter(repo.path());
+            Self {
+                _repo: repo,
+                _cwd: cwd,
+            }
         }
     }
 
-    impl Drop for GitRepoFixture {
-        fn drop(&mut self) {
-            let _ = std::env::set_current_dir(&self.original_cwd);
-        }
-    }
+    const FETCH_HEAD_FALLBACK: &str =
+        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/fallback/repo.git";
+    const FETCH_HEAD_UPSTREAM: &str =
+        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git";
 
-    /// rstest fixture for a repository on feature-branch with `FETCH_HEAD`.
+    /// Fixture for a repository on feature-branch with `FETCH_HEAD` only.
     #[fixture]
-    fn git_repo_on_feature_branch() -> GitRepoFixture {
-        GitRepoFixture::with_branch_and_fetch_head(
-            "feature-branch",
-            "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/fallback/repo.git",
+    fn git_repo_on_feature_branch() -> ResolverFixture {
+        ResolverFixture::enter(
+            GitRepoFixture::on_branch("feature-branch").with_fetch_head(FETCH_HEAD_FALLBACK),
+        )
+    }
+
+    /// Fixture for a repo with origin remote pointing to a fork.
+    #[fixture]
+    fn git_repo_with_fork_origin() -> ResolverFixture {
+        ResolverFixture::enter(
+            GitRepoFixture::on_branch("feature-branch")
+                .with_fetch_head(FETCH_HEAD_UPSTREAM)
+                .with_origin("https://github.com/fork-owner/repo.git"),
+        )
+    }
+
+    /// Fixture for a fresh worktree: branch and origin set, but no
+    /// `FETCH_HEAD` yet. Mirrors a `git worktree add` target before any
+    /// `git fetch` has run inside it.
+    #[fixture]
+    fn git_repo_with_origin_only() -> ResolverFixture {
+        ResolverFixture::enter(
+            GitRepoFixture::on_branch("feature-branch")
+                .with_origin("https://github.com/leynos/chutoro.git"),
         )
     }
 
     #[rstest]
     #[serial]
-    fn returns_repo_from_default_repo_when_provided(git_repo_on_feature_branch: GitRepoFixture) {
+    fn returns_repo_from_default_repo_when_provided(git_repo_on_feature_branch: ResolverFixture) {
         let _fixture = git_repo_on_feature_branch;
         let result = resolve_branch_and_repo(Some("owner/repo"));
         let ctx = result.expect("should resolve successfully");
@@ -167,13 +143,12 @@ mod resolve_branch_and_repo_tests {
             ctx.branch, "feature-branch",
             "should detect branch from git"
         );
-        // No origin remote configured in test fixture, so head_owner should be None
         assert!(ctx.head_owner.is_none(), "no origin remote configured");
     }
 
     #[rstest]
     #[serial]
-    fn falls_back_to_fetch_head_when_no_default_repo(git_repo_on_feature_branch: GitRepoFixture) {
+    fn falls_back_to_fetch_head_when_no_default_repo(git_repo_on_feature_branch: ResolverFixture) {
         let _fixture = git_repo_on_feature_branch;
         let result = resolve_branch_and_repo(None);
         let ctx = result.expect("should resolve successfully");
@@ -188,30 +163,9 @@ mod resolve_branch_and_repo_tests {
         );
     }
 
-    /// Fixture for a repo with origin remote pointing to a fork.
-    #[fixture]
-    fn git_repo_with_fork_origin() -> GitRepoFixture {
-        let fixture = GitRepoFixture::with_branch_and_fetch_head(
-            "feature-branch",
-            "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
-        );
-        // Add origin remote pointing to the fork
-        let status = Command::new("git")
-            .args([
-                "remote",
-                "add",
-                "origin",
-                "https://github.com/fork-owner/repo.git",
-            ])
-            .output()
-            .expect("git remote add");
-        assert!(status.status.success(), "git remote add failed");
-        fixture
-    }
-
     #[rstest]
     #[serial]
-    fn extracts_head_owner_from_origin_remote(git_repo_with_fork_origin: GitRepoFixture) {
+    fn extracts_head_owner_from_origin_remote(git_repo_with_fork_origin: ResolverFixture) {
         let _fixture = git_repo_with_fork_origin;
         let result = resolve_branch_and_repo(Some("upstream/repo"));
         let ctx = result.expect("should resolve successfully");
@@ -227,10 +181,12 @@ mod resolve_branch_and_repo_tests {
 
     #[rstest]
     #[serial]
-    fn prefers_fetch_head_over_origin_when_both_present(git_repo_with_fork_origin: GitRepoFixture) {
+    fn prefers_fetch_head_over_origin_when_both_present(
+        git_repo_with_fork_origin: ResolverFixture,
+    ) {
         let _fixture = git_repo_with_fork_origin;
-        // FETCH_HEAD identifies the upstream in a fork workflow, so it must win
-        // over the user's `origin` remote.
+        // FETCH_HEAD identifies the upstream in a fork workflow, so it must
+        // win over the user's `origin` remote.
         let ctx = resolve_branch_and_repo(None).expect("should resolve successfully");
         assert_eq!(ctx.repo.owner, "upstream", "FETCH_HEAD takes precedence");
         assert_eq!(ctx.repo.name, "repo");
@@ -241,18 +197,9 @@ mod resolve_branch_and_repo_tests {
         );
     }
 
-    /// Fixture for a fresh worktree: branch and origin set, but no `FETCH_HEAD`
-    /// yet. This mirrors the state of a `git worktree add` target where no
-    /// `git fetch` has been run from inside the worktree.
-    #[fixture]
-    fn git_repo_with_origin_only() -> GitRepoFixture {
-        GitRepoFixture::on_branch("feature-branch")
-            .with_origin("https://github.com/leynos/chutoro.git")
-    }
-
     #[rstest]
     #[serial]
-    fn falls_back_to_origin_when_fetch_head_missing(git_repo_with_origin_only: GitRepoFixture) {
+    fn falls_back_to_origin_when_fetch_head_missing(git_repo_with_origin_only: ResolverFixture) {
         let _fixture = git_repo_with_origin_only;
         let ctx =
             resolve_branch_and_repo(None).expect("origin must be used when FETCH_HEAD is absent");
