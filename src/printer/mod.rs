@@ -10,19 +10,6 @@ use crate::html::collapse_details;
 use crate::reviews::PullRequestReview;
 use crate::{ReviewComment, ReviewThread};
 
-/// Write a comment permalink followed by a horizontal rule separator (`\n---\n`).
-///
-/// The separator ensures the URL is visually associated with the preceding
-/// comment when multiple threads are printed back-to-back.
-fn write_comment_url_with_separator<W: std::io::Write>(
-    out: &mut W,
-    url: &str,
-) -> std::io::Result<()> {
-    writeln!(out, "{url}")?;
-    writeln!(out, "---")?;
-    Ok(())
-}
-
 fn write_author_line<W: std::io::Write>(
     out: &mut W,
     icon: &str,
@@ -158,36 +145,41 @@ pub fn write_comment_body<W: std::io::Write>(
     write_formattable(out, skin, comment)
 }
 
-/// Write a single comment including its diff hunk.
+/// Write one comment of a review thread using the structured layout.
 ///
-/// The diff is emitted first, followed by the comment body formatted
-/// using [`write_comment_body`].
-///
-/// # Examples
-///
-/// ```ignore
-/// use vk::printer::write_comment;
-/// use vk::ReviewComment;
-/// use termimad::MadSkin;
-/// let comment = ReviewComment { diff_hunk: "@@ -1 +1 @@\n-old\n+new".into(), ..Default::default() };
-/// let mut buf = Vec::new();
-/// write_comment(&mut buf, &MadSkin::default(), &comment).unwrap();
-/// ```
-pub fn write_comment<W: std::io::Write>(
+/// The layout is, in order: a leading blank line, the globe-prefixed URL, a
+/// blank line, the document-prefixed file path and the formatted diff hunk
+/// (only when `include_diff` is true), a blank line, the author banner and
+/// rendered body, and finally a closing thematic break. The leading blank
+/// line pairs with the previous comment's closing `---` to provide the
+/// required spacing after the opening thematic break; the body's trailing
+/// newline collapses into a single blank line before the closing break.
+fn write_thread_comment<W: std::io::Write>(
     mut out: W,
     skin: &MadSkin,
     comment: &ReviewComment,
+    include_diff: bool,
 ) -> anyhow::Result<()> {
-    let diff = format_comment_diff(comment)?;
-    write!(out, "{diff}")?;
+    writeln!(out)?;
+    writeln!(out, "🌍 {}", comment.url)?;
+    writeln!(out)?;
+    if include_diff {
+        writeln!(out, "📄 {}:", comment.path)?;
+        let diff = format_comment_diff(comment)?;
+        write!(out, "{diff}")?;
+        writeln!(out)?;
+    }
     write_comment_body(&mut out, skin, comment)?;
+    writeln!(out, "---")?;
     Ok(())
 }
 
-/// Write all comments in a thread, showing the diff only once.
+/// Write all comments in a thread using the structured layout.
 ///
-/// The first comment is printed via [`write_comment`]. Subsequent
-/// comments omit the diff and are formatted with [`write_comment_body`].
+/// The first comment includes the file path and diff hunk. Subsequent
+/// comments share the same hunk and so omit both. Each comment is framed
+/// by a closing `---` thematic break; the break also serves as the opening
+/// break for the next comment in the thread.
 ///
 /// # Examples
 ///
@@ -208,13 +200,12 @@ pub fn write_thread<W: std::io::Write>(
     thread: &ReviewThread,
 ) -> anyhow::Result<()> {
     let mut iter = thread.comments.nodes.iter();
-    if let Some(first) = iter.next() {
-        write_comment(&mut out, skin, first)?;
-        write_comment_url_with_separator(&mut out, &first.url)?;
-        for c in iter {
-            write_comment_body(&mut out, skin, c)?;
-            write_comment_url_with_separator(&mut out, &c.url)?;
-        }
+    let Some(first) = iter.next() else {
+        return Ok(());
+    };
+    write_thread_comment(&mut out, skin, first, true)?;
+    for c in iter {
+        write_thread_comment(&mut out, skin, c, false)?;
     }
     Ok(())
 }

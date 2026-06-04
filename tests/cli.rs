@@ -288,13 +288,14 @@ fn extract_coderabbit_comment_section(stdout: &str) -> String {
     let lines: Vec<_> = stdout.lines().collect();
     let start = lines
         .iter()
-        .position(|line| line.contains("coderabbitai wrote"))
-        .expect("comment start");
+        .position(|line| line.starts_with("\u{1f30d} "))
+        .expect("comment URL line");
     let tail = lines.get(start..).unwrap_or(&[]);
-    let end = tail
+    let end_offset = tail
         .iter()
-        .position(|line| line.starts_with("https://"))
-        .map_or(lines.len(), |idx| start + idx);
+        .position(|line| *line == "---")
+        .map_or(tail.len(), |idx| idx + 1);
+    let end = start + end_offset;
     lines
         .get(start..end)
         .map_or_else(String::new, |slice| slice.join("\n"))

@@ -1,8 +1,14 @@
 ---
 source: tests/cli.rs
-assertion_line: 329
+assertion_line: 245
 expression: plain
 ---
+🌍 https://github.com/leynos/netsuke/pull/177#discussion_r2396284785
+
+📄 release.sh:
+    1|-old
+    1|+new
+
 💬  coderabbitai wrote:
 _⚠️ Potential issue_ | _🟡 Minor_
 
@@ -21,3 +27,5 @@ Apply this diff to consolidate the message:
 ▶ 🤖 Prompt for AI Agents
 
 ✅ Addressed in commit 70c0c7a
+
+---
