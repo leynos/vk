@@ -11,7 +11,7 @@ use crate::{
         assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
     },
 };
-use vk::icons::{ICON_COMMENT, ICON_FILE, ICON_PERMALINK};
+use vk::icons::{ICON_COMMENT, ICON_FILE, ICON_PERMALINK, ICON_REVIEW};
 
 const CODERABBIT_COMMENT: &str = include_str!("../../tests/fixtures/comment_coderabbit.txt");
 
@@ -85,6 +85,8 @@ fn write_review_formats_banner(
     let out = String::from_utf8(buf).expect("utf8");
     assert!(out.contains(expected_login));
     assert!(out.contains(state));
+    // The review banner must carry the memo icon from `vk::icons`.
+    assert!(out.contains(ICON_REVIEW));
 }
 
 #[test]

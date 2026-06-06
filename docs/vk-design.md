@@ -89,7 +89,7 @@ The code centres on these printing helpers:
 2. `write_thread` iterates over a thread and emits each comment as a
    `---`-framed block. Each block opens with a blank line, then a
    `🌍 <permalink>` line, then a `📄 <path>:` heading and the formatted diff
-   hunk (rendered only for the first comment of the thread so the diff is
+   hunk (rendered only for the first comment of the thread, so the diff is
    shown once), then a blank line, then the `💬 <author> wrote:` banner and
    the rendered comment body. A single blank line precedes the closing
    `---`, which doubles as the opening break for the next comment in the
