@@ -288,10 +288,21 @@ fn extract_coderabbit_comment_section(stdout: &str) -> String {
     let stdout = strip_ansi_codes(&stdout);
     let lines: Vec<_> = stdout.lines().collect();
     let url_prefix = format!("{ICON_PERMALINK} ");
-    let start = lines
+    let coderabbit_marker = "coderabbitai wrote:";
+    // Locate the coderabbit author banner first, then walk backwards to the
+    // permalink line that opens its comment block. This binds the extracted
+    // section to the coderabbit thread even if the fixture grows to contain
+    // additional threads.
+    let marker_idx = lines
         .iter()
-        .position(|line| line.starts_with(&url_prefix))
-        .expect("comment URL line");
+        .position(|line| line.contains(coderabbit_marker))
+        .expect("coderabbit author banner");
+    let start = lines
+        .get(..marker_idx)
+        .unwrap_or(&[])
+        .iter()
+        .rposition(|line| line.starts_with(&url_prefix))
+        .expect("coderabbit permalink line preceding banner");
     let tail = lines.get(start..).unwrap_or(&[]);
     let end_offset = tail
         .iter()
