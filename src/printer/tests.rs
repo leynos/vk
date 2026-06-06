@@ -11,6 +11,7 @@ use crate::{
         assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
     },
 };
+use vk::icons::{ICON_COMMENT, ICON_FILE, ICON_PERMALINK};
 
 const CODERABBIT_COMMENT: &str = include_str!("../../tests/fixtures/comment_coderabbit.txt");
 
@@ -93,7 +94,7 @@ fn write_comment_body_formats_banner(#[case] login: Option<&str>, #[case] expect
     assert!(out.contains(expected_login));
     assert!(out.contains("wrote"));
     // Ensure the banner icon is included in the rendered output.
-    assert!(out.contains("\u{1f4ac}"));
+    assert!(out.contains(ICON_COMMENT));
 }
 
 #[test]
@@ -167,27 +168,27 @@ fn write_thread_emits_structured_layout_per_comment() {
     write_thread(&mut buf, &MadSkin::default(), &thread).expect("write thread");
     let out = strip_ansi_codes(&String::from_utf8(buf).expect("utf8"));
 
+    let url1_banner = format!("{ICON_PERMALINK} https://example.com#discussion_r1");
+    let url2_banner = format!("{ICON_PERMALINK} https://example.com#discussion_r2");
+    let path_banner = format!("{ICON_FILE} src/lib.rs:");
+
     // The first comment opens with a blank line followed by the URL.
-    assert!(out.starts_with("\n🌍 https://example.com#discussion_r1\n"));
+    assert!(out.starts_with(&format!("\n{url1_banner}\n")));
     // Follow-up comments are preceded by the previous comment's closing
     // thematic break and a single blank line.
-    assert!(out.contains("\n---\n\n🌍 https://example.com#discussion_r2\n"));
+    assert!(out.contains(&format!("\n---\n\n{url2_banner}\n")));
 
     // The first comment renders the path and diff; the second omits both.
-    assert!(out.contains("📄 src/lib.rs:\n"));
-    assert_eq!(out.matches("📄 src/lib.rs:").count(), 1);
+    assert!(out.contains(&format!("{path_banner}\n")));
+    assert_eq!(out.matches(&path_banner).count(), 1);
     assert_eq!(out.matches("|-old").count(), 1);
 
     // Each comment block closes with `---` on its own line.
     assert_eq!(out.matches("\n---\n").count(), 2);
 
     // The URL precedes the body banner for both comments.
-    let url1 = out
-        .find("🌍 https://example.com#discussion_r1")
-        .expect("first URL");
-    let url2 = out
-        .find("🌍 https://example.com#discussion_r2")
-        .expect("second URL");
+    let url1 = out.find(&url1_banner).expect("first URL");
+    let url2 = out.find(&url2_banner).expect("second URL");
     let banner1 = out.find("First").expect("first body");
     let banner2 = out.find("Second").expect("second body");
     assert!(url1 < banner1, "first URL must precede first body");

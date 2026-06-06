@@ -9,6 +9,7 @@ use crate::diff::format_comment_diff;
 use crate::html::collapse_details;
 use crate::reviews::PullRequestReview;
 use crate::{ReviewComment, ReviewThread};
+use vk::icons::{ICON_COMMENT, ICON_FILE, ICON_PERMALINK, ICON_REVIEW};
 
 fn write_author_line<W: std::io::Write>(
     out: &mut W,
@@ -45,7 +46,7 @@ impl Formattable for ReviewComment {
     }
 
     fn icon(&self) -> &'static str {
-        "💬"
+        ICON_COMMENT
     }
 
     fn suffix(&self) -> String {
@@ -63,7 +64,7 @@ impl Formattable for PullRequestReview {
     }
 
     fn icon(&self) -> &'static str {
-        "📝"
+        ICON_REVIEW
     }
 
     fn suffix(&self) -> String {
@@ -161,10 +162,10 @@ fn write_thread_comment<W: std::io::Write>(
     include_diff: bool,
 ) -> anyhow::Result<()> {
     writeln!(out)?;
-    writeln!(out, "🌍 {}", comment.url)?;
+    writeln!(out, "{ICON_PERMALINK} {}", comment.url)?;
     writeln!(out)?;
     if include_diff {
-        writeln!(out, "📄 {}:", comment.path)?;
+        writeln!(out, "{ICON_FILE} {}:", comment.path)?;
         let diff = format_comment_diff(comment)?;
         write!(out, "{diff}")?;
         writeln!(out)?;

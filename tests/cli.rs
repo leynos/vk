@@ -15,6 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
+use vk::icons::ICON_PERMALINK;
 use vk::test_utils::{
     assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
 };
@@ -286,9 +287,10 @@ fn extract_coderabbit_comment_section(stdout: &str) -> String {
     let stdout = stdout.replace("\r\n", "\n");
     let stdout = strip_ansi_codes(&stdout);
     let lines: Vec<_> = stdout.lines().collect();
+    let url_prefix = format!("{ICON_PERMALINK} ");
     let start = lines
         .iter()
-        .position(|line| line.starts_with("\u{1f30d} "))
+        .position(|line| line.starts_with(&url_prefix))
         .expect("comment URL line");
     let tail = lines.get(start..).unwrap_or(&[]);
     let end_offset = tail
