@@ -24,7 +24,7 @@ use crate::{
 use std::any::Any;
 use std::io::{ErrorKind, Write};
 use termimad::MadSkin;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 #[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
@@ -200,10 +200,21 @@ struct BranchContext {
 /// state, or `VkError::RepoNotFound` when the repository cannot be determined.
 fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<BranchContext, VkError> {
     let branch = current_branch().ok_or(VkError::DetachedHead)?;
+    // Each `.inspect(...)` fires only when its `Option` is `Some`, so exactly
+    // one `debug!` runs and it identifies the winning source. The chain stops
+    // short-circuiting at the first match, so subsequent sources are not
+    // consulted (and not logged).
     let repo = default_repo
         .and_then(parse_repo_str)
-        .or_else(repo_from_fetch_head)
-        .or_else(repo_from_origin)
+        .inspect(|r| debug!(repo = %format_repo(r), "resolved repo from --repo"))
+        .or_else(|| {
+            repo_from_fetch_head()
+                .inspect(|r| debug!(repo = %format_repo(r), "resolved repo from FETCH_HEAD"))
+        })
+        .or_else(|| {
+            repo_from_origin()
+                .inspect(|r| debug!(repo = %format_repo(r), "resolved repo from origin remote"))
+        })
         .ok_or(VkError::RepoNotFound)?;
     let head_owner = repo_from_origin().map(|r| r.owner);
     Ok(BranchContext {
@@ -211,6 +222,10 @@ fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<BranchContext, 
         branch,
         head_owner,
     })
+}
+
+fn format_repo(repo: &RepoInfo) -> String {
+    format!("{}/{}", repo.owner, repo.name)
 }
 
 /// Resolve the PR reference, detecting from branch when necessary.
