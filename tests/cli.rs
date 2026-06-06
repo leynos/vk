@@ -15,7 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
-use vk::icons::ICON_PERMALINK;
+use vk::icons::{ICON_COMMENT, ICON_FILE, ICON_PERMALINK};
 use vk::test_utils::{
     assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
 };
@@ -281,6 +281,58 @@ async fn run_cli_and_capture_output(addr: SocketAddr) -> String {
     })
     .await
     .expect("spawn blocking")
+}
+
+/// Compose a `write_thread`-shaped comment block for use in extractor tests.
+fn fake_thread_block(url: &str, path: &str, author: &str, body: &str) -> String {
+    format!(
+        "\n{ICON_PERMALINK} {url}\n\n{ICON_FILE} {path}:\n    1|-old\n    1|+new\n\n\
+         {ICON_COMMENT}  {author} wrote:\n{body}\n\n---\n",
+    )
+}
+
+#[test]
+fn extract_coderabbit_comment_section_skips_non_coderabbit_threads() {
+    let stdout = format!(
+        "{}{}{}",
+        fake_thread_block(
+            "https://example.com#discussion_r1",
+            "a.rs",
+            "alice",
+            "alice body",
+        ),
+        fake_thread_block(
+            "https://example.com#discussion_r2",
+            "b.rs",
+            "coderabbitai",
+            "rabbit body",
+        ),
+        fake_thread_block(
+            "https://example.com#discussion_r3",
+            "c.rs",
+            "bob",
+            "bob body",
+        ),
+    );
+
+    let extracted = extract_coderabbit_comment_section(&stdout);
+
+    assert!(
+        extracted.starts_with(&format!(
+            "{ICON_PERMALINK} https://example.com#discussion_r2"
+        )),
+        "extracted block must start at the coderabbit permalink: {extracted}"
+    );
+    assert!(extracted.ends_with("---"));
+    assert!(extracted.contains("coderabbitai wrote:"));
+    assert!(extracted.contains("rabbit body"));
+    // The extractor must not bleed into the alice or bob sections.
+    assert!(!extracted.contains("alice"));
+    assert!(!extracted.contains("alice body"));
+    assert!(!extracted.contains("bob"));
+    assert!(!extracted.contains("bob body"));
+    assert!(!extracted.contains("discussion_r1"));
+    assert!(!extracted.contains("discussion_r3"));
 }
 
 fn extract_coderabbit_comment_section(stdout: &str) -> String {
