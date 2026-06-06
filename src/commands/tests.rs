@@ -89,7 +89,7 @@ mod resolve_branch_and_repo_tests {
 
     impl ResolverFixture {
         fn enter(repo: GitRepoFixture) -> Self {
-            let cwd = CwdGuard::enter(repo.path());
+            let cwd = CwdGuard::enter(repo.path()).expect("enter fixture cwd");
             Self {
                 _repo: repo,
                 _cwd: cwd,
@@ -105,19 +105,20 @@ mod resolve_branch_and_repo_tests {
     /// Fixture for a repository on feature-branch with `FETCH_HEAD` only.
     #[fixture]
     fn git_repo_on_feature_branch() -> ResolverFixture {
-        ResolverFixture::enter(
-            GitRepoFixture::on_branch("feature-branch").with_fetch_head(FETCH_HEAD_FALLBACK),
-        )
+        let repo = GitRepoFixture::on_branch("feature-branch")
+            .and_then(|f| f.with_fetch_head(FETCH_HEAD_FALLBACK))
+            .expect("build FETCH_HEAD-only fixture");
+        ResolverFixture::enter(repo)
     }
 
     /// Fixture for a repo with origin remote pointing to a fork.
     #[fixture]
     fn git_repo_with_fork_origin() -> ResolverFixture {
-        ResolverFixture::enter(
-            GitRepoFixture::on_branch("feature-branch")
-                .with_fetch_head(FETCH_HEAD_UPSTREAM)
-                .with_origin("https://github.com/fork-owner/repo.git"),
-        )
+        let repo = GitRepoFixture::on_branch("feature-branch")
+            .and_then(|f| f.with_fetch_head(FETCH_HEAD_UPSTREAM))
+            .and_then(|f| f.with_origin("https://github.com/fork-owner/repo.git"))
+            .expect("build fork-origin fixture");
+        ResolverFixture::enter(repo)
     }
 
     /// Fixture for a fresh worktree: branch and origin set, but no
@@ -125,10 +126,10 @@ mod resolve_branch_and_repo_tests {
     /// `git fetch` has run inside it.
     #[fixture]
     fn git_repo_with_origin_only() -> ResolverFixture {
-        ResolverFixture::enter(
-            GitRepoFixture::on_branch("feature-branch")
-                .with_origin("https://github.com/leynos/chutoro.git"),
-        )
+        let repo = GitRepoFixture::on_branch("feature-branch")
+            .and_then(|f| f.with_origin("https://github.com/leynos/chutoro.git"))
+            .expect("build origin-only fixture");
+        ResolverFixture::enter(repo)
     }
 
     #[rstest]

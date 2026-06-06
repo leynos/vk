@@ -1,13 +1,33 @@
-//! Common test utilities.
+//! Common test utilities for the `vk` binary crate.
 //!
-//! Provides helpers for manipulating environment variables and spinning up a
-//! stub GraphQL server for integration tests.
+//! This module groups together a few unrelated test helpers so they can be
+//! shared across both the binary's unit tests and its integration tests:
+//!
+//! - Environment-variable helpers and the [`EnvSandbox`] RAII guard, which
+//!   acquires a global lock, snapshots the relevant configuration env vars and
+//!   the current working directory, points discovery-related paths at an empty
+//!   temporary tree, and restores everything on drop.
+//! - The [`TestClient`] stub HTTP server and [`start_server`] helper used to
+//!   exercise the GraphQL client without touching GitHub.
+//! - [`GitRepoFixture`], a hermetic temporary Git repository builder used by
+//!   tests that drive `git`-aware code (`current_branch`, `repo_from_origin`,
+//!   `resolve_branch_and_repo`, …). Its `on_branch` / `detached` constructors
+//!   spin up a real on-disk repo via `git init` and `symbolic-ref`; the
+//!   `with_origin` / `with_fetch_head` builders configure remotes and
+//!   `FETCH_HEAD` content. The repo lives in a `tempfile::TempDir` that is
+//!   removed when the fixture is dropped.
+//! - [`CwdGuard`], an RAII guard that switches the process working directory
+//!   to a chosen path and restores it on drop. The guard acquires the same
+//!   global lock as [`EnvSandbox`], so consumers must mark their tests
+//!   `#[serial]` and must not combine the two guards in a single test
+//!   (the lock is non-reentrant).
 
 use crate::api::{GraphQLClient, RetryConfig};
 use vk::environment;
 
 use std::env;
 use std::ffi::OsString;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex, MutexGuard, OnceLock,
@@ -242,17 +262,43 @@ impl Drop for EnvSandbox {
     }
 }
 
+/// Run `git` with `args` inside `dir`, surfacing both spawn and non-zero
+/// exit failures as `io::Error` so callers can propagate with `?`.
+fn run_git_in(dir: &Path, args: &[&str]) -> io::Result<()> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(io::Error::other(format!(
+            "git {args:?} in {dir:?} failed (status {status}): {stderr}",
+            status = output.status,
+            stderr = stderr.trim(),
+        )));
+    }
+    Ok(())
+}
+
 /// A temporary Git repository directory for tests.
 ///
-/// Initialises a hermetic repo in a `tempfile::TempDir` and exposes builders
-/// for the common shapes the `ref_parser` and `commands` test suites need:
-/// branch-pointing HEAD, detached HEAD, `FETCH_HEAD` contents, and an `origin`
-/// remote.
+/// Initialises a hermetic repo inside a [`tempfile::TempDir`] and exposes
+/// builders for the shapes the `ref_parser` and `commands` test suites need:
+/// a branch-pointing HEAD ([`Self::on_branch`]), a detached HEAD over an empty
+/// commit ([`Self::detached`]), `FETCH_HEAD` contents ([`Self::with_fetch_head`]),
+/// and an `origin` remote ([`Self::with_origin`]). The temporary directory is
+/// removed when the fixture is dropped.
 ///
-/// The fixture intentionally does *not* change the process working directory.
-/// Tests that exercise code paths reading from the current directory (for
-/// example, the public `repo_from_fetch_head` / `repo_from_origin` helpers)
-/// should compose this with [`CwdGuard`] and mark themselves `#[serial]`.
+/// All constructors and builders return [`io::Result`] so a broken test
+/// environment surfaces as a clear error rather than a panic deep inside a
+/// helper; tests typically `.expect(...)` at the call site to keep the
+/// failure mode unchanged.
+///
+/// The fixture intentionally does **not** change the process working
+/// directory. Tests that exercise code paths reading from the current
+/// directory (such as the public `repo_from_fetch_head` / `repo_from_origin`
+/// helpers) should compose the fixture with [`CwdGuard`] and mark themselves
+/// `#[serial]`.
 pub struct GitRepoFixture {
     dir: tempfile::TempDir,
 }
@@ -261,91 +307,72 @@ impl GitRepoFixture {
     /// Create a fixture whose HEAD is a symbolic ref to `branch`.
     ///
     /// No commit is required — `git symbolic-ref` is sufficient and keeps the
-    /// fixture cheap.
-    #[must_use]
-    pub fn on_branch(branch: &str) -> Self {
-        let dir = tempfile::TempDir::new().expect("tempdir");
-        // `-c init.defaultBranch=main` keeps behaviour stable on Git < 2.28.
-        let status = std::process::Command::new("git")
-            .args(["-c", "init.defaultBranch=main", "init"])
-            .current_dir(dir.path())
-            .output()
-            .expect("git init");
-        assert!(status.status.success(), "git init failed");
-
-        let status = std::process::Command::new("git")
-            .args(["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])
-            .current_dir(dir.path())
-            .output()
-            .expect("git symbolic-ref");
-        assert!(status.status.success(), "git symbolic-ref failed");
-
-        Self { dir }
+    /// fixture cheap. The `-c init.defaultBranch=main` flag keeps behaviour
+    /// stable on Git versions below 2.28.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` when the temporary directory cannot be created,
+    /// when `git` cannot be spawned, or when either `git init` or
+    /// `git symbolic-ref` exits with a non-zero status.
+    pub fn on_branch(branch: &str) -> io::Result<Self> {
+        let dir = tempfile::TempDir::new()?;
+        run_git_in(dir.path(), &["-c", "init.defaultBranch=main", "init"])?;
+        run_git_in(
+            dir.path(),
+            &["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")],
+        )?;
+        Ok(Self { dir })
     }
 
     /// Create a fixture with a detached HEAD pointing at an empty commit.
-    #[must_use]
-    pub fn detached() -> Self {
-        let dir = tempfile::TempDir::new().expect("tempdir");
-
-        let status = std::process::Command::new("git")
-            .args(["-c", "init.defaultBranch=main", "init"])
-            .current_dir(dir.path())
-            .output()
-            .expect("git init");
-        assert!(status.status.success(), "git init failed");
-
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` when any of the underlying `git` invocations
+    /// (`init`, `config`, `commit`, `checkout --detach`) cannot be spawned
+    /// or exits with a non-zero status.
+    pub fn detached() -> io::Result<Self> {
+        let dir = tempfile::TempDir::new()?;
+        run_git_in(dir.path(), &["-c", "init.defaultBranch=main", "init"])?;
         for (key, value) in [("user.email", "test@test.com"), ("user.name", "Test")] {
-            let status = std::process::Command::new("git")
-                .args(["config", key, value])
-                .current_dir(dir.path())
-                .output()
-                .expect("git config");
-            assert!(status.status.success(), "git config {key} failed");
+            run_git_in(dir.path(), &["config", key, value])?;
         }
-
-        let status = std::process::Command::new("git")
-            .args([
+        run_git_in(
+            dir.path(),
+            &[
                 "-c",
                 "commit.gpgsign=false",
                 "commit",
                 "--allow-empty",
                 "-m",
                 "initial",
-            ])
-            .current_dir(dir.path())
-            .output()
-            .expect("git commit");
-        assert!(status.status.success(), "git commit failed");
-
-        let status = std::process::Command::new("git")
-            .args(["checkout", "--detach"])
-            .current_dir(dir.path())
-            .output()
-            .expect("git checkout --detach");
-        assert!(status.status.success(), "git checkout --detach failed");
-
-        Self { dir }
+            ],
+        )?;
+        run_git_in(dir.path(), &["checkout", "--detach"])?;
+        Ok(Self { dir })
     }
 
     /// Configure an `origin` remote pointing at `url`.
-    #[must_use]
-    pub fn with_origin(self, url: &str) -> Self {
-        let status = std::process::Command::new("git")
-            .args(["remote", "add", "origin", url])
-            .current_dir(self.dir.path())
-            .output()
-            .expect("git remote add");
-        assert!(status.status.success(), "git remote add failed");
-        self
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` when `git remote add` cannot be spawned or
+    /// exits with a non-zero status.
+    pub fn with_origin(self, url: &str) -> io::Result<Self> {
+        run_git_in(self.dir.path(), &["remote", "add", "origin", url])?;
+        Ok(self)
     }
 
     /// Write `content` to the repository's `FETCH_HEAD` file.
-    #[must_use]
-    pub fn with_fetch_head(self, content: &str) -> Self {
-        let git_dir = self.dir.path().join(".git");
-        std::fs::write(git_dir.join("FETCH_HEAD"), content).expect("write FETCH_HEAD");
-        self
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` when the file cannot be created or written.
+    pub fn with_fetch_head(self, content: &str) -> io::Result<Self> {
+        let fetch_head = self.dir.path().join(".git").join("FETCH_HEAD");
+        std::fs::write(fetch_head, content)?;
+        Ok(self)
     }
 
     /// Path to the repository's working directory.
@@ -356,27 +383,45 @@ impl GitRepoFixture {
 }
 
 /// RAII guard that switches the process working directory and restores it on
-/// drop.
+/// drop, holding the global env/sandbox lock for its lifetime.
 ///
-/// The current working directory is process-global, so tests using `CwdGuard`
-/// must run serially (typically via `#[serial_test::serial]`) to avoid racing
-/// other tests.
+/// The current working directory is process-global, so concurrent tests that
+/// each call `set_current_dir` race. `CwdGuard::enter` acquires the same lock
+/// as [`EnvSandbox`], ensuring serialised access regardless of whether the
+/// caller has remembered the `#[serial]` attribute — and tests still should
+/// mark themselves `#[serial]` so they coordinate with other lock-aware
+/// guards. The lock is held for the guard's entire lifetime, so the original
+/// directory is restored under the same lock that switched it.
+///
+/// The underlying mutex is **non-reentrant**: a single test that constructs
+/// both an [`EnvSandbox`] and a `CwdGuard` will deadlock. Pick one per test.
 pub struct CwdGuard {
     original: PathBuf,
+    _guard: MutexGuard<'static, ()>,
 }
 
 impl CwdGuard {
     /// Switch the process cwd to `dir` for the lifetime of the guard.
-    #[must_use]
-    pub fn enter(dir: &Path) -> Self {
-        let original = env::current_dir().expect("cwd");
-        env::set_current_dir(dir).expect("chdir to fixture");
-        Self { original }
+    ///
+    /// # Errors
+    ///
+    /// Returns an `io::Error` when the current directory cannot be read or
+    /// when the chdir to `dir` fails.
+    pub fn enter(dir: &Path) -> io::Result<Self> {
+        let guard = env_sandbox_lock();
+        let original = env::current_dir()?;
+        env::set_current_dir(dir)?;
+        Ok(Self {
+            original,
+            _guard: guard,
+        })
     }
 }
 
 impl Drop for CwdGuard {
     fn drop(&mut self) {
+        // The lock is still held via `self._guard`, so the restore happens
+        // atomically with respect to other lock-aware test helpers.
         let _ = env::set_current_dir(&self.original);
     }
 }

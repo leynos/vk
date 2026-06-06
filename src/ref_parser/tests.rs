@@ -7,13 +7,13 @@ use rstest::{fixture, rstest};
 /// rstest fixture for a repository on a feature branch.
 #[fixture]
 fn feature_branch_repo() -> GitRepoFixture {
-    GitRepoFixture::on_branch("feature-branch")
+    GitRepoFixture::on_branch("feature-branch").expect("init feature-branch fixture")
 }
 
 /// rstest fixture for a repository with detached HEAD.
 #[fixture]
 fn detached_head_repo() -> GitRepoFixture {
-    GitRepoFixture::detached()
+    GitRepoFixture::detached().expect("init detached HEAD fixture")
 }
 
 #[test]
@@ -54,9 +54,13 @@ fn parse_url_plural_segment() {
 
 #[test]
 fn repo_from_fetch_head_git_suffix() {
-    let fixture = GitRepoFixture::on_branch("main").with_fetch_head(
-        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/foo/bar.git",
-    );
+    let fixture = GitRepoFixture::on_branch("main")
+        .and_then(|f| {
+            f.with_fetch_head(
+                "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/foo/bar.git",
+            )
+        })
+        .expect("build FETCH_HEAD fixture");
 
     let repo = repo_from_fetch_head_impl(Some(fixture.path())).expect("repo from fetch head");
     assert_eq!(repo.owner, "foo");
@@ -180,8 +184,9 @@ fn parse_fragment_only_rejects_invalid_input(#[case] input: &str) {
 
 #[test]
 fn repo_from_origin_extracts_owner_and_name() {
-    let fixture =
-        GitRepoFixture::on_branch("main").with_origin("https://github.com/fork-owner/my-repo.git");
+    let fixture = GitRepoFixture::on_branch("main")
+        .and_then(|f| f.with_origin("https://github.com/fork-owner/my-repo.git"))
+        .expect("build origin fixture");
 
     let repo = repo_from_origin_impl(Some(fixture.path())).expect("repo from origin");
     assert_eq!(repo.owner, "fork-owner");
@@ -190,7 +195,7 @@ fn repo_from_origin_extracts_owner_and_name() {
 
 #[test]
 fn repo_from_origin_returns_none_without_remote() {
-    let fixture = GitRepoFixture::on_branch("main");
+    let fixture = GitRepoFixture::on_branch("main").expect("init main fixture");
 
     assert!(repo_from_origin_impl(Some(fixture.path())).is_none());
 }
@@ -201,8 +206,9 @@ fn parse_pr_number_falls_back_to_origin_without_fetch_head() {
     // Mirrors a fresh worktree where `git fetch` has not yet been run inside
     // the worktree: no FETCH_HEAD, but `origin` is configured.
     let fixture = GitRepoFixture::on_branch("feature-branch")
-        .with_origin("https://github.com/leynos/chutoro.git");
-    let _cwd = CwdGuard::enter(fixture.path());
+        .and_then(|f| f.with_origin("https://github.com/leynos/chutoro.git"))
+        .expect("build origin-only fixture");
+    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
 
     let (repo, number) =
         parse_pr_reference("17", None).expect("origin should resolve repo for bare number");
@@ -215,11 +221,14 @@ fn parse_pr_number_falls_back_to_origin_without_fetch_head() {
 #[serial_test::serial]
 fn parse_pr_number_prefers_fetch_head_over_origin() {
     let fixture = GitRepoFixture::on_branch("feature-branch")
-        .with_origin("https://github.com/fork/repo.git")
-        .with_fetch_head(
-            "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
-        );
-    let _cwd = CwdGuard::enter(fixture.path());
+        .and_then(|f| f.with_origin("https://github.com/fork/repo.git"))
+        .and_then(|f| {
+            f.with_fetch_head(
+                "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
+            )
+        })
+        .expect("build fork-and-upstream fixture");
+    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
 
     let (repo, _) = parse_pr_reference("3", None).expect("FETCH_HEAD should win");
     assert_eq!(repo.owner, "upstream");
@@ -234,8 +243,9 @@ fn parse_pr_number_prefers_fetch_head_over_origin() {
 #[serial_test::serial]
 fn parse_issue_number_falls_back_to_origin_without_fetch_head() {
     let fixture = GitRepoFixture::on_branch("feature-branch")
-        .with_origin("https://github.com/leynos/chutoro.git");
-    let _cwd = CwdGuard::enter(fixture.path());
+        .and_then(|f| f.with_origin("https://github.com/leynos/chutoro.git"))
+        .expect("build origin-only fixture");
+    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
 
     let (repo, number) = parse_issue_reference("17", None)
         .expect("origin should resolve repo for bare issue number");
@@ -248,11 +258,14 @@ fn parse_issue_number_falls_back_to_origin_without_fetch_head() {
 #[serial_test::serial]
 fn parse_issue_number_prefers_fetch_head_over_origin() {
     let fixture = GitRepoFixture::on_branch("feature-branch")
-        .with_origin("https://github.com/fork/repo.git")
-        .with_fetch_head(
-            "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
-        );
-    let _cwd = CwdGuard::enter(fixture.path());
+        .and_then(|f| f.with_origin("https://github.com/fork/repo.git"))
+        .and_then(|f| {
+            f.with_fetch_head(
+                "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
+            )
+        })
+        .expect("build fork-and-upstream fixture");
+    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
 
     let (repo, _) = parse_issue_reference("3", None).expect("FETCH_HEAD should win");
     assert_eq!(repo.owner, "upstream");
