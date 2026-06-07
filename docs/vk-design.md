@@ -355,11 +355,13 @@ through two helpers in `src/test_utils.rs`:
   builders. All constructors return `io::Result<Self>` so a broken test
   environment surfaces a clear error instead of a panic.
 - `CwdGuard` switches the process working directory and restores it on drop.
-  Because the cwd is process-global, `CwdGuard::enter` acquires the same
+  Because the cwd is process-global, `CwdGuard::enter` shares the same
   `env_sandbox_lock` mutex that `EnvSandbox` uses and holds it for the guard's
-  lifetime. Tests using `CwdGuard` must be marked `#[serial_test::serial]`;
-  the mutex is non-reentrant, so a single test that constructs both a
-  `CwdGuard` and an `EnvSandbox` will deadlock.
+  lifetime. The lock is acquired with `try_lock`, so misuse — for example, a
+  single test that already holds the lock through `EnvSandbox` and then
+  constructs a `CwdGuard` — fails fast with `io::ErrorKind::WouldBlock`
+  rather than deadlocking. Tests using `CwdGuard` should still be marked
+  `#[serial_test::serial]` so they coordinate with other lock-aware guards.
 
 ## Configuration and features
 

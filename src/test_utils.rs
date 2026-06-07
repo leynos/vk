@@ -18,9 +18,11 @@
 //!   removed when the fixture is dropped.
 //! - [`CwdGuard`], an RAII guard that switches the process working directory
 //!   to a chosen path and restores it on drop. The guard acquires the same
-//!   global lock as [`EnvSandbox`], so consumers must mark their tests
-//!   `#[serial]` and must not combine the two guards in a single test
-//!   (the lock is non-reentrant).
+//!   global lock as [`EnvSandbox`] via `try_lock`, so misuse (combining the
+//!   two guards in a single test) fails fast with
+//!   [`std::io::ErrorKind::WouldBlock`] rather than deadlocking. Tests should
+//!   still mark themselves `#[serial]` to coordinate with other lock-aware
+//!   guards.
 
 use crate::api::{GraphQLClient, RetryConfig};
 use vk::environment;
@@ -386,15 +388,21 @@ impl GitRepoFixture {
 /// drop, holding the global env/sandbox lock for its lifetime.
 ///
 /// The current working directory is process-global, so concurrent tests that
-/// each call `set_current_dir` race. `CwdGuard::enter` acquires the same lock
+/// each call `set_current_dir` race. `CwdGuard::enter` shares the same mutex
 /// as [`EnvSandbox`], ensuring serialised access regardless of whether the
 /// caller has remembered the `#[serial]` attribute — and tests still should
 /// mark themselves `#[serial]` so they coordinate with other lock-aware
 /// guards. The lock is held for the guard's entire lifetime, so the original
 /// directory is restored under the same lock that switched it.
 ///
-/// The underlying mutex is **non-reentrant**: a single test that constructs
-/// both an [`EnvSandbox`] and a `CwdGuard` will deadlock. Pick one per test.
+/// The lock is acquired with `try_lock` rather than a blocking `lock`. The
+/// underlying mutex is **non-reentrant**, so a single test that already holds
+/// it — for example, one that has constructed an [`EnvSandbox`] — would
+/// otherwise deadlock here. With `try_lock` the same misuse fails fast with
+/// [`io::ErrorKind::WouldBlock`], turning a hung test into a finite,
+/// debuggable failure. Tests should still pick one guard per test rather than
+/// relying on this fail-fast.
+#[derive(Debug)]
 pub struct CwdGuard {
     original: PathBuf,
     _guard: MutexGuard<'static, ()>,
@@ -405,10 +413,27 @@ impl CwdGuard {
     ///
     /// # Errors
     ///
-    /// Returns an `io::Error` when the current directory cannot be read or
-    /// when the chdir to `dir` fails.
+    /// Returns [`io::ErrorKind::WouldBlock`] when the global env/sandbox lock
+    /// is already held (typically because the test also constructed an
+    /// [`EnvSandbox`] or another `CwdGuard`). Returns the underlying
+    /// `io::Error` when the current directory cannot be read or when the
+    /// chdir to `dir` fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the env/sandbox mutex has been poisoned by a previous test
+    /// panicking while holding it. Mirrors the behaviour of
+    /// `env_sandbox_lock`.
     pub fn enter(dir: &Path) -> io::Result<Self> {
-        let guard = env_sandbox_lock();
+        let guard = match ENV_SANDBOX_LOCK.get_or_init(|| Mutex::new(())).try_lock() {
+            Ok(guard) => guard,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            }
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                panic!("environment sandbox lock poisoned")
+            }
+        };
         let original = env::current_dir()?;
         env::set_current_dir(dir)?;
         Ok(Self {
@@ -423,5 +448,25 @@ impl Drop for CwdGuard {
         // The lock is still held via `self._guard`, so the restore happens
         // atomically with respect to other lock-aware test helpers.
         let _ = env::set_current_dir(&self.original);
+    }
+}
+
+#[cfg(test)]
+mod cwd_guard_tests {
+    use super::{CwdGuard, EnvSandbox};
+    use serial_test::serial;
+    use std::io;
+
+    /// Pins the fail-fast contract: when the env/sandbox lock is already
+    /// held, `CwdGuard::enter` must return `WouldBlock` immediately rather
+    /// than block.
+    #[test]
+    #[serial]
+    fn enter_reports_would_block_when_lock_held() {
+        let sandbox = EnvSandbox::new().expect("create sandbox");
+        let err =
+            CwdGuard::enter(sandbox.path()).expect_err("CwdGuard must not acquire a held lock");
+        assert_eq!(err.kind(), io::ErrorKind::WouldBlock);
+        drop(sandbox);
     }
 }
