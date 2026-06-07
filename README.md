@@ -53,17 +53,27 @@ the tool continues with the value provided on the CLI instead of exiting with
 an error.
 
 If you pass just a pull request number, `vk` tries to work out which repository
-you meant. It first examines `.git/FETCH_HEAD` for a GitHub remote URL and, if
-found, extracts the `owner/repo` from it. As the Codex agent does not put the
-upstream URL in `.git/config`, we must obtain this from `FETCH_HEAD` for now.
-Failing that, it falls back to the configured repository (`--repo` or
-`VK_REPO`). Set this value to `owner/repo` with or without a `.git` suffix. If
-neither source is available, `vk` will refuse to run with only a number.
+you meant. It consults three sources in order:
+
+1. the configured repository (`--repo` or `VK_REPO`), set to `owner/repo` with
+   or without a `.git` suffix;
+2. the GitHub URL recorded in `.git/FETCH_HEAD`, written by `git fetch`. In
+   fork workflows this still points at the upstream repository where pull
+   requests live, so it takes precedence over `origin`;
+3. the URL of the `origin` remote, used as a last-resort fallback. This is
+   what lets `vk pr` work in a fresh `git worktree add` target where
+   `git fetch` has not yet been run inside the worktree.
+
+If none of these resolve to a GitHub `owner/repo`, `vk` refuses to run with
+only a number.
 
 `vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN`, `VK_GITHUB_TOKEN`, pass
 `--github-token`, or add `github_token` to `~/.config/vk/config.toml` (or the
 path provided via `VK_CONFIG_PATH`) to authenticate. If no token is set, you'll
-get a warning and anonymous requests may be rate limited.
+get a warning and anonymous requests may be rate limited. When
+`VK_CONFIG_PATH` points at a file that cannot be parsed, `vk` exits early with
+a `configuration error: …` message rather than silently falling back to
+auto-discovered configuration.
 
 The token only needs read access. Select the `public_repo` scope (or `repo` for
 private repositories). See [docs/github-token.md](docs/github-token.md) for a

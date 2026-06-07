@@ -1,141 +1,19 @@
 //! Tests for `ref_parser` module.
 
 use super::*;
+use crate::test_utils::{CwdGuard, GitRepoFixture};
 use rstest::{fixture, rstest};
-use std::fs;
-use std::process::Command;
-use tempfile::TempDir;
-
-/// A temporary Git repository directory for testing.
-///
-/// This struct manages a temporary directory containing an initialized Git
-/// repository. Tests should use the `path()` method to get the directory
-/// path and pass it to commands via `current_dir()`.
-struct GitRepoFixture {
-    dir: TempDir,
-}
-
-impl GitRepoFixture {
-    /// Create a fixture with a symbolic ref to a branch.
-    ///
-    /// Initializes a git repository and uses `git symbolic-ref` to set HEAD
-    /// to point to the specified branch without requiring a commit.
-    fn on_branch(branch: &str) -> Self {
-        let dir = TempDir::new().expect("tempdir");
-
-        // Initialize a real git repository
-        // Use -c init.defaultBranch=main for compatibility with Git < 2.28
-        let status = Command::new("git")
-            .args(["-c", "init.defaultBranch=main", "init"])
-            .current_dir(dir.path())
-            .output()
-            .expect("git init");
-        assert!(status.status.success(), "git init failed");
-
-        // Use git symbolic-ref to set HEAD to desired branch
-        let status = Command::new("git")
-            .args(["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])
-            .current_dir(dir.path())
-            .output()
-            .expect("git symbolic-ref");
-        assert!(status.status.success(), "git symbolic-ref failed");
-
-        Self { dir }
-    }
-
-    /// Create a fixture with a detached HEAD.
-    ///
-    /// Initializes a git repository, creates an initial commit, then
-    /// detaches HEAD to that commit.
-    fn detached() -> Self {
-        let dir = TempDir::new().expect("tempdir");
-
-        // Initialize a real git repository
-        let status = Command::new("git")
-            .args(["-c", "init.defaultBranch=main", "init"])
-            .current_dir(dir.path())
-            .output()
-            .expect("git init");
-        assert!(status.status.success(), "git init failed");
-
-        // Configure user for commit
-        let status = Command::new("git")
-            .args(["config", "user.email", "test@test.com"])
-            .current_dir(dir.path())
-            .output()
-            .expect("git config email");
-        assert!(status.status.success(), "git config email failed");
-        let status = Command::new("git")
-            .args(["config", "user.name", "Test"])
-            .current_dir(dir.path())
-            .output()
-            .expect("git config name");
-        assert!(status.status.success(), "git config name failed");
-
-        // Create an empty commit so we have something to detach to
-        // (disable gpgsign for hermetic test)
-        let status = Command::new("git")
-            .args([
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "--allow-empty",
-                "-m",
-                "initial",
-            ])
-            .current_dir(dir.path())
-            .output()
-            .expect("git commit");
-        assert!(status.status.success(), "git commit failed");
-
-        // Detach HEAD
-        let status = Command::new("git")
-            .args(["checkout", "--detach"])
-            .current_dir(dir.path())
-            .output()
-            .expect("git checkout --detach");
-        assert!(status.status.success(), "git checkout --detach failed");
-
-        Self { dir }
-    }
-
-    /// Add an origin remote to the repository.
-    ///
-    /// Configures the origin remote to point to the given URL.
-    fn with_origin(self, url: &str) -> Self {
-        let status = Command::new("git")
-            .args(["remote", "add", "origin", url])
-            .current_dir(self.dir.path())
-            .output()
-            .expect("git remote add");
-        assert!(status.status.success(), "git remote add failed");
-
-        self
-    }
-
-    /// Write `FETCH_HEAD` content to the repository.
-    fn with_fetch_head(self, content: &str) -> Self {
-        let git_dir = self.dir.path().join(".git");
-        fs::write(git_dir.join("FETCH_HEAD"), content).expect("write FETCH_HEAD");
-        self
-    }
-
-    /// Get the path to the temporary git repository.
-    fn path(&self) -> &std::path::Path {
-        self.dir.path()
-    }
-}
 
 /// rstest fixture for a repository on a feature branch.
 #[fixture]
 fn feature_branch_repo() -> GitRepoFixture {
-    GitRepoFixture::on_branch("feature-branch")
+    GitRepoFixture::on_branch("feature-branch").expect("init feature-branch fixture")
 }
 
 /// rstest fixture for a repository with detached HEAD.
 #[fixture]
 fn detached_head_repo() -> GitRepoFixture {
-    GitRepoFixture::detached()
+    GitRepoFixture::detached().expect("init detached HEAD fixture")
 }
 
 #[test]
@@ -176,9 +54,13 @@ fn parse_url_plural_segment() {
 
 #[test]
 fn repo_from_fetch_head_git_suffix() {
-    let fixture = GitRepoFixture::on_branch("main").with_fetch_head(
-        "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/foo/bar.git",
-    );
+    let fixture = GitRepoFixture::on_branch("main")
+        .and_then(|f| {
+            f.with_fetch_head(
+                "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/foo/bar.git",
+            )
+        })
+        .expect("build FETCH_HEAD fixture");
 
     let repo = repo_from_fetch_head_impl(Some(fixture.path())).expect("repo from fetch head");
     assert_eq!(repo.owner, "foo");
@@ -302,8 +184,9 @@ fn parse_fragment_only_rejects_invalid_input(#[case] input: &str) {
 
 #[test]
 fn repo_from_origin_extracts_owner_and_name() {
-    let fixture =
-        GitRepoFixture::on_branch("main").with_origin("https://github.com/fork-owner/my-repo.git");
+    let fixture = GitRepoFixture::on_branch("main")
+        .and_then(|f| f.with_origin("https://github.com/fork-owner/my-repo.git"))
+        .expect("build origin fixture");
 
     let repo = repo_from_origin_impl(Some(fixture.path())).expect("repo from origin");
     assert_eq!(repo.owner, "fork-owner");
@@ -312,7 +195,79 @@ fn repo_from_origin_extracts_owner_and_name() {
 
 #[test]
 fn repo_from_origin_returns_none_without_remote() {
-    let fixture = GitRepoFixture::on_branch("main");
+    let fixture = GitRepoFixture::on_branch("main").expect("init main fixture");
 
     assert!(repo_from_origin_impl(Some(fixture.path())).is_none());
+}
+
+#[test]
+#[serial_test::serial]
+fn parse_pr_number_falls_back_to_origin_without_fetch_head() {
+    // Mirrors a fresh worktree where `git fetch` has not yet been run inside
+    // the worktree: no FETCH_HEAD, but `origin` is configured.
+    let fixture = GitRepoFixture::on_branch("feature-branch")
+        .and_then(|f| f.with_origin("https://github.com/leynos/chutoro.git"))
+        .expect("build origin-only fixture");
+    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
+
+    let (repo, number) =
+        parse_pr_reference("17", None).expect("origin should resolve repo for bare number");
+    assert_eq!(repo.owner, "leynos");
+    assert_eq!(repo.name, "chutoro");
+    assert_eq!(number, 17);
+}
+
+#[test]
+#[serial_test::serial]
+fn parse_pr_number_prefers_fetch_head_over_origin() {
+    let fixture = GitRepoFixture::on_branch("feature-branch")
+        .and_then(|f| f.with_origin("https://github.com/fork/repo.git"))
+        .and_then(|f| {
+            f.with_fetch_head(
+                "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
+            )
+        })
+        .expect("build fork-and-upstream fixture");
+    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
+
+    let (repo, _) = parse_pr_reference("3", None).expect("FETCH_HEAD should win");
+    assert_eq!(repo.owner, "upstream");
+    assert_eq!(repo.name, "repo");
+}
+
+// Issue-number resolution shares the bare-number code path with PRs via
+// `parse_reference`. These tests mirror the PR coverage so a future divergence
+// between the two entry points cannot regress issue resolution unnoticed.
+
+#[test]
+#[serial_test::serial]
+fn parse_issue_number_falls_back_to_origin_without_fetch_head() {
+    let fixture = GitRepoFixture::on_branch("feature-branch")
+        .and_then(|f| f.with_origin("https://github.com/leynos/chutoro.git"))
+        .expect("build origin-only fixture");
+    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
+
+    let (repo, number) = parse_issue_reference("17", None)
+        .expect("origin should resolve repo for bare issue number");
+    assert_eq!(repo.owner, "leynos");
+    assert_eq!(repo.name, "chutoro");
+    assert_eq!(number, 17);
+}
+
+#[test]
+#[serial_test::serial]
+fn parse_issue_number_prefers_fetch_head_over_origin() {
+    let fixture = GitRepoFixture::on_branch("feature-branch")
+        .and_then(|f| f.with_origin("https://github.com/fork/repo.git"))
+        .and_then(|f| {
+            f.with_fetch_head(
+                "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
+            )
+        })
+        .expect("build fork-and-upstream fixture");
+    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
+
+    let (repo, _) = parse_issue_reference("3", None).expect("FETCH_HEAD should win");
+    assert_eq!(repo.owner, "upstream");
+    assert_eq!(repo.name, "repo");
 }

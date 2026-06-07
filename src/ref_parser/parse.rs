@@ -18,6 +18,11 @@ pub(super) fn strip_git_suffix(name: &str) -> &str {
     name.strip_suffix(".git").unwrap_or(name)
 }
 
+/// Render a [`RepoInfo`] as `owner/name` for trace events.
+fn format_repo(repo: &RepoInfo) -> String {
+    format!("{}/{}", repo.owner, repo.name)
+}
+
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum ResourceType {
     Issues,
@@ -72,10 +77,32 @@ pub(super) fn parse_reference(
         return res;
     }
     if let Ok(number) = input.parse::<u64>() {
+        // `origin` is a last-resort fallback: it covers fresh worktrees where
+        // `FETCH_HEAD` has not yet been written. `FETCH_HEAD` still takes
+        // precedence because in fork workflows it identifies the upstream
+        // repository while `origin` points at the user's fork.
+        //
+        // Each `.inspect(...)` fires only when its `Option` is `Some`, so
+        // exactly one `debug!` runs and it identifies the winning source.
+        // Mirrors the instrumentation on `resolve_branch_and_repo` so
+        // diagnostics for bare-number references stay symmetrical with
+        // branch-based PR detection.
         let repo = default_repo
             .as_option()
             .and_then(parse_repo_str)
-            .or_else(super::repo_from_fetch_head)
+            .inspect(|r| {
+                tracing::debug!(repo = %format_repo(r), "resolved repo from --repo");
+            })
+            .or_else(|| {
+                super::repo_from_fetch_head().inspect(|r| {
+                    tracing::debug!(repo = %format_repo(r), "resolved repo from FETCH_HEAD");
+                })
+            })
+            .or_else(|| {
+                super::repo_from_origin().inspect(|r| {
+                    tracing::debug!(repo = %format_repo(r), "resolved repo from origin remote");
+                })
+            })
             .ok_or(VkError::RepoNotFound)?;
         return Ok((repo, number));
     }

@@ -281,7 +281,7 @@ flowchart TD
         GET_BRANCH[Get current branch<br/>via git symbolic-ref]
         GET_BRANCH --> BRANCH_OK{Symbolic ref<br/>resolved?}
         BRANCH_OK -->|No| ERR_DETACHED[Error: detached HEAD]
-        BRANCH_OK -->|Yes| GET_REPO[Get repo from<br/>FETCH_HEAD or --repo]
+        BRANCH_OK -->|Yes| GET_REPO[Get repo: --repo →<br/>FETCH_HEAD → origin]
         GET_REPO --> REPO_OK{Repo<br/>found?}
         REPO_OK -->|No| ERR_REPO[Error: repo not found]
         REPO_OK -->|Yes| QUERY_PR[Query GitHub for PR<br/>matching branch]
@@ -300,7 +300,7 @@ flowchart TD
     HAS_FRAG -->|Yes| FETCH_WITH_FRAG
     HAS_FRAG -->|No| FETCH_THREADS
 
-    NUMBER_ONLY --> NEED_REPO[Require --repo<br/>or auto-detect repo]
+    NUMBER_ONLY --> NEED_REPO[Resolve repo: --repo<br/>→ FETCH_HEAD → origin]
     NEED_REPO --> FETCH_THREADS
 
     FETCH_THREADS[Fetch review threads] --> DISPLAY[Display comments]
@@ -340,6 +340,45 @@ sequenceDiagram
     Cmd-->>User: Output PR information
 ```
 
+### Repository resolution order
+
+Both `resolve_branch_and_repo` (in `commands.rs`) and `parse_reference` (in
+`ref_parser/parse.rs`) consult the same three sources, in this priority order,
+when they have to map a bare PR or issue number to a GitHub repository:
+
+1. **`--repo` flag or `VK_REPO`** — the configured default, parsed via
+   `parse_repo_str`. Highest precedence because the user has stated it
+   explicitly.
+2. **`.git/FETCH_HEAD`** — populated by `git fetch`. In fork workflows it
+   continues to point at the upstream repository where pull requests live, so
+   it must beat `origin`.
+3. **`origin` remote URL** — the last-resort fallback. This lets `vk pr`
+   succeed in a fresh `git worktree add` target where `git fetch` has not yet
+   been run inside the worktree, so `FETCH_HEAD` does not yet exist.
+
+`resolve_branch_and_repo` calls `repo_from_origin` lazily — the happy path
+(when `--repo` or `FETCH_HEAD` already resolves the repository) only spawns
+`git` once, for the head-owner lookup used to disambiguate same-name branches
+across forks.
+
+### Test fixtures for Git-aware code
+
+The `commands` and `ref_parser` test suites exercise the resolution order
+through two helpers in `src/test_utils.rs`:
+
+- `GitRepoFixture` builds a hermetic temporary Git repository via `git init`
+  and `git symbolic-ref`, with optional `with_origin` and `with_fetch_head`
+  builders. All constructors return `io::Result<Self>` so a broken test
+  environment surfaces a clear error instead of a panic.
+- `CwdGuard` switches the process working directory and restores it on drop.
+  Because the cwd is process-global, `CwdGuard::enter` shares the same
+  `env_sandbox_lock` mutex that `EnvSandbox` uses and holds it for the guard's
+  lifetime. The lock is acquired with `try_lock`, so misuse — for example, a
+  single test that already holds the lock through `EnvSandbox` and then
+  constructs a `CwdGuard` — fails fast with `io::ErrorKind::WouldBlock`
+  rather than deadlocking. Tests using `CwdGuard` should still be marked
+  `#[serial_test::serial]` so they coordinate with other lock-aware guards.
+
 ## Configuration and features
 
 `vk` reads configuration files using `ortho_config`, which layers values from
@@ -348,3 +387,10 @@ enabled through the `json5` and `yaml` features on `ortho_config`, which pull
 in the required parsers as transitive dependencies. The REST API base URL
 defaults to `https://api.github.com` but can be overridden with
 `GITHUB_API_URL` for testing.
+
+When the user has set `VK_CONFIG_PATH` explicitly, the loader in
+`config_loader.rs` validates that file up-front via
+`ortho_config::file::load_config_file` before discovery runs. Parse failures
+are propagated as `VkError::Config` so the user sees a `configuration error:
+…` message instead of having the broken file silently dropped as an optional
+discovery layer.

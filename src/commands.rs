@@ -24,7 +24,7 @@ use crate::{
 use std::any::Any;
 use std::io::{ErrorKind, Write};
 use termimad::MadSkin;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 #[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
@@ -178,9 +178,21 @@ struct BranchContext {
 
 /// Resolve the current branch and repository for PR auto-detection.
 ///
-/// Returns the target repository (from `--repo` flag or `FETCH_HEAD`), the
-/// current branch name, and optionally the head repository owner (from the
-/// `origin` remote URL) for disambiguating PRs from forks.
+/// Returns the target repository, the current branch name, and optionally the
+/// head repository owner (from the `origin` remote URL) for disambiguating PRs
+/// from forks.
+///
+/// The target repository is resolved from, in order: the `--repo` flag,
+/// `FETCH_HEAD`, then the `origin` remote URL. The `origin` fallback handles
+/// fresh worktrees where `git fetch` has not been run since creation, so
+/// `FETCH_HEAD` does not yet exist. `FETCH_HEAD` is consulted before `origin`
+/// because in fork workflows it points at the upstream repository (where PRs
+/// live) while `origin` points at the user's fork.
+///
+/// `repo_from_origin` is called lazily so the happy path (a usable `--repo` or
+/// `FETCH_HEAD`) only spawns git once — for the head-owner lookup. The rare
+/// `origin` fallback pays for a second invocation to keep the fast path
+/// allocation-free.
 ///
 /// # Errors
 ///
@@ -188,17 +200,32 @@ struct BranchContext {
 /// state, or `VkError::RepoNotFound` when the repository cannot be determined.
 fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<BranchContext, VkError> {
     let branch = current_branch().ok_or(VkError::DetachedHead)?;
+    // Each `.inspect(...)` fires only when its `Option` is `Some`, so exactly
+    // one `debug!` runs and it identifies the winning source. The chain stops
+    // short-circuiting at the first match, so subsequent sources are not
+    // consulted (and not logged).
     let repo = default_repo
         .and_then(parse_repo_str)
-        .or_else(repo_from_fetch_head)
+        .inspect(|r| debug!(repo = %format_repo(r), "resolved repo from --repo"))
+        .or_else(|| {
+            repo_from_fetch_head()
+                .inspect(|r| debug!(repo = %format_repo(r), "resolved repo from FETCH_HEAD"))
+        })
+        .or_else(|| {
+            repo_from_origin()
+                .inspect(|r| debug!(repo = %format_repo(r), "resolved repo from origin remote"))
+        })
         .ok_or(VkError::RepoNotFound)?;
-    // Get the head owner from origin remote for fork disambiguation
     let head_owner = repo_from_origin().map(|r| r.owner);
     Ok(BranchContext {
         repo,
         branch,
         head_owner,
     })
+}
+
+fn format_repo(repo: &RepoInfo) -> String {
+    format!("{}/{}", repo.owner, repo.name)
 }
 
 /// Resolve the PR reference, detecting from branch when necessary.
