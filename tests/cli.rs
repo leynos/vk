@@ -15,6 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use vk::banners::{COMMENTS_BANNER, END_BANNER, START_BANNER};
+use vk::icons::{ICON_COMMENT, ICON_FILE, ICON_PERMALINK};
 use vk::test_utils::{
     assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
 };
@@ -282,19 +283,84 @@ async fn run_cli_and_capture_output(addr: SocketAddr) -> String {
     .expect("spawn blocking")
 }
 
+/// Compose a `write_thread`-shaped comment block for use in extractor tests.
+fn fake_thread_block(url: &str, path: &str, author: &str, body: &str) -> String {
+    format!(
+        "\n{ICON_PERMALINK} {url}\n\n{ICON_FILE} {path}:\n    1|-old\n    1|+new\n\n\
+         {ICON_COMMENT}  {author} wrote:\n{body}\n\n---\n",
+    )
+}
+
+#[test]
+fn extract_coderabbit_comment_section_skips_non_coderabbit_threads() {
+    let stdout = format!(
+        "{}{}{}",
+        fake_thread_block(
+            "https://example.com#discussion_r1",
+            "a.rs",
+            "alice",
+            "alice body",
+        ),
+        fake_thread_block(
+            "https://example.com#discussion_r2",
+            "b.rs",
+            "coderabbitai",
+            "rabbit body",
+        ),
+        fake_thread_block(
+            "https://example.com#discussion_r3",
+            "c.rs",
+            "bob",
+            "bob body",
+        ),
+    );
+
+    let extracted = extract_coderabbit_comment_section(&stdout);
+
+    assert!(
+        extracted.starts_with(&format!(
+            "{ICON_PERMALINK} https://example.com#discussion_r2"
+        )),
+        "extracted block must start at the coderabbit permalink: {extracted}"
+    );
+    assert!(extracted.ends_with("---"));
+    assert!(extracted.contains("coderabbitai wrote:"));
+    assert!(extracted.contains("rabbit body"));
+    // The extractor must not bleed into the alice or bob sections.
+    assert!(!extracted.contains("alice"));
+    assert!(!extracted.contains("alice body"));
+    assert!(!extracted.contains("bob"));
+    assert!(!extracted.contains("bob body"));
+    assert!(!extracted.contains("discussion_r1"));
+    assert!(!extracted.contains("discussion_r3"));
+}
+
 fn extract_coderabbit_comment_section(stdout: &str) -> String {
     let stdout = stdout.replace("\r\n", "\n");
     let stdout = strip_ansi_codes(&stdout);
     let lines: Vec<_> = stdout.lines().collect();
+    let url_prefix = format!("{ICON_PERMALINK} ");
+    let coderabbit_marker = "coderabbitai wrote:";
+    // Locate the coderabbit author banner first, then walk backwards to the
+    // permalink line that opens its comment block. This binds the extracted
+    // section to the coderabbit thread even if the fixture grows to contain
+    // additional threads.
+    let marker_idx = lines
+        .iter()
+        .position(|line| line.contains(coderabbit_marker))
+        .expect("coderabbit author banner");
     let start = lines
+        .get(..marker_idx)
+        .unwrap_or(&[])
         .iter()
-        .position(|line| line.contains("coderabbitai wrote"))
-        .expect("comment start");
+        .rposition(|line| line.starts_with(&url_prefix))
+        .expect("coderabbit permalink line preceding banner");
     let tail = lines.get(start..).unwrap_or(&[]);
-    let end = tail
+    let end_offset = tail
         .iter()
-        .position(|line| line.starts_with("https://"))
-        .map_or(lines.len(), |idx| start + idx);
+        .position(|line| *line == "---")
+        .map_or(tail.len(), |idx| idx + 1);
+    let end = start + end_offset;
     lines
         .get(start..end)
         .map_or_else(String::new, |slice| slice.join("\n"))

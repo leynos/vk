@@ -79,14 +79,29 @@ even when multiple comments reference the same code.
 
 ## Architecture
 
-The code centres on three printing helpers:
+The code centres on these printing helpers:
 
 <!-- mdformat off -->
 
 1. `write_comment_body` formats a single comment body to any `Write`
-   implementation.
-2. `write_comment` includes the diff for the first comment in a thread.
-3. `write_thread` iterates over a thread and prints each comment body in turn.
+   implementation, prefixing the author banner with the speech-balloon icon
+   from `vk::icons`.
+2. `write_thread` iterates over a thread and emits each comment as a
+   `---`-framed block. Each block opens with a blank line, then a
+   `🌍 <permalink>` line, then a `📄 <path>:` heading and the formatted diff
+   hunk (rendered only for the first comment of the thread, so the diff is
+   shown once), then a blank line, then the `💬 <author> wrote:` banner and
+   the rendered comment body. A single blank line precedes the closing
+   `---`, which doubles as the opening break for the next comment in the
+   thread.
+3. `write_review` writes a single review banner using the memo icon from
+   `vk::icons` and shares the body-rendering pipeline with
+   `write_comment_body`.
+
+The emoji glyphs above are defined once in [`src/icons.rs`](../src/icons.rs)
+as `ICON_PERMALINK`, `ICON_FILE`, `ICON_COMMENT`, and `ICON_REVIEW`, and
+re-exported via `vk::icons` so the renderer, its unit tests, and the CLI
+integration tests share a single source of truth.
 
 <!-- mdformat on -->
 
@@ -153,14 +168,15 @@ sequenceDiagram
     participant ReviewComment
 
     Main->>ReviewThread: for each thread
-    Main->>MadSkin: print_thread(&skin, &thread)
+    Main->>MadSkin: write_thread(&skin, &thread)
     MadSkin->>ReviewComment: get first comment
-    MadSkin->>MadSkin: print_comment(skin, first)
-    MadSkin->>ReviewComment: print_comment_body(skin, first)
-    MadSkin->>Main: print first.url
+    MadSkin->>Main: emit 🌍 url, 📄 path, diff hunk
+    MadSkin->>ReviewComment: write_comment_body(skin, first)
+    MadSkin->>Main: emit `---` closing break
     MadSkin->>ReviewComment: for remaining comments
-    MadSkin->>MadSkin: print_comment_body(skin, c)
-    MadSkin->>Main: print c.url
+    MadSkin->>Main: emit 🌍 url
+    MadSkin->>ReviewComment: write_comment_body(skin, c)
+    MadSkin->>Main: emit `---` closing break
 ```
 
 ## Class Diagram

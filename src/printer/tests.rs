@@ -11,8 +11,32 @@ use crate::{
         assert_diff_lines_not_blank_separated, assert_no_triple_newlines, strip_ansi_codes,
     },
 };
+use vk::icons::{ICON_COMMENT, ICON_FILE, ICON_PERMALINK, ICON_REVIEW};
 
 const CODERABBIT_COMMENT: &str = include_str!("../../tests/fixtures/comment_coderabbit.txt");
+
+/// Build a `ReviewComment` with the standard one-line diff hunk used by the
+/// `write_thread` layout tests, leaving `body` and `url` as the only knobs.
+fn diff_comment(body: &str, url: &str) -> ReviewComment {
+    ReviewComment {
+        body: body.into(),
+        diff_hunk: "@@ -1 +1 @@\n-old\n+new\n".into(),
+        path: "src/lib.rs".into(),
+        url: url.into(),
+        ..Default::default()
+    }
+}
+
+/// Wrap `comments` in a `ReviewThread` with default thread metadata.
+fn thread_with(comments: Vec<ReviewComment>) -> ReviewThread {
+    ReviewThread {
+        comments: CommentConnection {
+            nodes: comments,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
 
 #[test]
 fn print_reviews_formats_authors_and_states() {
@@ -61,6 +85,8 @@ fn write_review_formats_banner(
     let out = String::from_utf8(buf).expect("utf8");
     assert!(out.contains(expected_login));
     assert!(out.contains(state));
+    // The review banner must carry the memo icon from `vk::icons`.
+    assert!(out.contains(ICON_REVIEW));
 }
 
 #[test]
@@ -93,7 +119,7 @@ fn write_comment_body_formats_banner(#[case] login: Option<&str>, #[case] expect
     assert!(out.contains(expected_login));
     assert!(out.contains("wrote"));
     // Ensure the banner icon is included in the rendered output.
-    assert!(out.contains("\u{1f4ac}"));
+    assert!(out.contains(ICON_COMMENT));
 }
 
 #[test]
@@ -140,30 +166,68 @@ fn write_comment_body_renders_coderabbit_comment() {
 }
 
 #[test]
-fn write_thread_prints_separator_after_each_comment_url() {
-    let thread = ReviewThread {
-        comments: CommentConnection {
-            nodes: vec![
-                ReviewComment {
-                    body: "First".into(),
-                    url: "https://example.com#discussion_r1".into(),
-                    ..Default::default()
-                },
-                ReviewComment {
-                    body: "Second".into(),
-                    url: "https://example.com#discussion_r2".into(),
-                    ..Default::default()
-                },
-            ],
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+fn write_thread_emits_structured_layout_per_comment() {
+    let thread = thread_with(vec![
+        diff_comment("First", "https://example.com#discussion_r1"),
+        diff_comment("Second", "https://example.com#discussion_r2"),
+    ]);
     let mut buf = Vec::new();
     write_thread(&mut buf, &MadSkin::default(), &thread).expect("write thread");
-    let out = String::from_utf8(buf).expect("utf8");
-    assert!(out.contains("https://example.com#discussion_r1\n---\n"));
-    assert!(out.contains("https://example.com#discussion_r2\n---\n"));
+    let out = strip_ansi_codes(&String::from_utf8(buf).expect("utf8"));
+
+    let url1_banner = format!("{ICON_PERMALINK} https://example.com#discussion_r1");
+    let url2_banner = format!("{ICON_PERMALINK} https://example.com#discussion_r2");
+    let path_banner = format!("{ICON_FILE} src/lib.rs:");
+
+    // The first comment opens with a blank line followed by the URL.
+    assert!(out.starts_with(&format!("\n{url1_banner}\n")));
+    // Follow-up comments are preceded by the previous comment's closing
+    // thematic break and a single blank line.
+    assert!(out.contains(&format!("\n---\n\n{url2_banner}\n")));
+
+    // The first comment renders the path and diff; the second omits both.
+    assert!(out.contains(&format!("{path_banner}\n")));
+    assert_eq!(out.matches(&path_banner).count(), 1);
+    assert_eq!(out.matches("|-old").count(), 1);
+
+    // Each comment block closes with `---` on its own line.
+    assert_eq!(out.matches("\n---\n").count(), 2);
+
+    // The URL precedes the body banner for both comments.
+    let url1 = out.find(&url1_banner).expect("first URL");
+    let url2 = out.find(&url2_banner).expect("second URL");
+    let banner1 = out.find("First").expect("first body");
+    let banner2 = out.find("Second").expect("second body");
+    assert!(url1 < banner1, "first URL must precede first body");
+    assert!(url2 < banner2, "second URL must precede second body");
+}
+
+#[test]
+fn write_thread_frames_each_comment_with_single_blank_before_separator() {
+    let thread = thread_with(vec![diff_comment(
+        "Only",
+        "https://example.com#discussion_r1",
+    )]);
+    let mut buf = Vec::new();
+    write_thread(&mut buf, &MadSkin::default(), &thread).expect("write thread");
+    let out = strip_ansi_codes(&String::from_utf8(buf).expect("utf8"));
+    assert_no_triple_newlines(&out);
+    // A single blank line precedes the closing thematic break.
+    assert!(
+        out.ends_with("\n\n---\n"),
+        "output must end with one blank line before `---`: {out:?}"
+    );
+}
+
+#[test]
+fn write_thread_with_no_comments_produces_no_output() {
+    let thread = thread_with(Vec::new());
+    let mut buf = Vec::new();
+    write_thread(&mut buf, &MadSkin::default(), &thread).expect("write thread");
+    assert!(
+        buf.is_empty(),
+        "empty thread must produce no output: {buf:?}"
+    );
 }
 
 #[test]
