@@ -7,6 +7,10 @@
 
 - [README](../README.md): Use this for a concise project overview,
   installation guidance, and everyday command examples.
+- [User's guide](users-guide.md): Use this for user-facing workflows,
+  configuration entry points, and command behaviour.
+- [Developer's guide](developers-guide.md): Use this for maintainer workflow,
+  validation commands, and implementation conventions.
 - [GitHub token guide](github-token.md): Use this to configure the GitHub token
   required by `vk` when reading pull request review data.
 - [Ortho Config users' guide](ortho-config-users-guide.md): Use this for
