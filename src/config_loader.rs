@@ -109,12 +109,10 @@ where
 {
     let mut args = args.into_iter();
     let mut filtered = vec![args.next().map_or_else(|| OsString::from("vk"), Into::into)];
-    let mut has_config_path = false;
 
     while let Some(raw_arg) = args.next() {
         let arg = raw_arg.into();
         if arg == "--config-path" {
-            has_config_path = true;
             filtered.push(arg);
             if let Some(value) = args.next() {
                 filtered.push(value.into());
@@ -126,28 +124,24 @@ where
             continue;
         };
         if arg_str.starts_with("--config-path=") {
-            has_config_path = true;
             filtered.push(arg);
         }
-    }
-
-    if !has_config_path {
-        append_config_path_env_override(&mut filtered);
     }
 
     filtered
 }
 
-fn append_config_path_env_override(filtered: &mut Vec<OsString>) {
-    let config_path =
-        std::env::var_os("VK_CONFIG_PATH").or_else(|| std::env::var_os("CONFIG_PATH"));
-
-    if let Some(config_path) = config_path {
-        filtered.push(OsString::from("--config-path"));
-        filtered.push(config_path);
-    }
-}
+#[cfg(test)]
 mod tests {
+    use super::{
+        EXPLICIT_CONFIG_PATH_ENV, load_global_args_without_cli_overrides_from_process_args,
+    };
+    use crate::cli_args::GlobalArgs;
+    use crate::test_utils::EnvSandbox;
+    use serial_test::serial;
+    use std::ffi::OsString;
+    use vk::environment;
+
     fn setup_global_args_without_cli_overrides<I, F>(configure: F) -> (EnvSandbox, GlobalArgs)
     where
         I: IntoIterator<Item = OsString>,
@@ -209,25 +203,5 @@ mod tests {
         );
         // `EnvSandbox` restores VK_CONFIG_PATH on drop.
         drop(sandbox);
-    }
-
-    #[test]
-    #[serial]
-    fn load_global_args_without_cli_overrides_honours_config_path_env() {
-        let (_sandbox, global) = setup_global_args_without_cli_overrides(|sandbox| {
-            let config_path = sandbox.path().join("env-override.toml");
-            std::fs::write(&config_path, "repo = \"from-env-config-path\"\n")
-                .expect("write config");
-            // SAFETY: `EnvSandbox` holds the shared environment sandbox lock.
-            unsafe { env::set_var("VK_CONFIG_PATH", config_path) };
-
-            [
-                OsString::from("vk"),
-                OsString::from("pr"),
-                OsString::from("1"),
-            ]
-        });
-
-        assert_eq!(global.repo.as_deref(), Some("from-env-config-path"));
     }
 }
