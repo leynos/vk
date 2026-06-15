@@ -1052,8 +1052,8 @@ Documentation, accessed on July 20, 2025,
 \[^7\]: termimad - [crates.io](http://crates.io): Rust Package Registry,
 accessed on July 20, 2025, <https://crates.io/crates/termimad/0.9.7>
 
-\[^8\]: assert_cmd - Rust - [Docs.rs](http://Docs.rs), accessed on July 20,
-2025, <https://docs.rs/assert_cmd>
+\[^8\]: assert_cmd - Rust - [Docs.rs](http://Docs.rs), accessed on
+July 20, 2025, <https://docs.rs/assert_cmd>
 
 \[^9\]: assert_cmd - [crates.io](http://crates.io): Rust Package Registry,
 accessed on July 20, 2025, <https://crates.io/crates/assert_cmd>
@@ -1072,11 +1072,11 @@ accessed on July 20, 2025, <https://github.com/campbellC/third-wheel>
 
 \[^14\]: Insta Snapshots, accessed on July 20, 2025, <https://insta.rs/>
 
-\[^15\]: Testing - Command Line Applications in Rust, accessed on July 20,
-2025, <https://rust-cli.github.io/book/tutorial/testing.html>
+\[^15\]: Testing - Command Line Applications in Rust, accessed on
+July 20, 2025, <https://rust-cli.github.io/book/tutorial/testing.html>
 
-\[^16\]: Test Organization - The Rust Programming Language, accessed on July
-20, 2025, <https://doc.rust-lang.org/book/ch11-03-test-organization.html>
+\[^16\]: Test Organization - The Rust Programming Language, accessed on
+July 20, 2025, <https://doc.rust-lang.org/book/ch11-03-test-organization.html>
 
 \[^17\]: insta - [crates.io](http://crates.io): Rust Package Registry, accessed
 on July 20, 2025, <https://crates.io/crates/insta>
@@ -1084,8 +1084,8 @@ on July 20, 2025, <https://crates.io/crates/insta>
 \[^18\]: third-wheel - [crates.io](http://crates.io): Rust Package Registry,
 accessed on July 20, 2025, <https://crates.io/crates/third-wheel>
 
-\[^19\]: tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20,
-2025, <https://docs.rs/tempfile>
+\[^19\]: tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on
+July 20, 2025, <https://docs.rs/tempfile>
 
 \[^20\]: Should unit tests really be put in the same file as the source? - Rust
 Users Forum, accessed on July 20, 2025,

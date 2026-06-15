@@ -260,9 +260,9 @@ for callers. See
 \[^saphyr\]: The `SaphyrYaml` provider reads files with strict YAML 1.2
 semantics and backs the format-specific branch of `parse_config_by_format`. See
 [`ortho_config/src/file/mod.rs`](https://github.com/leynos/ortho-config/blob/v0.6.0/ortho_config/src/file/mod.rs).
-\[^hello-world-yaml\]: Behavioural tests in `hello_world` create YAML
-fixtures, load them through `ortho_config::load_config_file`, and assert strict
-parsing behaviour. See
+\[^hello-world-yaml\]: Behavioural tests in `hello_world` create YAML fixtures,
+load them through `ortho_config::load_config_file`, and assert strict parsing
+behaviour. See
 [`examples/hello_world/src/cli/tests/overrides.rs`](https://github.com/leynos/ortho-config/blob/v0.6.0/examples/hello_world/src/cli/tests/overrides.rs).
 \[^changelog\]: The Unreleased changelog summarizes the v0.6.0 additions and
 behaviour changes discussed in this guide. See
