@@ -130,8 +130,8 @@ examples are placed in the `[dev-dependencies]` section of the `Cargo.toml`
 file.[^15] This ensures that testing libraries are not compiled into the final
 release binary, keeping it lean and free of unnecessary code.
 
-The following dependencies are required to build the complete E2E test suite
-for `vk`. Each one plays a specific, interconnected role within the test
+The following dependencies are required to build the complete E2E test suite for
+`vk`. Each one plays a specific, interconnected role within the test
 architecture. For instance, the `third-wheel` mock server is asynchronous and
 therefore requires the `tokio` runtime to execute. The mock server, in turn,
 needs to serve predefined JSON responses, which are loaded and handled using
@@ -297,8 +297,8 @@ standard for this in the Rust ecosystem. By annotating a test with
 running asynchronous code, such as starting and managing the mock server.
 
 The following code demonstrates a reusable helper function,
-`start_mock_server`, which encapsulates the logic for setting up and running
-the `third-wheel` proxy.
+`start_mock_server`, which encapsulates the logic for setting up and running the
+`third-wheel` proxy.
 
 ```rust
 // In tests/e2e.rs, or a new tests/helpers.rs module
@@ -704,8 +704,8 @@ intuitive, revolving around the `cargo-insta` command-line tool.[^13]
      leaving it in a pending state.
 
 4. **Non-Interactive Updates (for CI/CD):** The `INSTA_UPDATE` environment
-   variable controls `insta`'s behaviour in non-interactive environments like
-   CI pipelines.[^13]
+   variable controls `insta`'s behaviour in non-interactive environments like CI
+   pipelines.[^13]
 
 <!-- mdformat on -->
 
@@ -850,8 +850,8 @@ async fn test_pr_command_with_single_comment_renders_correctly() {
 }
 ```
 
-This complete example demonstrates the synergy of the testing stack. `tokio`
-and `third-wheel` create the controlled environment, `assert_cmd` executes the
+This complete example demonstrates the synergy of the testing stack. `tokio` and
+`third-wheel` create the controlled environment, `assert_cmd` executes the
 application within that environment, and `insta` provides the final, robust
 verification of the application's primary output. This structure forms a
 powerful and reusable pattern for all other E2E tests in the suite.
@@ -1052,8 +1052,8 @@ Documentation, accessed on July 20, 2025,
 \[^7\]: termimad - [crates.io](http://crates.io): Rust Package Registry,
 accessed on July 20, 2025, <https://crates.io/crates/termimad/0.9.7>
 
-\[^8\]: assert_cmd - Rust - [Docs.rs](http://Docs.rs), accessed on July 20,
-2025, <https://docs.rs/assert_cmd>
+\[^8\]: assert_cmd - Rust - [Docs.rs](http://Docs.rs), accessed on
+July 20, 2025, <https://docs.rs/assert_cmd>
 
 \[^9\]: assert_cmd - [crates.io](http://crates.io): Rust Package Registry,
 accessed on July 20, 2025, <https://crates.io/crates/assert_cmd>
@@ -1072,11 +1072,11 @@ accessed on July 20, 2025, <https://github.com/campbellC/third-wheel>
 
 \[^14\]: Insta Snapshots, accessed on July 20, 2025, <https://insta.rs/>
 
-\[^15\]: Testing - Command Line Applications in Rust, accessed on July 20,
-2025, <https://rust-cli.github.io/book/tutorial/testing.html>
+\[^15\]: Testing - Command Line Applications in Rust, accessed on
+July 20, 2025, <https://rust-cli.github.io/book/tutorial/testing.html>
 
-\[^16\]: Test Organization - The Rust Programming Language, accessed on July
-20, 2025, <https://doc.rust-lang.org/book/ch11-03-test-organization.html>
+\[^16\]: Test Organization - The Rust Programming Language, accessed on
+July 20, 2025, <https://doc.rust-lang.org/book/ch11-03-test-organization.html>
 
 \[^17\]: insta - [crates.io](http://crates.io): Rust Package Registry, accessed
 on July 20, 2025, <https://crates.io/crates/insta>
@@ -1084,8 +1084,8 @@ on July 20, 2025, <https://crates.io/crates/insta>
 \[^18\]: third-wheel - [crates.io](http://crates.io): Rust Package Registry,
 accessed on July 20, 2025, <https://crates.io/crates/third-wheel>
 
-\[^19\]: tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on July 20,
-2025, <https://docs.rs/tempfile>
+\[^19\]: tempfile - Rust - [Docs.rs](http://Docs.rs), accessed on
+July 20, 2025, <https://docs.rs/tempfile>
 
 \[^20\]: Should unit tests really be put in the same file as the source? - Rust
 Users Forum, accessed on July 20, 2025,

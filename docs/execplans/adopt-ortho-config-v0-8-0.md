@@ -12,7 +12,7 @@ tests, and documentation with the v0.8.0 migration requirements.
   <https://raw.githubusercontent.com/leynos/ortho-config/refs/tags/v0.8.0/docs/users-guide.md>.
 - Apply the v0.7.0 migration guidance from
   <https://raw.githubusercontent.com/leynos/ortho-config/refs/tags/v0.8.0/docs/v0-7-0-migration-guide.md>
-   before closing the v0.8.0 migration work, because this repository is still
+  before closing the v0.8.0 migration work, because this repository is still
   on v0.6.x today.
 - Apply the v0.8.0 migration notes for dependency versions, crate aliasing,
   clap defaults, YAML parsing, re-export usage, and optional `cargo orthohelp`

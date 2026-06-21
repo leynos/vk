@@ -70,9 +70,9 @@ only a number.
 `vk` uses the GitHub GraphQL API. Set `GITHUB_TOKEN`, `VK_GITHUB_TOKEN`, pass
 `--github-token`, or add `github_token` to `~/.config/vk/config.toml` (or the
 path provided via `VK_CONFIG_PATH`) to authenticate. If no token is set, you'll
-get a warning and anonymous requests may be rate limited. When
-`VK_CONFIG_PATH` points at a file that cannot be parsed, `vk` exits early with
-a `configuration error: …` message rather than silently falling back to
+get a warning and anonymous requests may be rate limited. When `VK_CONFIG_PATH`
+points at a file that cannot be parsed, `vk` exits early with a
+`configuration error: …` message rather than silently falling back to
 auto-discovered configuration.
 
 The token only needs read access. Select the `public_repo` scope (or `repo` for
