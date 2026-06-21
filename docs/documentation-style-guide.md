@@ -75,8 +75,8 @@ system is shaped the way it is, and the repository layout document explains
 where important things live. For discoverability, use canonical filenames
 unless a stronger repository-specific constraint applies. A minimal canonical
 set looks like
-`docs/{contents,users-guide,developers-guide,repository-layout}.md` plus a
-primary design document under `docs/*-design.md`, for example
+`docs/{contents,users-guide,developers-guide,repository-layout,documentation-style-guide}.md`
+plus a primary design document under `docs/*-design.md`, for example
 `docs/theoremc-design.md` or `docs/query-planner-design.md`.
 
 ### Contents file
@@ -534,8 +534,11 @@ contents of the manual.
   argument.
 - Document the return value with `# Returns`.
 - Document any panics or errors with `# Panics` or `# Errors` as appropriate.
-- Place examples under `# Examples` and mark the code block with `no_run`, so
-  they do not execute during documentation tests.
+- Place examples under `# Examples`. Let examples run as documentation tests
+  when they can execute correctly, so the compiler verifies that they compile
+  and behave as documented. Mark examples with `no_run` only when they
+  genuinely cannot execute, such as examples that require external resources,
+  incomplete snippets, or environment-specific setup.
 - Put function attributes after the doc comment.
 
 ```rust,no_run

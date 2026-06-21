@@ -84,22 +84,20 @@ The code centres on these printing helpers:
 <!-- mdformat off -->
 
 1. `write_comment_body` formats a single comment body to any `Write`
-   implementation, prefixing the author banner with the speech-balloon icon
-   from `vk::icons`.
+   implementation, prefixing the author banner with the speech-balloon icon from
+   `vk::icons`.
 2. `write_thread` iterates over a thread and emits each comment as a
    `---`-framed block. Each block opens with a blank line, then a
    `🌍 <permalink>` line, then a `📄 <path>:` heading and the formatted diff
    hunk (rendered only for the first comment of the thread, so the diff is
-   shown once), then a blank line, then the `💬 <author> wrote:` banner and
-   the rendered comment body. A single blank line precedes the closing
-   `---`, which doubles as the opening break for the next comment in the
-   thread.
+   shown once), then a blank line, then the `💬 <author> wrote:` banner and the
+   rendered comment body. A single blank line precedes the closing `---`, which
+   doubles as the opening break for the next comment in the thread.
 3. `write_review` writes a single review banner using the memo icon from
-   `vk::icons` and shares the body-rendering pipeline with
-   `write_comment_body`.
+   `vk::icons` and shares the body-rendering pipeline with `write_comment_body`.
 
-The emoji glyphs above are defined once in [`src/icons.rs`](../src/icons.rs)
-as `ICON_PERMALINK`, `ICON_FILE`, `ICON_COMMENT`, and `ICON_REVIEW`, and
+The emoji glyphs above are defined once in [`src/icons.rs`](../src/icons.rs) as
+`ICON_PERMALINK`, `ICON_FILE`, `ICON_COMMENT`, and `ICON_REVIEW`, and
 re-exported via `vk::icons` so the renderer, its unit tests, and the CLI
 integration tests share a single source of truth.
 
@@ -356,10 +354,10 @@ when they have to map a bare PR or issue number to a GitHub repository:
    succeed in a fresh `git worktree add` target where `git fetch` has not yet
    been run inside the worktree, so `FETCH_HEAD` does not yet exist.
 
-`resolve_branch_and_repo` calls `repo_from_origin` lazily — the happy path
-(when `--repo` or `FETCH_HEAD` already resolves the repository) only spawns
-`git` once, for the head-owner lookup used to disambiguate same-name branches
-across forks.
+`resolve_branch_and_repo` calls `repo_from_origin` lazily — the happy path (when
+`--repo` or `FETCH_HEAD` already resolves the repository) only spawns `git`
+once, for the head-owner lookup used to disambiguate same-name branches across
+forks.
 
 ### Test fixtures for Git-aware code
 
@@ -375,8 +373,8 @@ through two helpers in `src/test_utils.rs`:
   `env_sandbox_lock` mutex that `EnvSandbox` uses and holds it for the guard's
   lifetime. The lock is acquired with `try_lock`, so misuse — for example, a
   single test that already holds the lock through `EnvSandbox` and then
-  constructs a `CwdGuard` — fails fast with `io::ErrorKind::WouldBlock`
-  rather than deadlocking. Tests using `CwdGuard` should still be marked
+  constructs a `CwdGuard` — fails fast with `io::ErrorKind::WouldBlock` rather
+  than deadlocking. Tests using `CwdGuard` should still be marked
   `#[serial_test::serial]` so they coordinate with other lock-aware guards.
 
 ## Configuration and features
@@ -391,6 +389,6 @@ defaults to `https://api.github.com` but can be overridden with
 When the user has set `VK_CONFIG_PATH` explicitly, the loader in
 `config_loader.rs` validates that file up-front via
 `ortho_config::file::load_config_file` before discovery runs. Parse failures
-are propagated as `VkError::Config` so the user sees a `configuration error:
-…` message instead of having the broken file silently dropped as an optional
+are propagated as `VkError::Config` so the user sees a `configuration error: …`
+message instead of having the broken file silently dropped as an optional
 discovery layer.
