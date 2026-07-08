@@ -260,6 +260,16 @@ escalation, not workarounds.
   consumed by the printer and summary modules; the generated types are an
   implementation detail of the wire format. Date/Author: 2026-07-09, planning
   session.
+- Decision: design the refitted GraphQL client (PRs 2 and 3) for cheap
+  future extraction into a shared crate. Rationale: the sibling project frankie
+  (a code-review TUI, currently REST-only octocrab) will need the GraphQL-only
+  review-thread surface (`isResolved`, `resolveReviewThread`) that motivated
+  this client, and the executor (transport, retry, transcript, typed
+  operations, cursor pagination) is the reusable part while query documents
+  stay per-project. Concretely: keep `VkError` and `vk::environment` coupling
+  at the edges of the transport and typed modules rather than woven through
+  them. Extraction itself is out of scope for this plan. Date/Author:
+  2026-07-09, follow-up review discussion.
 - Decision: record the programme in a new ADR,
   `docs/adr-001-github-api-client-modernisation.md`. Rationale: no ADRs exist;
   the bespoke-client choice was never recorded. AGENTS.md requires substantive
