@@ -40,6 +40,8 @@
 - [Execution plans](execplans/): Use this directory for living implementation
   plans that need to survive context handoffs.
   - [Adopt octocrab](execplans/adopt-octocrab.md): Use this for the living
-    plan to replace the bespoke reqwest clients with the octocrab library.
+    plan to modernise GitHub API access — octocrab for REST, a hyper
+    transport for the bespoke GraphQL client, and `graphql_client` codegen
+    for typed queries.
   - [Adopt Ortho Config v0.8.0](execplans/adopt-ortho-config-v0-8-0.md): Use
     this for the recorded plan behind the v0.8.0 configuration adoption work.

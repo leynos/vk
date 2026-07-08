@@ -1,4 +1,4 @@
-# Adopt octocrab as the GitHub API transport for vk
+# Modernise GitHub API access: octocrab REST, hyper transport, typed GraphQL
 
 This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
@@ -15,23 +15,35 @@ clients built directly on the `reqwest` crate: a GraphQL client
 (`src/resolve/rest.rs`, compiled only under the `unstable-rest-resolve`
 feature) used to post a reply before resolving a review thread.
 
-This plan replaces the `reqwest` transport underneath both clients with
-[octocrab](https://docs.rs/octocrab) (version 0.54.x, the maintained GitHub API
-client for Rust), while preserving `vk`'s externally observable behaviour:
-command output, error messages, retry semantics, transcript recording,
-authentication precedence, and the environment-variable endpoint overrides that
-the entire test suite depends on.
+An earlier draft of this plan proposed routing everything through
+[octocrab](https://docs.rs/octocrab). Review concluded octocrab is a weak fit
+for the GraphQL side (its `graphql()` helper hides the raw response that `vk`'s
+transcript, error-snippet, and retry machinery depend on) but a genuine win for
+the REST side (typed pull-request APIs, maintained auth and base-URI plumbing).
+The revised programme is therefore three separable changes, delivered as three
+pull requests:
 
-After this change, a user sees no behavioural difference: `vk pr`, `vk issue`,
-and `vk resolve` work exactly as before, and `make test` passes with the same
-suite. What the project gains is a maintained transport layer (authentication
-plumbing, base-URI handling, connection management, rate-limit-aware retry
-available for future use) and a ready-made typed REST surface for future
-features, in exchange for deleting bespoke plumbing. Success is observable as:
-`cargo tree -i reqwest` reports the crate is absent from the dependency graph,
-`cargo tree -p vk | grep octocrab` shows octocrab present, and all existing
-gates (`make check-fmt`, `make lint`, `make test`, `make markdownlint`,
-`make nixie`) pass.
+1. PR 1 — adopt octocrab for the REST resolve path, replacing the bespoke
+   `reqwest`-based `RestClient`.
+2. PR 2 — replace `reqwest` inside the bespoke GraphQL client with a direct
+   hyper transport, then remove `reqwest` from the dependency graph. The binary
+   converges on one HTTP stack (hyper/rustls), shared with octocrab.
+3. PR 3 — adopt `graphql_client` codegen so every GraphQL query and its
+   variables are checked against GitHub's published schema at compile time,
+   removing the raw query-string constants and hand-maintained response
+   envelopes.
+
+`vk`'s externally observable behaviour is preserved throughout: command output,
+error messages, retry semantics, transcript recording, authentication
+precedence, and the environment-variable endpoint overrides that the entire
+test suite depends on.
+
+Success is observable per PR: after PR 1, `tests/resolve.rs` passes with
+octocrab serving the reply path; after PR 2, `cargo tree -i reqwest` reports
+the crate absent while the full suite passes; after PR 3, malforming any query
+in the vendored `.graphql` documents fails the build rather than a runtime
+request, and the suite still passes. All gates (`make check-fmt`, `make lint`,
+`make test`, `make markdownlint`, `make nixie`) pass at every commit.
 
 ## Constraints
 
@@ -49,7 +61,7 @@ escalation, not workarounds.
 - Token precedence must remain: `--github-token` flag, then
   `VK_GITHUB_TOKEN`, then `GITHUB_TOKEN`, then the config-file value
   (`src/auth.rs`).
-- Requests must keep sending `User-Agent: vk`,
+- GraphQL requests must keep sending `User-Agent: vk`,
   `Accept: application/vnd.github+json`, and `Authorization: Bearer <token>`
   (only when a token is present; anonymous access must keep working and keep
   printing the "GitHub token not set, using anonymous API access" warning).
@@ -58,78 +70,102 @@ escalation, not workarounds.
   `tests/e2e/common.rs::load_transcript` and the `tests/fixtures/pr42.json`
   fixture: one object per line with keys `operation`, `status`, `request`, and
   `response` (response body truncated to 500 characters).
-- Retry behaviour must be preserved: jittered exponential backoff via
-  `backon` with the transient-error classification in `src/api/retry.rs` (retry
-  on request errors, empty responses, HTTP 5xx, HTTP 429, and HTML-looking
-  bodies).
+- Retry behaviour on the GraphQL path must be preserved: jittered
+  exponential backoff via `backon` with the transient-error classification in
+  `src/api/retry.rs` (retry on request errors, empty responses, HTTP 5xx, HTTP
+  429, and HTML-looking bodies). The REST reply path performs no retries today
+  and must not gain any.
 - TLS must remain rustls-based; do not introduce a native-tls or OpenSSL
   dependency.
 - Dependency versions must use caret requirements unless a tilde pin is
   documented with a reason (see Decision Log for the octocrab pin).
 - The error type `VkError` and its variants remain the error surface of
-  `src/api/`; octocrab's `snafu`-based errors must be mapped at the transport
-  boundary and never leak into public signatures.
+  `src/api/`; octocrab's, hyper's, and `graphql_client`'s error types must be
+  mapped at module boundaries and never leak into public signatures.
+- The exported domain types (`ReviewThread`, `ReviewComment`,
+  `CommentConnection`, `PageInfo`, `PullRequestReview`, `Issue`, `User`) remain
+  the types consumers and the printer use; generated GraphQL types stay private
+  behind a conversion layer.
 - All commit gates pass on every commit: `make check-fmt`, `make lint`,
   `make test`, and for documentation changes `make markdownlint` and
   `make nixie`.
 - No single source file may exceed 400 lines; module-level `//!` comments
-  and en-GB-oxendict spelling are required in all new code.
+  and en-GB-oxendict spelling are required in all new code. The vendored
+  GraphQL schema is third-party generated data, not source, and is exempt.
 
 ## Tolerances (exception triggers)
 
-- Scope: if the migration requires editing more than 25 source files or a
-  net change beyond roughly 1,500 lines, stop and escalate.
+- Scope: if any single PR requires editing more than 20 source files or a
+  net change beyond roughly 1,200 lines (excluding the vendored schema and
+  `.graphql` documents), stop and escalate.
 - Interface: if a public API of the `vk` library crate (anything re-exported
-  from `src/lib.rs`, such as `GraphQLClient`, `Endpoint`, `Token`, `Query`,
-  `RetryConfig`, `CommentConnection`, `PageInfo`) must change signature, stop
-  and escalate. Internal (private or `pub(crate)`) signatures may change freely.
-- Dependencies: adding `octocrab` (and accepting its transitive hyper/tower
-  stack) is pre-approved by this plan. Any further new direct dependency
-  requires escalation.
+  from `src/lib.rs`) must change signature or be removed, stop and escalate —
+  with one pre-approved exception: PR 3 may add typed operation-execution
+  methods to `GraphQLClient` and deprecate (not remove) the string-based
+  `run_query`/`fetch_page`/`paginate_all` surface if call-site migration leaves
+  them unused.
+- Dependencies: this plan pre-approves `octocrab` (PR 1), promotion of
+  `hyper`, `hyper-util`, `hyper-rustls`, and `http-body-util` from
+  dev-dependencies to runtime dependencies (PR 2), and `graphql_client` (PR 3).
+  Any further new direct dependency requires escalation.
 - Behaviour: if preserving an asserted behaviour (error text, transcript
-  format, header set) proves impossible on top of octocrab, stop and present
+  format, header set, retry counts) proves impossible, stop and present
   options; do not weaken tests to fit.
 - Iterations: if a gate still fails after three fix attempts on the same
   failure, stop and escalate.
-- Prototype outcome: if Milestone 1 (the spike) shows octocrab cannot
-  expose raw response status and body for the transcript and error-snippet
-  machinery, stop and escalate with alternatives (see Risks).
+- Build time: if PR 3's schema-parsing derives push a clean `cargo build`
+  more than 50% above the pre-PR baseline (record the baseline first), stop and
+  escalate with options (group operations per derive, prune the schema).
 
 ## Risks
 
-- Risk: octocrab's default builder does not accept custom tower layers, so
-  the transcript recorder cannot be a middleware; the plan instead relies on
-  octocrab's raw `_post` method returning an unprocessed `http::Response` from
-  which status and body can be read. Severity: high. Likelihood: low.
-  Mitigation: Milestone 1 is a spike proving the raw-response path against the
-  existing unit tests before any consumer changes. Fallback: build the client
-  via `OctocrabBuilder::new_empty().with_service(...)` with a custom recording
-  layer, or escalate.
+- Risk: octocrab's typed REST models may not deserialize the minimal inline
+  JSON bodies used by `tests/resolve.rs`, and its error mapping may not
+  reproduce the 404-non-fatal / other-non-2xx-fatal semantics exactly.
+  Severity: medium. Likelihood: medium. Mitigation: PR 1 starts with a spike;
+  test stub bodies may be enriched to realistic fixtures (that is
+  strengthening, not weakening); fall back to octocrab's raw `_post` route
+  (which inherits auth and base-URI middleware but leaves response handling to
+  `vk`) if the typed handler cannot match semantics.
 - Risk: octocrab has shipped breaking changes in patch releases before
-  (issue 899, the 0.49.8 GraphQL return-type change). Severity: medium.
-  Likelihood: medium. Mitigation: pin with a tilde requirement (`~0.54`) and
-  record the reason in `Cargo.toml` comment and the ADR (see Decision Log).
-- Risk: unit tests construct clients with endpoints that have no path
-  (`http://127.0.0.1:PORT`), while e2e tests use
-  `http://127.0.0.1:PORT/graphql`; octocrab joins a relative route onto a base
-  URI, so the endpoint-to-(base URI, route) split must handle both. Severity:
-  medium. Likelihood: high (it will definitely arise). Mitigation: a dedicated
-  pure function with rstest coverage written test-first (Milestone 2, Stage B).
-- Risk: double-retry — octocrab's default retry layer (`Simple(3)`) would
-  stack with `backon`, tripling observed attempts and breaking the retry unit
-  tests that count requests. Severity: medium. Likelihood: high. Mitigation:
-  configure `add_retry_config(RetryConfig::None)` on the octocrab builder; keep
-  `backon` as the single retry mechanism.
-- Risk: octocrab's REST models may not deserialize the minimal inline JSON
-  bodies used by `tests/resolve.rs`, breaking the REST reply path if it moves
-  to octocrab's typed `reply_to_comment`. Severity: low. Likelihood: medium.
-  Mitigation: use the raw `_post` route for the reply as well, preserving the
-  exact path and status-code semantics (404 non-fatal, 403/500 fatal); typed
-  handlers can be adopted later.
-- Risk: binary size and compile time grow while both reqwest and octocrab
-  are present mid-migration. Severity: low. Likelihood: certain but transient.
-  Mitigation: the final milestone removes reqwest; the overlap is bounded to
-  the life of this branch.
+  (upstream issue 899). Severity: medium. Likelihood: medium. Mitigation: pin
+  with a tilde requirement (`~0.54`) and record the reason in a `Cargo.toml`
+  comment and the ADR.
+- Risk: a direct hyper transport must reassemble what `reqwest` provided
+  for free: connection pooling, TLS configuration, total-request timeout, and
+  body collection. A subtle difference (for example timeout scope or TLS root
+  store) could change behaviour under failure. Severity: medium. Likelihood:
+  medium. Mitigation: the retry and timeout unit tests in
+  `src/api/client/tests.rs` count attempts against scripted local servers and
+  act as a characterization harness; PR 2 changes nothing but the transport
+  internals, so any drift surfaces there. Root-store choice (webpki versus
+  native) is recorded in the Decision Log during implementation.
+- Risk: `graphql_client`'s generated response types may produce
+  `serde_path_to_error` paths that differ from the hand-written structs,
+  breaking the e2e assertion on `"repository.pullRequest.reviewThreads"`.
+  Severity: low. Likelihood: low (generated fields carry the same camelCase
+  serde renames). Mitigation: the e2e test is in the harness; if paths differ,
+  adjust the conversion boundary, not the test.
+- Risk: GitHub's vendored schema is ~73,000 lines (~1.5 MB) and each
+  `#[derive(GraphQLQuery)]` re-parses it at compile time. Severity: low.
+  Likelihood: medium. Mitigation: benchmark before and after (see Build time
+  tolerance); group operations into shared documents where sensible; generated
+  code is small because only selected fields are generated.
+- Risk: GitHub's custom scalars (`DateTime`, `URI`, `HTML`, `GitObjectID`)
+  need Rust type aliases in scope of each derive; a missed alias is a compile
+  error easily misread. Severity: low. Likelihood: high (it will arise).
+  Mitigation: a single shared `scalars` module
+  (`type DateTime = chrono::DateTime<chrono::Utc>`, `type URI = String`,
+  `type HTML = String`) imported by every operation module.
+- Risk: `paginate_all` currently injects the cursor into an untyped JSON
+  variables map; typed `Variables` structs break that mechanism. Severity:
+  medium. Likelihood: certain (by design). Mitigation: PR 3 introduces a small
+  `CursorVariables` trait (set the cursor on a typed variables struct)
+  implemented per paginated operation; written test-first.
+- Risk: binary size and compile time grow while both reqwest and the hyper
+  stack are present (during PR 1, and PR 2 before removal). Severity: low.
+  Likelihood: certain but transient. Mitigation: PR 2 ends with
+  `cargo tree -i reqwest` failing to find the package.
 
 ## Progress
 
@@ -138,17 +174,23 @@ escalation, not workarounds.
   plan.
 - [x] (2026-07-09 12:40Z) ExecPlan drafted and linked from
   `docs/contents.md`.
-- [ ] Stage A: author ADR `docs/adr-001-adopt-octocrab.md`; add octocrab
-  dependency; record pin rationale.
-- [ ] Milestone 1 (prototype): swap `GraphQLClient` transport to octocrab
-  behind the existing facade; `src/api/client/tests.rs` passes unchanged.
-- [ ] Milestone 2: endpoint-splitting function (test-first), transcript,
-  redaction, retry, and timeout parity; full `make test` green.
-- [ ] Milestone 3: REST resolve path on octocrab
-  (`--features unstable-rest-resolve`); `tests/resolve.rs` green.
-- [ ] Milestone 4: remove reqwest; update `docs/vk-design.md`,
-  `docs/repository-layout.md`, `docs/developers-guide.md` as needed; final
-  gates and retrospective.
+- [x] (2026-07-09 14:10Z) Scope revised after review: octocrab confined to
+  REST; GraphQL keeps the bespoke client on a hyper transport with
+  `graphql_client` codegen. `graphql_client` 0.16 researched and confirmed
+  transport-agnostic.
+- [ ] Stage A: author ADR `docs/adr-001-github-api-client-modernisation.md`
+  covering all three decisions; link from `docs/vk-design.md` and
+  `docs/contents.md`.
+- [ ] PR 1: octocrab REST resolve path
+  (`--features unstable-rest-resolve`); `tests/resolve.rs` green; octocrab
+  dependency added with pin rationale.
+- [ ] PR 2: hyper transport inside `GraphQLClient`; reqwest removed;
+  `cargo tree -i reqwest` fails; full suite green.
+- [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a
+  conversion layer, typed pagination; raw query constants deleted; full suite
+  green.
+- [ ] Documentation pass per PR (`docs/vk-design.md` and the e2e guide
+  correction in whichever PR touches it first); retrospective completed.
 
 ## Surprises & discoveries
 
@@ -161,51 +203,70 @@ escalation, not workarounds.
   `third_wheel::hyper` re-exports for a plain loopback stub server driven by
   env-var endpoint overrides. Evidence: `tests/utils/mod.rs:186-192` sets
   `GITHUB_GRAPHQL_URL` and `GITHUB_API_URL`; no proxy or certificate trust is
-  configured anywhere. Impact: the migration only needs to preserve the env-var
-  overrides, not proxy semantics; the guide should be corrected during
-  Milestone 4.
+  configured anywhere. Impact: only the env-var overrides need preserving; the
+  guide should be corrected when first touched.
 - Observation: the transcript writes the raw, unredacted request payload;
   redaction (`redact_sensitive`) applies only to error-context snippets.
   Evidence: `src/api/client/transcript.rs` versus
   `src/api/client/mod.rs:126-134`. Impact: parity is the goal; do not silently
   change redaction behaviour during the migration. Flagged for a possible
   follow-up outside this plan.
+- Observation: octocrab's own GraphQL example delegates query typing to
+  `graphql_client`, confirming the two tools' division of labour matches this
+  plan's (octocrab does not provide typed GraphQL itself). Evidence:
+  `examples/graphql_issues.rs` in the octocrab repository. Impact: supports
+  confining octocrab to REST.
 
 ## Decision log
 
-- Decision: keep the `GraphQLClient` facade and `VkError` taxonomy; replace
-  only the transport internals with octocrab. Rationale: consumers
-  (`src/commands.rs`, `src/review_threads.rs`, `src/reviews.rs`,
-  `src/issues.rs`, `src/branch_pr/`, `src/resolve/`) and roughly twenty network
-  tests couple to the facade, the error text, and the env-var overrides.
-  Swapping internals preserves all of that and bounds the blast radius;
-  rewriting consumers against octocrab's typed models would triple the diff for
-  no behavioural gain. Date/Author: 2026-07-09, planning session.
-- Decision: use octocrab's raw `_post` (returning `http::Response`) for
-  GraphQL and for the REST reply, not the convenience `graphql()` method or
-  typed REST handlers. Rationale: `graphql()` swallows the raw body and
-  discards partial-success data, which would break transcript recording,
-  body-snippet error context, and the HTML-body transient-retry heuristic.
-  `_post` inherits auth and base-URI middleware while leaving response
-  processing to `vk`. Date/Author: 2026-07-09, planning session.
-- Decision: keep `backon` retry and disable octocrab's retry layer
-  (`RetryConfig::None` on the builder). Rationale: a single retry authority
-  preserves the tested attempt counts and backoff behaviour. octocrab's
-  rate-limit-aware retry cannot see GraphQL rate-limit errors (they arrive as
-  HTTP 200 with an `errors` payload), so `backon` at the operation level
-  remains necessary anyway. Date/Author: 2026-07-09, planning session.
-- Decision: pin octocrab with a tilde requirement (`~0.54`).
-  Rationale: octocrab has a documented history of breaking changes in patch
-  releases (upstream issue 899). AGENTS.md permits tilde pins where the reason
-  is documented; this is that documentation, and the ADR repeats it.
-  Date/Author: 2026-07-09, planning session.
-- Decision: record the adoption in a new ADR,
-  `docs/adr-001-adopt-octocrab.md`. Rationale: no ADRs exist; the
-  bespoke-client choice was never recorded. AGENTS.md requires substantive
+- Decision: adopt the three-part programme — octocrab for REST only, a
+  direct hyper transport for the bespoke GraphQL client, and `graphql_client`
+  codegen for typed queries — instead of routing all traffic through octocrab.
+  Rationale: the bespoke GraphQL client is heavily leveraged for
+  instrumentability (transcript recording, body-snippet error context,
+  transient-retry classification on raw bodies), all of which octocrab's
+  `graphql()` helper hides; octocrab's value concentrates in its typed REST
+  surface and maintained plumbing. This keeps the observability investment,
+  converges on one HTTP stack, and adds the compile-time query checking the
+  bespoke client always lacked. Date/Author: 2026-07-09, direction given by the
+  user in review of the first draft.
+- Decision: deliver as three pull requests in the order REST (PR 1),
+  transport (PR 2), codegen (PR 3). Rationale: PR 1 is the smallest and proves
+  octocrab in-tree with minimal blast radius; PR 2 removes reqwest early so the
+  dependency win lands before the largest change; PR 3 is type-level only and
+  benefits from a settled transport underneath it. PRs 2 and 3 are
+  order-independent if circumstances change. Date/Author: 2026-07-09, planning
+  session.
+- Decision: keep the `GraphQLClient` facade and `VkError` taxonomy
+  throughout; all three PRs change internals or add typed surface only.
+  Rationale: consumers (`src/commands.rs`, `src/review_threads.rs`,
+  `src/reviews.rs`, `src/issues.rs`, `src/branch_pr/`, `src/resolve/`) and
+  roughly twenty network tests couple to the facade, the error text, and the
+  env-var overrides. Date/Author: 2026-07-09, planning session.
+- Decision: keep `backon` retry as the single retry authority on the
+  GraphQL path; build octocrab (REST) without its retry feature so the reply
+  path stays retry-free as today. Rationale: preserves tested attempt counts;
+  octocrab's retry layer cannot see GraphQL rate-limit errors (HTTP 200 with an
+  `errors` payload) anyway. Date/Author: 2026-07-09, planning session.
+- Decision: pin octocrab with a tilde requirement (`~0.54`). Rationale:
+  octocrab has a documented history of breaking changes in patch releases
+  (upstream issue 899). AGENTS.md permits tilde pins where the reason is
+  documented; this is that documentation, and the ADR repeats it. Date/Author:
+  2026-07-09, planning session.
+- Decision: in PR 3, keep the exported domain structs and convert from
+  generated `ResponseData` types at a private boundary (`From`
+  implementations), rather than exporting generated types. Rationale: the
+  domain structs are public API (re-exported from `src/lib.rs`) and are
+  consumed by the printer and summary modules; the generated types are an
+  implementation detail of the wire format. Date/Author: 2026-07-09, planning
+  session.
+- Decision: record the programme in a new ADR,
+  `docs/adr-001-github-api-client-modernisation.md`. Rationale: no ADRs exist;
+  the bespoke-client choice was never recorded. AGENTS.md requires substantive
   decisions to be captured as ADRs following
-  `docs/documentation-style-guide.md` (Status, Date, Context and Problem
-  Statement, Options Considered, Decision Outcome, Migration Plan, Known
-  Risks). Date/Author: 2026-07-09, planning session.
+  `docs/documentation-style-guide.md`. Date/Author: 2026-07-09, planning
+  session (path renamed from `adr-001-adopt-octocrab.md` when the scope
+  changed).
 
 ## Outcomes & retrospective
 
@@ -246,7 +307,9 @@ GraphQL queries are raw string constants in `src/graphql_queries.rs`
 (`THREADS_QUERY`, `COMMENT_QUERY`, `ISSUE_QUERY`, `PR_FOR_BRANCH_QUERY`) and in
 `src/resolve/graphql.rs` (`RESOLVE_THREAD_MUTATION`, `REVIEW_COMMENTS_PAGE`).
 Responses deserialize into per-module serde structs that mirror the GraphQL
-wire shape; these structs are unchanged by this plan.
+wire shape; the exported ones (`ReviewThread`, `ReviewComment`,
+`CommentConnection`, `PageInfo`, `PullRequestReview`, `Issue`, `User`) are
+public API and survive all three PRs.
 
 The REST path: `src/resolve/rest.rs` (only compiled with
 `--features unstable-rest-resolve`) builds a second `reqwest::Client`
@@ -254,7 +317,8 @@ The REST path: `src/resolve/rest.rs` (only compiled with
 `GITHUB_API_URL` env var (default `https://api.github.com`). Its one operation,
 `post_reply`, POSTs to
 `repos/{owner}/{name}/pulls/{pull_number}/comments/{comment_id}/replies`,
-treating 404 as non-fatal and other non-2xx as fatal, with no retry.
+treating 404 as non-fatal (warn and continue) and other non-2xx as fatal, with
+no retry.
 
 Authentication: `src/auth.rs::resolve_github_token` implements the precedence
 chain; no `gh` CLI integration exists. The token is a plain string handed to
@@ -265,8 +329,8 @@ Tests that constrain this work:
 - `src/api/client/tests.rs` spins up loopback hyper servers and constructs
   clients via `with_endpoint`/`with_endpoint_retry` using endpoints without a
   path; it counts retry attempts and asserts error-text fragments.
-- `src/test_utils/test_http.rs` and `src/branch_pr/tests.rs` follow the same
-  pattern.
+- `src/test_utils/test_http.rs` and `src/branch_pr/tests.rs` follow the
+  same pattern.
 - `tests/utils/mod.rs::vk_cmd` runs the real binary with
   `GITHUB_GRAPHQL_URL=http://{addr}/graphql`, `GITHUB_API_URL=http://{addr}`,
   and `GITHUB_TOKEN=dummy`.
@@ -278,115 +342,131 @@ Tests that constrain this work:
 - `tests/e2e/common.rs::load_transcript` and `tests/fixtures/pr42.json`
   encode the transcript JSON-lines format.
 
-Key octocrab facts (version 0.54.0, MSRV 1.85, rustls + ring by default):
+Key library facts (verified 2026-07-09):
 
-- It builds on hyper 1.x and tower, not reqwest. `OctocrabBuilder`
-  provides `personal_token`, `base_uri` (a tower layer rewriting relative
-  routes, applying to REST and GraphQL alike), `add_header`,
-  `add_retry_config`, and connect/read/write timeouts.
-- `Octocrab::_post(route, body)` returns the raw `http::Response`, from
-  which status and body bytes can be read — this is the hook that preserves
-  `vk`'s transcript, snippets, and retry classification.
-- The convenience `graphql()` method deserializes internally and discards
-  the raw body and partial-success data; it is not used by this plan.
-- Resolving a review thread has no REST endpoint; the `resolveReviewThread`
-  GraphQL mutation remains the only way, so GraphQL stays central.
+- octocrab 0.54.0 (MSRV 1.85) builds on hyper 1.x and tower, rustls with
+  the ring provider by default. `OctocrabBuilder` provides `personal_token`,
+  `base_uri` (applies to all routes), `add_header`, and timeouts.
+  `pulls(owner, repo)` exposes typed review-comment operations including
+  replying to a comment; the raw `_post(route, body)` method returns an
+  unprocessed `http::Response` as a fallback. Resolving a review thread has no
+  REST endpoint; the `resolveReviewThread` GraphQL mutation is the only way.
+- `graphql_client` 0.16.0 (January 2026, maintained, MSRV 1.66):
+  `#[derive(GraphQLQuery)]` with `schema_path`/`query_path` generates
+  `Variables` and `ResponseData` types per operation.
+  `Operation::build_query(variables)` returns a `QueryBody` that serializes to
+  the standard `{"query", "variables", "operationName"}` envelope, and
+  responses are plain serde — both compose with any transport, so the bespoke
+  client's envelope handling, transcript, and `serde_path_to_error` diagnostics
+  continue to work. The reqwest features are optional and stay off. Custom
+  scalars used by GitHub (`DateTime`, `URI`, `HTML`, and friends) need type
+  aliases in scope of the derive.
+- GitHub's public GraphQL schema is published at
+  `https://docs.github.com/public/fpt/schema.docs.graphql` (~73,000 lines, ~1.5
+  MB SDL); vendoring it whole is the established practice (octocrab and
+  graphql_client both do so in their examples).
 
 ## Plan of work
 
-The work is four milestones, each ending in a commit (or small commit series)
-with all gates green. The public facade means consumers are untouched until
-Milestone 3, and most tests act as a characterization harness throughout: their
-continuing to pass is the acceptance evidence.
+Stage A (lands with PR 1): author
+`docs/adr-001-github-api-client-modernisation.md` following the ADR template in
+`docs/documentation-style-guide.md`. Status: Accepted. Context: two bespoke
+reqwest clients, an undocumented prior decision, and no compile-time query
+checking. Options Considered: keep bespoke; route everything through octocrab;
+the adopted three-part split; `graphql_client` plus reqwest without octocrab.
+Decision Outcome: the three-part programme, with the octocrab tilde pin and its
+rationale. Migration Plan: reference this ExecPlan. Reference the ADR from
+`docs/vk-design.md` and list it in `docs/contents.md`.
 
-Stage A (part of the first commit): author `docs/adr-001-adopt-octocrab.md`
-following the ADR template in `docs/documentation-style-guide.md` (Status:
-Accepted; Context: two bespoke reqwest clients, undocumented prior decision;
-Options Considered: keep bespoke, octocrab, graphql_client + reqwest codegen;
-Decision Outcome: octocrab as transport with retained facade; Migration Plan:
-reference this ExecPlan; Known Risks: semver history, hence tilde pin).
-Reference the ADR from `docs/vk-design.md` and list it in `docs/contents.md`.
-Add the dependency to `Cargo.toml`:
+### PR 1 — octocrab for the REST resolve path
 
+Add the dependency (final feature list recorded here after the spike; the
+`retry` feature is deliberately excluded so no retry layer exists, matching
+today's retry-free reply path):
+
+    # Tilde pin: octocrab has shipped breaking changes in patch releases
+    # (upstream issue 899); widen only after review.
     octocrab = { version = "~0.54", default-features = false, features = ["rustls", "rustls-ring", "timeout"] }
 
-(Feature list to be verified during the spike: the goal is rustls with the ring
-provider, timeouts available, octocrab's retry and tracing layers not required;
-adjust to the minimal set that compiles, and record the final set here.) Run
-`cargo tree -d` to check for duplicate major versions of shared transitive
-dependencies and note findings in `Surprises & discoveries`.
+Rework `src/resolve/rest.rs` behind its existing `pub(crate)` surface:
+`RestClient::new(token, api, timeout, connect_timeout)` builds an
+`octocrab::Octocrab` via `OctocrabBuilder` (`personal_token` when the token is
+non-empty, `base_uri` from the existing parameter → `GITHUB_API_URL` → default
+resolution, connect/read timeouts from the existing arguments). `post_reply`
+first attempts the typed route
+(`octocrab.pulls(owner, name).reply_to_comment(...)` or the closest current
+equivalent — verify the exact method against octocrab 0.54 during the spike);
+it must preserve the semantics `tests/resolve.rs` asserts: exact request path,
+404 mapped to a warning and success, other non-2xx mapped to a fatal `VkError`.
+If the typed model rejects the stub response bodies, enrich the stubs toward
+realistic fixtures (`tests/fixtures/review_comment.json` exists for this); if
+semantics still cannot be matched, fall back to `_post` with the hand-built
+route and record the outcome in the Decision Log. Delete `github_client` and
+the hand-rolled header constants. Acceptance:
+`cargo test --features unstable-rest-resolve` and `make lint` (all-features)
+pass; `tests/resolve.rs` unchanged in what it asserts.
 
-Milestone 1 (prototyping, go/no-go): inside `src/api/client/`, add a private
-transport module (`src/api/client/transport.rs`) that owns an
-`octocrab::Octocrab` instance plus the route to post to, and give it one async
-method mirroring today's `execute_single_request` contract: take a JSON
-payload, return `HttpResponse { status, body }` or `VkError`. Construct it from
-the existing `Endpoint`, `Token`, and `RetryConfig` values:
+### PR 2 — hyper transport; remove reqwest
 
-- Split the `Endpoint` URL into a base URI and a route path (for
-  `http://127.0.0.1:9999` the route is `/`; for
-  `https://api.github.com/graphql` the base is `https://api.github.com` and the
-  route `/graphql`). This is the pure function `split_endpoint` described under
-  Interfaces below, written test-first.
-- Builder: `personal_token` only when the token is non-empty; `add_header`
-  for `User-Agent: vk` and `Accept: application/vnd.github+json` (verify during
-  the spike whether octocrab's defaults duplicate or fight these; the wire
-  assertions in `tests/auth.rs` are the arbiter);
-  `add_retry_config(octocrab::service::middleware::retry::RetryConfig::None)`;
-  read/connect timeouts from `vk`'s `RetryConfig::request_timeout`.
-- Method body: `_post(route, Some(&payload))`, read status, collect body
-  bytes to a `String`, map transport errors into `VkError::RequestContext` with
-  the same context text as today.
+Add a private transport module `src/api/client/transport.rs` owning a pooled
+hyper client (`hyper_util::client::legacy::Client` with a `hyper_rustls` HTTPS
+connector) and exposing one method mirroring `execute_single_request`'s
+contract: take the JSON payload and headers, POST to the configured endpoint
+URL (kept whole — no base/route splitting is needed because the bespoke client
+posts to one absolute URL), enforce the total-request timeout via
+`tokio::time::timeout` (mirroring reqwest's `.timeout()` scope: connect plus
+body), collect the body with `http-body-util`, and return
+`HttpResponse { status, body }` or a `VkError::RequestContext` with today's
+context text. Promote `hyper`, `hyper-util`, `hyper-rustls`, and
+`http-body-util` to runtime dependencies; record the chosen TLS root store
+(webpki roots, matching the current `rustls-tls` posture) in the Decision Log.
+Switch `execute_single_request` to delegate to the transport; the transcript
+call, status check, snippets, retry loop, and headers logic are untouched.
+Remove `reqwest` from `Cargo.toml` and replace any residual `reqwest::header`
+imports with the `http` crate equivalents (they are the same types
+re-exported). Acceptance: `make test` passes without any test edits;
+`cargo tree -i reqwest` reports the package is not found.
 
-Switch `execute_single_request` to delegate to the transport while leaving
-everything else (transcript call, status check, snippets, retry loop)
-untouched. The `reqwest::Client` field and `headers: HeaderMap` field of
-`GraphQLClient` are removed or bypassed. Acceptance: `cargo test api::client`
-(module tests) and then `make test` pass without any test edits. If raw
-status/body access or header parity cannot be achieved, stop: this is the
-go/no-go gate.
+### PR 3 — typed GraphQL via graphql_client codegen
 
-Milestone 2 (parity hardening): promote the spike to final quality. Red-green
-applies to the new unit: add rstest cases for `split_endpoint` covering
-path-less endpoints, `/graphql` paths, deeper paths, and trailing slashes,
-written before the implementation and observed failing (the function is new, so
-the red stage is a compile-fail or a failing assertion against a stub). Confirm
-timeout behaviour (a hanging stub server test already exists in the retry
-tests; verify it still passes), transcript output (run the ignored `e2e_pr_42`
-transcript test locally: `cargo test --test e2e -- --ignored e2e_pr_42` — it
-replays `tests/fixtures/pr42.json`), and anonymous access (`tests/auth.rs`).
-Delete `src/api/client/helpers.rs::build_headers` and its two unit tests only
-if header construction has genuinely moved into the octocrab builder; otherwise
-keep it as the single source of header values fed to `add_header`. Update module
-`//!` comments to describe the octocrab transport. All gates green; commit.
+Record the build-time baseline first (`cargo build` from clean, wall clock).
+Vendor the schema at `graphql/schema.docs.graphql` with a short
+`graphql/README.md` noting the source URL and refresh procedure. Move each
+operation into a `.graphql` document under `graphql/` (thread listing, comment
+paging, issue lookup, PR-for-branch, review-comments paging, the
+`resolveReviewThread` mutation, and reviews listing), grouping related
+operations per file to amortize the per-derive schema parse. Create a shared
+scalars module (`type DateTime = chrono::DateTime<chrono::Utc>`,
+`type URI = String`, `type HTML = String`, extended as compile errors direct).
+Derive `GraphQLQuery` per operation with
+`response_derives = "Debug, Clone, PartialEq"`.
 
-Milestone 3 (REST resolve path): replace `src/resolve/rest.rs::github_client`
-and the `RestClient` internals with a second octocrab instance whose base URI
-comes from the existing resolution (parameter, then `GITHUB_API_URL`, then
-default). Keep `post_reply`'s signature and semantics: build the same relative
-route string, call `_post`, keep 404-as-warning and other-non-2xx-as-fatal
-mapping into `VkError`. Do not adopt the typed `pulls().reply_to_comment`
-handler in this plan (see Decision Log). Acceptance:
-`cargo test --features unstable-rest-resolve` passes, including
-`tests/resolve.rs`; `make lint` (which uses `--all-features`) passes. Commit.
+Client surface: add a typed method to `GraphQLClient` (see Interfaces) that
+takes an operation's `Variables`, builds the envelope with `build_query`, and
+reuses the existing POST, transcript, retry, and `serde_path_to_error`
+machinery; the codegen'd operation name replaces the string-sniffing
+`operation_name` helper on this path. For pagination, introduce a
+`CursorVariables` trait (set/replace the cursor on a typed variables struct)
+and a typed `paginate_operation` counterpart to `paginate_all`, written
+test-first against the existing scripted stub servers.
 
-Milestone 4 (removal and documentation): delete the `reqwest` dependency from
-`Cargo.toml` and any residual `use reqwest` imports (after Milestones 1–3 the
-only candidates are error-source downcasts; replace with hyper/http
-equivalents). Verify with `cargo tree -i reqwest` (expected: error, package not
-found). Update documentation:
+Conversion boundary: implement `From<ResponseData>` (or dedicated mapper
+functions where `From` is awkward) producing the existing exported domain
+structs, so `src/commands.rs`, the printer, and the summary modules do not
+change. Migrate call sites module by module (review_threads, reviews, issues,
+branch_pr, resolve/graphql), deleting each raw query constant as its operation
+moves; `src/graphql_queries.rs` is deleted at the end. Red-green applies to the
+new units (the `CursorVariables` trait, each conversion): write the rstest
+cases first against fixture JSON and observe the expected failure before
+implementing. Acceptance: full suite green; introducing a deliberate typo into
+any `.graphql` document fails `cargo build` (demonstrate once, then revert);
+build-time delta within tolerance.
 
-- `docs/vk-design.md`: rewrite the networking section to describe the
-  octocrab transport, retained facade, retry split (backon outside, octocrab
-  retry disabled), and endpoint splitting; reference the ADR.
-- `docs/vk-end-to-end-testing-guide.md`: correct the third-wheel
-  description (loopback stub via env-var override, not a MITM proxy).
-- `docs/repository-layout.md` and `docs/developers-guide.md`: only if
-  module boundaries moved (they should not).
-- `docs/contents.md`: ensure the ADR and this plan are listed.
-
-Run all gates including `make markdownlint` and `make nixie`. Complete
-`Outcomes & retrospective`. Set Status to COMPLETE. Commit.
+Documentation lands with each PR: `docs/vk-design.md` networking and resolve
+sections (PRs 1–2), the third-wheel correction in
+`docs/vk-end-to-end-testing-guide.md` (first PR that touches test docs), the
+GraphQL section rewrite and schema-refresh procedure (PR 3), and
+`docs/contents.md` whenever a document is added.
 
 ## Concrete steps
 
@@ -396,7 +476,7 @@ All commands run from the repository root
 
     make test 2>&1 | tee "/tmp/test-vk-adopt-octocrab.out"
 
-Per-milestone sequence (repeat for each milestone):
+Per-milestone sequence (repeat for each commit within each PR):
 
 1. Make the edits described in Plan of work.
 2. `make check-fmt` (apply `make fmt` first if needed).
@@ -410,11 +490,12 @@ Per-milestone sequence (repeat for each milestone):
 
 Useful focused commands:
 
-    cargo test api::client 2>&1 | tee /tmp/test-vk-adopt-octocrab.out
     cargo test --features unstable-rest-resolve --test resolve 2>&1 | tee /tmp/test-vk-adopt-octocrab.out
+    cargo test api::client 2>&1 | tee /tmp/test-vk-adopt-octocrab.out
     cargo test --test e2e -- --ignored e2e_pr_42 2>&1 | tee /tmp/test-vk-adopt-octocrab.out
-    cargo tree -i reqwest        # Milestone 4: expect "package … not found"
+    cargo tree -i reqwest        # PR 2 exit: expect "package … not found"
     cargo tree -d                # check duplicate transitive versions
+    curl -L https://docs.github.com/public/fpt/schema.docs.graphql -o graphql/schema.docs.graphql
 
 Expected shape of a passing test run (counts will drift as tests are added):
 
@@ -422,99 +503,133 @@ Expected shape of a passing test run (counts will drift as tests are added):
 
 ## Validation and acceptance
 
-The migration is behaviour-preserving, so the existing suite is the primary
-acceptance harness: every milestone ends with `make check-fmt`, `make lint`, and
-`make test` green with no test weakened or deleted (except the two
-`build_headers` unit tests, which may move with the code they test — see
-Milestone 2).
+The programme is behaviour-preserving, so the existing suite is the primary
+acceptance harness: every commit ends with `make check-fmt`, `make lint`, and
+`make test` green with no test weakened or deleted. Enriching REST stub bodies
+toward realistic fixtures (PR 1) and adding new tests is permitted; loosening
+assertions is not.
 
-Red-green-refactor evidence is required for the one genuinely new unit:
+Red-green-refactor evidence is required for the genuinely new units:
 
-- Red: add `split_endpoint` rstest cases in the transport module first;
-  run `cargo test api::client::transport` and observe failure (initially a
-  compile failure for the missing function, then failing assertions against a
-  todo stub).
-- Green: implement `split_endpoint` minimally; the focused test passes.
-- Refactor: tidy, then run `make lint` and `make test`.
+- PR 2: if any helper with observable logic is added to the transport
+  (beyond direct delegation), specify it with a failing test first; otherwise
+  the characterization harness (retry counts, error text, transcript replay)
+  stands in, and that substitution is recorded here.
+- PR 3: the `CursorVariables` trait, `paginate_operation`, and each
+  `ResponseData` → domain conversion get rstest cases against fixture JSON
+  written before the implementation; run the focused test, observe the expected
+  failure, implement, observe the pass, then run the wider gates.
 
-End-to-end observation: with no token and pointing at a loopback stub, the
-binary behaves identically before and after, for example:
+End-to-end observations per PR:
 
-    GITHUB_GRAPHQL_URL=http://127.0.0.1:1/graphql GITHUB_TOKEN=dummy \
-      cargo run -- pr https://github.com/leynos/vk/pull/1
+- PR 1: `cargo test --features unstable-rest-resolve --test resolve`
+  passes; a manual run against a loopback stub shows the reply POST hitting
+  `repos/{owner}/{name}/pulls/{n}/comments/{id}/replies` exactly as on `main`.
+- PR 2: `cargo tree -i reqwest` fails to find the package; the ignored
+  transcript-replay test (`cargo test --test e2e -- --ignored e2e_pr_42`)
+  passes, proving transcript format parity; with no server listening, running
+  `cargo run -- pr <url>` with `GITHUB_TOKEN=dummy` and
+  `GITHUB_GRAPHQL_URL=http://127.0.0.1:1/graphql` fails with a
+  connection-refused `RequestContext` error naming the operation, exactly as on
+  `main`.
+- PR 3: a deliberate field typo in a `.graphql` document turns into a
+  compile error (demonstrated once and reverted); the insta snapshots in
+  `tests/cli.rs` are byte-identical.
 
-fails with a connection-refused `RequestContext` error mentioning the operation
-name, exactly as on `main`.
-
-Quality criteria: all gates above, plus `cargo tree -i reqwest` failing to find
-the package at the end of Milestone 4, and documentation gates for the ADR and
-design-doc updates.
+Quality criteria: all gates above; documentation gates (`make markdownlint`,
+`make nixie`) for the ADR, design-doc, and `graphql/README.md` changes;
+build-time delta within the stated tolerance for PR 3.
 
 ## Idempotence and recovery
 
 Every step is an ordinary source edit gated by the test suite; re-running any
-command is safe. Each milestone is an independent commit, so a failed milestone
-is abandoned with `git restore` / `git reset --hard HEAD` without affecting
-completed work. Nothing in this plan touches user data, CI configuration, or
-anything outside the repository; the only files written outside it are `tee`
-logs under `/tmp`.
+command is safe. Each PR (and each commit within it) is independent, so a
+failed attempt is abandoned with `git restore` / `git reset --hard HEAD`
+without affecting completed work. The schema download is re-runnable and
+version-controlled once vendored. Nothing in this plan touches user data, CI
+configuration, or anything outside the repository; the only files written
+outside it are `tee` logs under `/tmp`.
 
 ## Artifacts and notes
 
 Record here, as milestones complete: the final octocrab feature set, the
-`cargo tree -d` duplicate report, a sample transcript line proving format
-parity, and the closing test counts.
+`cargo tree -d` duplicate report, the clean-build baseline and post-PR 3 delta,
+a sample transcript line proving format parity, and the closing test counts.
 
 ## Interfaces and dependencies
 
-Dependency to add (Stage A; final feature list recorded here after the spike):
+Dependencies to add:
 
-    # Tilde pin: octocrab has shipped breaking changes in patch releases
-    # (upstream issue 899); widen only after review.
+    # PR 1. Tilde pin: octocrab has shipped breaking changes in patch
+    # releases (upstream issue 899); widen only after review.
     octocrab = { version = "~0.54", default-features = false, features = ["rustls", "rustls-ring", "timeout"] }
 
-Dependency to remove (Milestone 4): `reqwest`.
+    # PR 2 (promoted from dev-dependencies; align versions with the lockfile)
+    hyper = "1"
+    hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
+    hyper-rustls = { version = "0.27", features = ["webpki-roots", "http1", "ring"] }
+    http-body-util = "0.1"
 
-In `src/api/client/transport.rs` (new, private to `client`):
+    # PR 3
+    graphql_client = "0.16"
 
-    /// Owns the octocrab instance and the GraphQL route derived from the
-    /// configured endpoint.
-    pub(super) struct Transport {
-        octocrab: octocrab::Octocrab,
-        route: String,
-    }
+Dependency to remove (PR 2): `reqwest`.
+
+In `src/api/client/transport.rs` (PR 2, new, private to `client`):
+
+    /// Owns the pooled hyper client used for GraphQL requests.
+    pub(super) struct Transport { /* hyper_util legacy client + HTTPS connector */ }
 
     impl Transport {
-        pub(super) fn new(
-            token: &Token,
-            endpoint: &Endpoint,
-            retry: &RetryConfig,
-        ) -> Result<Self, VkError>;
+        pub(super) fn new() -> Result<Self, VkError>;
 
-        /// POST `payload` to the GraphQL route, returning status and body.
+        /// POST `payload` to `endpoint` with `headers`, honouring `timeout`
+        /// across the whole request, returning status and body.
         pub(super) async fn post_json(
             &self,
+            endpoint: &Endpoint,
+            headers: &http::HeaderMap,
             payload: &serde_json::Value,
+            timeout: std::time::Duration,
         ) -> Result<HttpResponse, VkError>;
     }
 
-    /// Split a full endpoint URL into (base URI, route path).
-    ///
-    /// `https://api.github.com/graphql` -> ("https://api.github.com", "/graphql")
-    /// `http://127.0.0.1:9999`          -> ("http://127.0.0.1:9999", "/")
-    pub(super) fn split_endpoint(endpoint: &Endpoint) -> Result<(String, String), VkError>;
+In `src/api/client/mod.rs` (PR 3, added; string-based methods retained until
+unused, then deprecated per the Interface tolerance):
+
+    /// Execute a codegen'd GraphQL operation using this client.
+    pub async fn run_operation<Q: graphql_client::GraphQLQuery>(
+        &self,
+        variables: Q::Variables,
+    ) -> Result<Q::ResponseData, VkError>;
+
+In `src/api/pagination.rs` or a sibling module (PR 3):
+
+    /// Implemented by generated Variables types for paginated operations.
+    pub(crate) trait CursorVariables {
+        fn set_cursor(&mut self, cursor: Option<String>);
+    }
 
 Unchanged public surface (re-exported from `src/lib.rs` and `src/api/`):
-`GraphQLClient` and its constructors/methods, `Endpoint`, `Token`, `Query`,
+`GraphQLClient` and its constructors, `Endpoint`, `Token`, `Query`,
 `RetryConfig`, `paginate`, `PageInfo`, `CommentConnection`, `ReviewThread`,
 `ReviewComment`, `PullRequestReview`, `Issue`, `User`, and `VkError`.
 
-In `src/resolve/rest.rs`, `RestClient` keeps its `pub(crate)` construction and
-`post_reply` free function; only the inner client type changes from
-`reqwest::Client` to `octocrab::Octocrab`.
+In `src/resolve/rest.rs` (PR 1), `RestClient` keeps its `pub(crate)`
+construction and the `post_reply` free function; only the inner client type
+changes from `reqwest::Client` to `octocrab::Octocrab`.
 
 ## Revision note
 
-2026-07-09: initial draft, based on codebase reconnaissance (client layer,
-consumers, test infrastructure, documentation conventions) and octocrab 0.54
-research. No implementation has begun; awaiting approval.
+2026-07-09: initial draft proposed octocrab as the transport for both GraphQL
+and REST.
+
+2026-07-09 (second revision): scope changed on user direction after review of
+the first draft. octocrab is now confined to the REST resolve path; the bespoke
+GraphQL client is retained for its observability machinery and moves from
+reqwest to a direct hyper transport; `graphql_client` codegen adds compile-time
+query checking. Delivery is three pull requests. The planned ADR was renamed
+from `adr-001-adopt-octocrab.md` to
+`adr-001-github-api-client-modernisation.md`. Constraints, tolerances, risks,
+decisions, and interfaces were rewritten to match; no implementation has begun
+and the plan awaits approval.
