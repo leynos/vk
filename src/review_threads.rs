@@ -8,165 +8,18 @@
 //! CLI flag `--show-outdated`. Utilities for filtering threads by file
 //! path are also provided.
 
-use graphql_client::GraphQLQuery;
-use serde::Deserialize;
 use std::collections::HashSet;
 
-use crate::api::CursorVariables;
-// `graphql_client` resolves the `URI` scalar (the comment `url` field) to a
-// type of the same name in scope of the threads/comment derives; the shared
-// alias supplies it.
-use crate::api::scalars::URI;
 use crate::boxed::BoxedStr;
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, VkError};
 
-#[derive(Debug, Deserialize, Default)]
-/// Top-level response for the review-thread query.
-struct ThreadData {
-    /// Repository response data.
-    repository: Repository,
-}
+mod wire;
 
-#[derive(Debug, Deserialize, Default)]
-/// Repository response data for a pull request.
-struct Repository {
-    #[serde(rename = "pullRequest")]
-    /// Pull-request response data.
-    pull_request: PullRequest,
-}
-
-#[derive(Debug, Deserialize, Default)]
-/// Pull-request response data for review threads.
-struct PullRequest {
-    #[serde(rename = "reviewThreads")]
-    /// Review-thread connection returned by GitHub.
-    review_threads: ReviewThreadConnection,
-}
-
-#[derive(Debug, Deserialize, Default)]
-/// Wrapper for a nullable GraphQL node.
-struct NodeWrapper<T> {
-    /// Node value, when the requested node exists.
-    node: Option<T>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-/// Comment node containing its comment connection.
-struct CommentNode {
-    /// Comments attached to the node.
-    comments: CommentConnection,
-}
-
-#[derive(Debug, Deserialize, Default)]
-/// A paginated GraphQL connection.
-pub struct Connection<T> {
-    /// Items returned in this page.
-    pub nodes: Vec<T>,
-    #[serde(rename = "pageInfo")]
-    /// Pagination metadata for this page.
-    pub page_info: PageInfo,
-}
-
-/// Connection containing review threads.
-type ReviewThreadConnection = Connection<ReviewThread>;
-/// Connection containing review comments.
-pub type CommentConnection = Connection<ReviewComment>;
-
-/// Details of a single review thread.
-#[derive(Debug, Deserialize, Default)]
-pub struct ReviewThread {
-    /// Global identifier of the review thread.
-    pub id: String,
-    #[serde(rename = "isResolved")]
-    /// Whether the thread has been resolved.
-    pub is_resolved: bool,
-    #[serde(default, rename = "isOutdated")]
-    /// Whether the thread refers to an outdated diff.
-    pub is_outdated: bool,
-    /// Comments belonging to the thread.
-    pub comments: CommentConnection,
-}
-
-/// A single review comment.
-#[derive(Debug, Deserialize, Default)]
-pub struct ReviewComment {
-    /// Comment body in Markdown.
-    pub body: String,
-    #[serde(rename = "diffHunk")]
-    /// Diff hunk surrounding the comment.
-    pub diff_hunk: String,
-    #[serde(rename = "originalPosition")]
-    /// Original line position before later diffs moved the comment.
-    pub original_position: Option<i32>,
-    /// Current line position, when GitHub provides one.
-    pub position: Option<i32>,
-    /// Repository-relative path containing the comment.
-    pub path: String,
-    /// Web URL for the comment.
-    pub url: String,
-    /// Author of the comment, when available.
-    pub author: Option<User>,
-}
-
-/// Pagination information returned by GitHub's GraphQL API.
-#[derive(Debug, Deserialize, Default, Clone)]
-pub struct PageInfo {
-    #[serde(rename = "hasNextPage")]
-    /// Whether another page is available.
-    pub has_next_page: bool,
-    #[serde(rename = "endCursor")]
-    /// Cursor to use when requesting the next page.
-    pub end_cursor: Option<String>,
-}
-
-impl PageInfo {
-    /// Return the cursor for the next page when available.
-    /// Returns `Ok(None)` when there are no more pages.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`VkError::BadResponse`] when `has_next_page` is `true` but
-    /// `end_cursor` is absent.
-    ///
-    /// # Examples
-    /// ```
-    /// use vk::PageInfo;
-    /// let info = PageInfo { has_next_page: true, end_cursor: Some("c1".into()) };
-    /// assert_eq!(info.next_cursor().expect("cursor"), Some("c1"));
-    /// ```
-    /// ```
-    /// use vk::PageInfo;
-    /// let info = PageInfo { has_next_page: true, end_cursor: None };
-    /// assert!(info.next_cursor().is_err());
-    /// ```
-    /// ```
-    /// use vk::PageInfo;
-    /// let info = PageInfo { has_next_page: false, end_cursor: None };
-    /// assert_eq!(info.next_cursor().expect("cursor"), None);
-    /// ```
-    #[inline]
-    #[must_use = "inspect the returned cursor to advance pagination"]
-    pub fn next_cursor(&self) -> Result<Option<&str>, VkError> {
-        match (self.has_next_page, self.end_cursor.as_deref()) {
-            (true, Some(cursor)) => Ok(Some(cursor)),
-            (true, None) => Err(VkError::BadResponse(
-                format!(
-                    "PageInfo invariant violated: hasNextPage=true but endCursor missing | pageInfo: {self:?}"
-                )
-                .boxed(),
-            )),
-            (false, _) => Ok(None),
-        }
-    }
-}
-
-/// Minimal user representation for authorship information.
-#[derive(Debug, Deserialize, Default, Clone)]
-pub struct User {
-    /// GitHub login for the user.
-    pub login: String,
-}
+pub use wire::{
+    CommentConnection, CommentQuery, PageInfo, ReviewComment, ReviewThread, ThreadsQuery, User,
+};
+use wire::{CommentNode, NodeWrapper, ThreadData, comment_query, threads_query};
 
 /// Options controlling which review threads to include.
 ///
@@ -488,47 +341,3 @@ pub fn thread_for_comment(threads: Vec<ReviewThread>, comment_id: u64) -> Option
 
 #[cfg(test)]
 mod tests;
-
-/// Typed `ThreadsQuery` operation: the paginated review-thread listing.
-///
-/// The generated `ResponseData` would require `isOutdated` on every thread,
-/// but the documented behaviour is that threads missing `isOutdated` are
-/// treated as current (see `docs/vk-design.md`). The response is therefore
-/// decoded into the hand-written [`ThreadData`] via
-/// [`GraphQLClient::paginate_operation_as`], which keeps that `#[serde(default)]`
-/// leniency while still validating the query against the vendored schema.
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "graphql/schema.docs.graphql",
-    query_path = "graphql/review_threads.graphql",
-    variables_derives = "Clone",
-    response_derives = "Debug, Clone, PartialEq"
-)]
-pub struct ThreadsQuery;
-
-/// Typed `CommentQuery` operation: per-thread comment paging via `node(id:)`.
-///
-/// Decoded into the hand-written [`NodeWrapper<CommentNode>`] for consistency
-/// with [`ThreadsQuery`] (both populate the shared [`ReviewComment`]) and to
-/// avoid mapping the `Node` interface's inline-fragment enum; the fixtures
-/// would also satisfy the generated `ResponseData`.
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "graphql/schema.docs.graphql",
-    query_path = "graphql/review_threads.graphql",
-    variables_derives = "Clone",
-    response_derives = "Debug, Clone, PartialEq"
-)]
-pub struct CommentQuery;
-
-impl CursorVariables for comment_query::Variables {
-    fn set_cursor(&mut self, cursor: Option<String>) {
-        self.cursor = cursor;
-    }
-}
-
-impl CursorVariables for threads_query::Variables {
-    fn set_cursor(&mut self, cursor: Option<String>) {
-        self.cursor = cursor;
-    }
-}
