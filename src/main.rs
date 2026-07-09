@@ -32,7 +32,7 @@ mod environment {
     pub(crate) use vk::environment::var;
 }
 
-pub use crate::api::{GraphQLClient, paginate};
+pub use crate::api::GraphQLClient;
 pub use issues::{Issue, fetch_issue};
 pub use review_threads::{
     CommentConnection, FetchOptions, PageInfo, ReviewComment, ReviewThread, User,

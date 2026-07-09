@@ -2,35 +2,6 @@
 
 use serde::Deserialize;
 
-/// A GraphQL query string with type safety.
-#[derive(Debug, Clone)]
-pub struct Query(String);
-
-impl Query {
-    /// Create a query from a string-like value.
-    pub fn new(query: impl Into<String>) -> Self {
-        Self(query.into())
-    }
-
-    /// Return the query text.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for Query {
-    fn from(s: &str) -> Self {
-        Self(s.to_string())
-    }
-}
-
-impl AsRef<str> for Query {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
 /// A GitHub API authentication token.
 #[derive(Debug, Clone)]
 pub struct Token(String);
