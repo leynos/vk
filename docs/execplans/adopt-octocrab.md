@@ -196,11 +196,6 @@ escalation, not workarounds.
   via builder `add_header` with a direct `http` dependency; `tests/resolve.rs`
   green unchanged; design doc updated; all gates green; CodeRabbit review
   completed with zero findings; draft pull request opened as leynos/vk#194.
-- [x] (2026-07-28) Review follow-up restored the total REST reply deadline,
-  strengthened raw POST coverage for the route, body, authentication, required
-  headers, and status handling, and reconciled the documentation findings.
-- [x] (2026-08-03) Documentation review follow-up corrected the dependency
-  record, documentation index, Oxford spelling, and REST ownership guidance.
 - [x] (2026-07-09 18:30Z) PR 2 complete: `src/api/client/transport.rs`
   added with `GraphQLClient` delegating to it; reqwest removed from the graph
   entirely (`cargo tree -i reqwest` finds nothing in normal, dev, and
@@ -208,16 +203,31 @@ escalation, not workarounds.
   and e2e testing guide corrected; all gates green; CodeRabbit review completed
   with zero findings; draft pull request opened as leynos/vk#195 (stacked on PR
   1).
+- [x] (2026-07-09 21:10Z) PR 3 implementation complete: schema vendored
+  (72,911 lines); all six operations in named `.graphql` documents;
+  `run_operation`/`run_operation_as`/`paginate_operation_as` plus the
+  `CursorVariables` trait (red-green tested); domain structs preserved behind
+  conversions; `src/graphql_queries.rs` and the string query surface deleted
+  with characterization tests ported; the resolve thread-lookup latent bug fixed
+  (`reviewThreads`/`fullDatabaseId`); wire-submodule split restores the
+  400-line limit; compile-fail demonstrated
+  (`No field named titleTYPO on Issue`) and reverted; clean build 17 s versus
+  the 46 s baseline (well within tolerance); full suite green.
+- [x] (2026-07-09 21:20Z) Documentation pass complete across all PRs:
+  `docs/vk-design.md` networking and resolve sections rewritten for the typed
+  path, e2e guide MITM correction (PR 2), `docs/repository-layout.md` gains the
+  `graphql/` entry; users' guide reviewed, no change needed. Remaining: PR 3
+  CodeRabbit review and draft PR.
+- [x] (2026-07-28) Review follow-up restored the total REST reply deadline,
+  strengthened raw POST coverage for the route, body, authentication, required
+  headers, and status handling, and reconciled the documentation findings.
+- [x] (2026-08-03) Documentation review follow-up corrected the dependency
+  record, documentation index, Oxford spelling, and REST ownership guidance.
 - [x] (2026-08-27) GraphQL transport hardening added loopback request-contract,
   connection, status, header-timeout, body-timeout, response-limit, and
   concurrent-transcript coverage; bounded metrics and property tests cover
   outcome labels, every `u16` status classification, and the response-size
   boundary.
-- [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a
-  conversion layer, typed pagination; raw query constants deleted; full suite
-  green.
-- [ ] Documentation pass per PR (`docs/vk-design.md` and the e2e guide
-  correction in whichever PR touches it first); retrospective completed.
 
 ## Surprises & discoveries
 
@@ -329,10 +339,11 @@ escalation, not workarounds.
   keeps the loopback test servers working. The total-request timeout is one
   `tokio::time::timeout` spanning send plus body collection, mirroring reqwest's
   `.timeout()`; a timeout maps to `VkError::RequestContext`, which
-  `should_retry` already classifies as transient. System proxies
-  (`HTTP(S)_PROXY`) and redirects are deliberately not supported by the new
-  transport — reqwest honoured both by default, but neither is used or tested
-  on the GraphQL path; both are documented in the transport module. The
+  `should_retry` already classifies as transient. System proxy support
+  (`HTTP(S)_PROXY`) and redirect support are deliberately not supported by the
+  new transport — reqwest honoured both by default, but neither system proxy
+  support nor redirect support is used or tested on the GraphQL path; both are
+  documented in the transport module. The
   binary-internal `VkError::Request` variant (constructed only from reqwest
   errors) was removed along with its retry-classifier arm; `VkError` is not
   exported from `src/lib.rs`, so this is not a public API change. Date/Author:
@@ -388,6 +399,28 @@ escalation, not workarounds.
 
 ## Outcomes & retrospective
 
+Interim (2026-07-09, all three PRs implemented; PRs 1 and 2 reviewed clean by
+CodeRabbit; PR 3 review pending):
+
+- The programme delivered its purpose: one HTTP stack (hyper/rustls),
+  octocrab serving REST, and compile-time-checked GraphQL, with the observable
+  behaviour pinned by the suite preserved throughout.
+- Biggest surprise: codegen validation exposed that the resolve
+  thread-lookup query selected a field (`PullRequest.reviewComments`) that does
+  not exist in GitHub's schema — `vk resolve` could never have worked against
+  the live API. The compile-time checking paid for itself before the PR even
+  landed.
+- The `_as` escape hatch (schema-checked query, hand-written
+  deserialization target) proved the pivotal design move: it let every lenient
+  documented behaviour survive codegen strictness and kept serde error paths
+  byte-identical.
+- Lesson: octocrab's semver-loose history and hidden feature coupling
+  (`jwt-rust-crypto` mandatory under `default-features = false`) justify the
+  tilde pin twice over.
+- Lesson (process): two construction agents racing one file set caused
+  formatting/lint churn; sequencing construction strictly would have saved
+  several gate iterations.
+
 PR 1 is complete. The REST reply path uses Octocrab's raw `_post` route and
 preserves the route, headers, total deadline, authentication, and
 404-non-fatal/other-non-2xx-fatal semantics. The recorded PR 1 validation ran
@@ -397,9 +430,13 @@ the route, body, authentication, header, and status assertions.
 
 PR 2 is complete: the bespoke GraphQL client uses a pooled Hyper/rustls
 transport, retains its total deadline and contextual errors, and `reqwest` is
-absent from the dependency graph. PR 3 remains future work: add typed GraphQL
-code generation and migrate the query call sites without changing the public
-domain types.
+absent from the dependency graph. The 2026-08-27 follow-up added loopback
+request-contract, connection, status, timeout, response-limit, and
+concurrent-transcript coverage, as well as bounded metrics and property tests.
+
+PR 3 is complete: the typed GraphQL operations and pagination preserve the
+public domain types and the documented behaviour while validating each query
+against the vendored schema at compile time.
 
 ## Context and orientation
 
@@ -714,8 +751,37 @@ authentication, status handling, URI normalization, and total deadline, and the
 recorded PR 1 gate run is green. PR 2 artifacts include the Hyper transport,
 `reqwest`-absence report, and loopback validation for deadlines, response-size
 limits, observability, property boundaries, and concurrent transcript writes.
-The remaining artifacts are the PR 3 sample transcript line,
-schema/code-generation evidence, and closing test counts.
+
+Recorded evidence:
+
+- octocrab final feature set: `default-client`, `jwt-rust-crypto`,
+  `rustls`, `rustls-ring`, `timeout` (no `retry`).
+- Clean `cargo build --all-features`: 46 s pre-codegen baseline, 17 s
+  after PR 3 on the same machine (variance dominated by cache warmth; the
+  schema-parsing derives are immaterial).
+- Compile-fail evidence: a deliberate `titleTYPO` field in
+  `graphql/issue.graphql` fails `cargo check` with "No field named titleTYPO on
+  Issue"; reverted.
+- Transcript parity: `cargo test --test e2e -- --ignored e2e_pr_42`
+  passes on the hyper transport and the typed path (replay is sequential,
+  insensitive to query text).
+- reqwest absence: `cargo tree -i reqwest` reports the package is not
+  found in normal, dev, and all-features graphs.
+
+- `cargo tree -d` reports the following duplicate dependency families in the
+  final graph: `base64` 0.22.1/0.23.1, `bytes` 0.5.6/1.12.1, `http`
+  0.2.12/1.5.0, `hyper` 0.14.32/1.11.1, `tokio-util` 0.6.10/0.7.19,
+  `toml` 0.8.23/1.1.6, and `thiserror` 1.0.69/2.0.20. These are transitive
+  duplicates retained by the REST, GraphQL, and test stacks.
+- A generated transcript line retains the established JSON-lines shape:
+
+  ```json
+  {"operation":"RetryOp","status":200,"request":{"query":"query RetryOp { __typename }","variables":{},"operationName":"RetryOp"},"response":"{\"data\":{\"x\":1}}"}
+  ```
+
+- Closing validation: `make test` passed with 215 library tests, all
+  integration suites, and 11 doctests; 0 tests failed. The ignored
+  `e2e_pr_42` transcript replay also passed.
 
 ## Interfaces and dependencies
 
