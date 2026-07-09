@@ -2,7 +2,8 @@
 //!
 //! The thread lookup pages through `repository.pullRequest.reviewThreads`,
 //! scanning each thread's first 100 comments for the requested comment's
-//! `databaseId`. An earlier revision paged a flat
+//! database id (`fullDatabaseId`; the plain `databaseId` field is deprecated
+//! in the schema). An earlier revision paged a flat
 //! `PullRequest.reviewComments` connection, but that field does not exist in
 //! GitHub's published GraphQL schema — it only ever worked against mocked
 //! responses — so the query was redesigned onto the real schema when the
@@ -14,12 +15,15 @@
 //! review threads of that depth are not a practical concern for `vk resolve`.
 
 use super::CommentRef;
+// `graphql_client` resolves the `BigInt` scalar (`fullDatabaseId`) to a type
+// of the same name in scope of the derive; the shared alias supplies it.
+use crate::api::scalars::BigInt;
 use crate::{VkError, api::GraphQLClient};
 use graphql_client::GraphQLQuery;
 
 /// Typed `ThreadForCommentQuery` operation: pages review threads (with their
 /// first 100 comments) so [`get_thread_id`] can locate the thread owning a
-/// comment `databaseId`.
+/// comment database id.
 ///
 /// Uses the generated `ResponseData` directly: the fetcher trait below is the
 /// only consumer, its unit tests construct the generated types via [`tests`]
@@ -93,11 +97,15 @@ impl ReviewCommentsFetcher for GraphQLClient {
     }
 }
 
-/// Scan one page of review threads for the comment with `target` databaseId,
+/// Scan one page of review threads for the comment with `target` database id,
 /// returning the owning thread's id when found.
 fn find_thread_in_page(
-    threads: Vec<Option<thread_for_comment_query::ThreadForCommentQueryRepositoryPullRequestReviewThreadsNodes>>,
-    target: i64,
+    threads: Vec<
+        Option<
+            thread_for_comment_query::ThreadForCommentQueryRepositoryPullRequestReviewThreadsNodes,
+        >,
+    >,
+    target: &str,
 ) -> Option<String> {
     threads.into_iter().flatten().find_map(|thread| {
         let hit = thread
@@ -106,7 +114,7 @@ fn find_thread_in_page(
             .iter()
             .flatten()
             .flatten()
-            .any(|comment| comment.database_id == Some(target));
+            .any(|comment| comment.full_database_id.as_deref() == Some(target));
         hit.then_some(thread.id)
     })
 }
@@ -115,14 +123,10 @@ pub(crate) async fn get_thread_id(
     gql: &impl ReviewCommentsFetcher,
     reference: CommentRef<'_>,
 ) -> Result<String, VkError> {
-    // Comment ids come from `#discussion_r<ID>` permalinks; the schema types
-    // `databaseId` as `Int` (i64), so an id beyond `i64::MAX` cannot match any
-    // comment and is reported as not found.
-    let Ok(target) = i64::try_from(reference.comment_id) else {
-        return Err(VkError::CommentNotFound {
-            comment_id: reference.comment_id,
-        });
-    };
+    // Comment ids come from `#discussion_r<ID>` permalinks; `fullDatabaseId`
+    // is a `BigInt` scalar carried as a decimal string, so the id is matched
+    // by its canonical string form.
+    let target = reference.comment_id.to_string();
     let mut cursor: Option<String> = None;
     loop {
         let data = gql
@@ -139,7 +143,7 @@ pub(crate) async fn get_thread_id(
             .map(|p| p.review_threads)
             .ok_or_else(|| VkError::BadResponse("missing review threads".into()))?;
         if let Some(nodes) = threads.nodes
-            && let Some(id) = find_thread_in_page(nodes, target)
+            && let Some(id) = find_thread_in_page(nodes, &target)
         {
             return Ok(id);
         }
@@ -182,8 +186,7 @@ mod tests {
     use mockall::Sequence;
     use rstest::rstest;
     use thread_for_comment_query::{
-        ResponseData, ThreadForCommentQueryRepository,
-        ThreadForCommentQueryRepositoryPullRequest,
+        ResponseData, ThreadForCommentQueryRepository, ThreadForCommentQueryRepositoryPullRequest,
         ThreadForCommentQueryRepositoryPullRequestReviewThreads,
         ThreadForCommentQueryRepositoryPullRequestReviewThreadsNodes,
         ThreadForCommentQueryRepositoryPullRequestReviewThreadsNodesComments,
@@ -191,8 +194,11 @@ mod tests {
         ThreadForCommentQueryRepositoryPullRequestReviewThreadsPageInfo,
     };
 
-    /// Build one thread node containing the given comment databaseIds.
-    fn thread(id: &str, comment_ids: Vec<i64>) -> ThreadForCommentQueryRepositoryPullRequestReviewThreadsNodes {
+    /// Build one thread node containing the given comment database ids.
+    fn thread(
+        id: &str,
+        comment_ids: Vec<u64>,
+    ) -> ThreadForCommentQueryRepositoryPullRequestReviewThreadsNodes {
         ThreadForCommentQueryRepositoryPullRequestReviewThreadsNodes {
             id: id.into(),
             comments: ThreadForCommentQueryRepositoryPullRequestReviewThreadsNodesComments {
@@ -201,7 +207,7 @@ mod tests {
                         .into_iter()
                         .map(|database_id| {
                             Some(ThreadForCommentQueryRepositoryPullRequestReviewThreadsNodesCommentsNodes {
-                                database_id: Some(database_id),
+                                full_database_id: Some(database_id.to_string()),
                             })
                         })
                         .collect(),
@@ -212,15 +218,16 @@ mod tests {
 
     /// Build a page of review threads, each holding one comment id, with the
     /// given pagination cursor.
-    fn page(comment_ids: Vec<i64>, end_cursor: Option<&str>, has_next: bool) -> ThreadPage {
+    fn page(comment_ids: Vec<u64>, end_cursor: Option<&str>, has_next: bool) -> ThreadPage {
         ResponseData {
             repository: Some(ThreadForCommentQueryRepository {
                 pull_request: Some(ThreadForCommentQueryRepositoryPullRequest {
                     review_threads: ThreadForCommentQueryRepositoryPullRequestReviewThreads {
-                        page_info: ThreadForCommentQueryRepositoryPullRequestReviewThreadsPageInfo {
-                            end_cursor: end_cursor.map(ToOwned::to_owned),
-                            has_next_page: has_next,
-                        },
+                        page_info:
+                            ThreadForCommentQueryRepositoryPullRequestReviewThreadsPageInfo {
+                                end_cursor: end_cursor.map(ToOwned::to_owned),
+                                has_next_page: has_next,
+                            },
                         nodes: Some(
                             comment_ids
                                 .into_iter()
