@@ -4,7 +4,7 @@ This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
 and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
-Status: IN PROGRESS
+Status: COMPLETE (awaiting review/merge of PRs #194, #195, #196)
 
 ## Purpose / big picture
 
@@ -217,8 +217,11 @@ escalation, not workarounds.
 - [x] (2026-07-09 21:20Z) Documentation pass complete across all PRs:
   `docs/vk-design.md` networking and resolve sections rewritten for the typed
   path, e2e guide MITM correction (PR 2), `docs/repository-layout.md` gains the
-  `graphql/` entry; users' guide reviewed, no change needed. Remaining: PR 3
-  CodeRabbit review and draft PR.
+  `graphql/` entry; users' guide reviewed, no change needed.
+- [x] (2026-07-09 21:50Z) PR 3 CodeRabbit review completed with zero
+  findings against the cumulative diff from main; draft pull request opened as
+  leynos/vk#196 (stacked on PR 2). Plan status COMPLETE pending review and
+  merges.
 
 ## Surprises & discoveries
 
