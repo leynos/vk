@@ -1,107 +1,25 @@
 //! Pagination helpers for the GraphQL client.
 
-use super::{GraphQLClient, Query};
+use super::GraphQLClient;
 use crate::VkError;
 use crate::api::CursorVariables;
 use crate::boxed::BoxedStr;
 use serde::de::DeserializeOwned;
-use serde_json::{Map, Value};
-use std::borrow::Cow;
 
 const MAX_PAGES: usize = 1000;
 
 impl GraphQLClient {
-    /// Fetch and concatenate all pages from a cursor-based connection.
-    ///
-    /// `query` and `vars` define the base request. The `map` closure
-    /// extracts the items and pagination info from each page's response.
-    ///
-    /// Pagination stops after 1000 pages to avoid infinite loops when cursors
-    /// repeat or the API misbehaves.
-    ///
-    /// # Examples
-    /// Borrowed and owned cursors both avoid allocations until needed.
-    ///
-    /// ```no_run
-    /// use std::borrow::Cow;
-    /// use serde_json::Map;
-    /// use vk::{api::GraphQLClient, PageInfo, VkError};
-    ///
-    /// # async fn run(client: GraphQLClient) -> Result<(), VkError> {
-    /// let vars = Map::new();
-    /// client
-    ///     .paginate_all::<(), _, serde_json::Value>(
-    ///         "query",
-    ///         vars.clone(),
-    ///         Some(Cow::Borrowed("c1")),
-    ///         |_page| Ok((Vec::new(), PageInfo::default())),
-    ///     )
-    ///     .await?;
-    /// let owned = String::from("c2");
-    /// client
-    ///     .paginate_all::<(), _, serde_json::Value>(
-    ///         "query",
-    ///         vars,
-    ///         Some(Cow::Owned(owned)),
-    ///         |_page| Ok((Vec::new(), PageInfo::default())),
-    ///     )
-    ///     .await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// Propagates any [`VkError`] returned by the underlying request or mapper
-    /// closure.
-    pub async fn paginate_all<Item, Mapper, Page>(
-        &self,
-        query: impl Into<Query>,
-        vars: Map<String, Value>,
-        start_cursor: Option<Cow<'_, str>>,
-        mut map: Mapper,
-    ) -> Result<Vec<Item>, VkError>
-    where
-        Mapper: FnMut(Page) -> Result<(Vec<Item>, crate::PageInfo), VkError>,
-        Page: DeserializeOwned,
-    {
-        let query = query.into();
-        let mut items = Vec::new();
-        let mut cursor = start_cursor;
-        let mut pages_seen = 0usize;
-        loop {
-            pages_seen += 1;
-            if pages_seen > MAX_PAGES {
-                return Err(VkError::BadResponse(
-                    format!("pagination exceeded max pages {MAX_PAGES}").boxed(),
-                ));
-            }
-            let data = self
-                .fetch_page::<Page, _>(query.clone(), cursor.take(), &vars)
-                .await?;
-            let (mut page, info) = map(data)?;
-            items.append(&mut page);
-            if let Some(next) = info.next_cursor()? {
-                cursor = Some(Cow::Owned(next.to_string()));
-            } else {
-                break;
-            }
-        }
-        Ok(items)
-    }
-
     /// Fetch and concatenate all pages of a `graphql_client` codegen'd
     /// operation.
     ///
-    /// This is the typed counterpart to [`paginate_all`](Self::paginate_all):
     /// `variables` supplies the base request, the [`CursorVariables`] impl
     /// advances the cursor between pages, and the `map` closure extracts the
     /// items and [`crate::PageInfo`] from each page's `ResponseData`.
     ///
     /// Pagination stops after 1000 pages to avoid infinite loops when cursors
-    /// repeat or the API misbehaves. As with `paginate_all`, any items fetched
-    /// before an error are discarded: an error from the request or the `map`
-    /// closure aborts the whole traversal and yields only that error.
+    /// repeat or the API misbehaves. Any items fetched before an error are
+    /// discarded: an error from the request or the `map` closure aborts the
+    /// whole traversal and yields only that error.
     ///
     /// # Errors
     ///
@@ -109,9 +27,12 @@ impl GraphQLClient {
     /// `map` closure, and returns [`VkError::BadResponse`] if the page cap is
     /// exceeded.
     ///
-    /// Exercised only from tests during the pilot; its first non-test caller
-    /// arrives when a paginated operation migrates, at which point the `expect`
-    /// is removed.
+    /// Currently exercised only from tests: the migrated paginated operations
+    /// all decode into hand-written domain structs via
+    /// [`paginate_operation_as`](Self::paginate_operation_as). This wrapper is
+    /// the plan-specified typed interface for future operations whose
+    /// generated `ResponseData` is fixture-compatible; the `expect` is removed
+    /// when its first production caller arrives.
     #[cfg_attr(
         not(test),
         expect(
@@ -148,7 +69,8 @@ impl GraphQLClient {
     /// listing).
     ///
     /// Pagination stops after 1000 pages to avoid infinite loops when cursors
-    /// repeat or the API misbehaves. As with `paginate_all`, any items fetched
+    /// repeat or the API misbehaves. As with
+    /// [`paginate_operation`](Self::paginate_operation), any items fetched
     /// before an error are discarded.
     ///
     /// # Errors
@@ -289,6 +211,39 @@ mod tests {
         assert_eq!(server.hits.load(std::sync::atomic::Ordering::SeqCst), 2);
         server.join.abort();
         let _ = server.join.await;
+    }
+
+    /// Port of the retired `fetch_page` cursor characterization: the cursor
+    /// supplied to the paginator must land in the request's
+    /// `variables.cursor`, overwriting any stale value already present in the
+    /// base variables.
+    #[rstest::rstest]
+    #[case::no_prior_cursor(None)]
+    #[case::overwrites_stale_cursor(Some("stale"))]
+    #[tokio::test]
+    async fn paginate_operation_sends_cursor_in_request_variables(#[case] prior: Option<&str>) {
+        let (client, captured, join) = super::super::tests::mock_server_with_capture();
+        let _ = client
+            .paginate_operation_as::<PageTestQuery, serde_json::Value, String, _>(
+                page_test_query::Variables {
+                    cursor: prior.map(ToOwned::to_owned),
+                },
+                Some("fresh".to_string()),
+                |_page| {
+                    Ok((
+                        Vec::new(),
+                        crate::PageInfo {
+                            has_next_page: false,
+                            end_cursor: None,
+                        },
+                    ))
+                },
+            )
+            .await
+            .expect("single page");
+        join.abort();
+        let _ = join.await;
+        super::super::tests::assert_cursor_in_request(&captured, "fresh");
     }
 
     #[tokio::test]
