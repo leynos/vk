@@ -28,6 +28,10 @@ pub(crate) type DateTime = chrono::DateTime<chrono::Utc>;
 )]
 pub(crate) type URI = String;
 
+/// GitHub's `BigInt` scalar: a non-fractional signed whole number that may
+/// exceed 32 bits, encoded as a string on the wire.
+pub(crate) type BigInt = String;
+
 /// GitHub's `HTML` scalar: a pre-rendered HTML fragment transported as a
 /// string.
 #[expect(dead_code, reason = "consumed once HTML-bearing operations migrate")]
