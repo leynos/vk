@@ -24,6 +24,7 @@ chrono = { version = "0.4.42", features = ["serde", "clock"] }
 anyhow = "1.0"
 backon = "1.5.2"
 html5ever = "0.35.0"
+http = "1"
 markup5ever_rcdom = "0.35.0"
 # Tilde pin: octocrab has shipped breaking changes in patch releases
 # (upstream issue 899); widen only after review. The `retry` feature is
