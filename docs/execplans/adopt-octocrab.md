@@ -185,13 +185,13 @@ escalation, not workarounds.
   `docs/vk-design.md` and `docs/contents.md`; octocrab `~0.54` added to
   `Cargo.toml` (default features off; `default-client`, `rustls`, `rustls-ring`,
   `timeout`; `retry` excluded deliberately).
-- [ ] PR 1: octocrab REST resolve path (completed: `src/resolve/rest.rs`
-  reworked onto octocrab via the raw `_post` route with `RestClient::new` and
-  `post_reply` signatures and semantics preserved, `github_client` deleted,
-  `x-github-api-version` and `Accept` headers restored via builder `add_header`
-  with a direct `http` dependency, `tests/resolve.rs` green unchanged;
-  remaining: design-doc update, CodeRabbit review, PR opened). (2026-07-09
-  16:40Z)
+- [x] (2026-07-09 17:20Z) PR 1: octocrab REST resolve path complete.
+  `src/resolve/rest.rs` reworked onto octocrab via the raw `_post` route with
+  `RestClient::new` and `post_reply` signatures and semantics preserved,
+  `github_client` deleted, `x-github-api-version` and `Accept` headers restored
+  via builder `add_header` with a direct `http` dependency; `tests/resolve.rs`
+  green unchanged; design doc updated; all gates green; CodeRabbit review
+  completed with zero findings; draft pull request opened as leynos/vk#194.
 - [ ] PR 2: hyper transport inside `GraphQLClient`; reqwest removed;
   `cargo tree -i reqwest` fails; full suite green.
 - [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a
