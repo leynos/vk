@@ -42,19 +42,22 @@ impl Page {
     }
 
     fn body(&self) -> String {
+        // One review-thread page holding a single thread whose sole comment
+        // carries the scripted database id (`fullDatabaseId` is a BigInt
+        // scalar, transported as a string).
         self.end_cursor.map_or_else(
             || {
                 format!(
-                    r#"{{"data":{{"repository":{{"pullRequest":{{"reviewComments":{{"pageInfo":{{"endCursor":null,"hasNextPage":false}},"nodes":[{{"databaseId":{},"pullRequestReviewThread":{{"id":"{}"}}}}]}}}}}}}}}}"#,
-                    self.comment_id,
+                    r#"{{"data":{{"repository":{{"pullRequest":{{"reviewThreads":{{"pageInfo":{{"endCursor":null,"hasNextPage":false}},"nodes":[{{"id":"{}","comments":{{"nodes":[{{"fullDatabaseId":"{}"}}]}}}}]}}}}}}}}}}"#,
                     self.thread_id,
+                    self.comment_id,
                 )
             },
             |cursor| {
                 format!(
-                    r#"{{"data":{{"repository":{{"pullRequest":{{"reviewComments":{{"pageInfo":{{"endCursor":"{cursor}","hasNextPage":true}},"nodes":[{{"databaseId":{},"pullRequestReviewThread":{{"id":"{}"}}}}]}}}}}}}}}}"#,
-                    self.comment_id,
+                    r#"{{"data":{{"repository":{{"pullRequest":{{"reviewThreads":{{"pageInfo":{{"endCursor":"{cursor}","hasNextPage":true}},"nodes":[{{"id":"{}","comments":{{"nodes":[{{"fullDatabaseId":"{}"}}]}}}}]}}}}}}}}}}"#,
                     self.thread_id,
+                    self.comment_id,
                 )
             },
         )
@@ -172,7 +175,7 @@ async fn run_reply_flow(
         };
         let body = if req.uri().path() == "/graphql" {
             if gql_calls == 0 {
-                r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
+                r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"id":"t","comments":{"nodes":[{"fullDatabaseId":"1"}]}}]}}}}}"#
             } else {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
             }
@@ -317,7 +320,7 @@ async fn resolve_skips_empty_reply() {
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             if gql_calls == 0 {
-                r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
+                r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"id":"t","comments":{"nodes":[{"fullDatabaseId":"1"}]}}]}}}}}"#
             } else {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
             }

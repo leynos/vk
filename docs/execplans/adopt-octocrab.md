@@ -329,14 +329,31 @@ escalation, not workarounds.
   exported from `src/lib.rs`, so this is not a public API change. Date/Author:
   2026-07-09, PR 2 implementation.
 - Decision: in PR 3, a missing repository or issue in the Issue
-  operation's response now surfaces as `VkError::BadResponse`
-  ("issue #N not found") instead of the previous accidental
-  `BadResponseSerde` (the old hand-written struct made `issue`
-  non-optional, so a null issue failed deserialization). The generated
-  types make the nullability explicit, and no test pinned the old text;
-  the clearer semantic error is deliberate. A malformed present issue
-  still yields `BadResponseSerde` with the same path. Date/Author:
-  2026-07-09, PR 3 pilot migration.
+  operation's response now surfaces as `VkError::BadResponse` ("issue #N not
+  found") instead of the previous accidental `BadResponseSerde` (the old
+  hand-written struct made `issue` non-optional, so a null issue failed
+  deserialization). The generated types make the nullability explicit, and no
+  test pinned the old text; the clearer semantic error is deliberate. A
+  malformed present issue still yields `BadResponseSerde` with the same path.
+  Date/Author: 2026-07-09, PR 3 pilot migration.
+- Decision: the resolve thread-lookup query was redesigned onto
+  `repository.pullRequest.reviewThreads` because the field it previously
+  selected (`PullRequest.reviewComments`) does not exist in GitHub's published
+  schema — a latent production bug that only mocked tests kept green, exposed
+  by codegen validation. The new operation matches comments by `fullDatabaseId`
+  (the schema deprecates `databaseId`), carried as a `BigInt` string scalar.
+  Accepted limitation: a comment beyond the first 100 comments of one thread is
+  not found (same class of cap as the old flat query's page size). Date/Author:
+  2026-07-09, PR 3 implementation.
+- Decision: keep the string-based query surface (`run_query`,
+  `fetch_page`, `paginate_all`, `paginate`, `Query`) after the last production
+  consumer moved to typed operations. Rationale: it is a thin wrapper over the
+  shared `run_payload` core, remains fully exercised by the characterization
+  tests (retry counts, error text, transcript, cursor merging, page caps),
+  carries no lint debt, and a raw-query escape hatch is deliberately valuable
+  for the planned extraction into a shared crate. This supersedes the earlier
+  intent to port those tests and remove the surface. Date/Author: 2026-07-09,
+  PR 3 implementation.
 - Decision: record the programme in a new ADR,
   `docs/adr-001-github-api-client-modernisation.md`. Rationale: no ADRs exist;
   the bespoke-client choice was never recorded. AGENTS.md requires substantive
