@@ -3,81 +3,13 @@
 //! The module defines GraphQL query structures and pagination helpers so callers
 //! can fetch pull-request reviews and collate the latest review from each author.
 
-use graphql_client::GraphQLQuery;
-use serde::Deserialize;
-
-// `graphql_client` resolves the `DateTime` scalar in `reviews.graphql` to a
-// type of the same name in scope of the derive; the shared alias supplies it.
-// It is `chrono::DateTime<chrono::Utc>`, so it doubles as the field type for
-// `PullRequestReview::submitted_at`. The test module imports `chrono::DateTime`
-// explicitly, which shadows this glob-free alias where a generic `DateTime<Utc>`
-// is needed.
-use crate::api::CursorVariables;
-use crate::api::scalars::DateTime;
-use crate::{GraphQLClient, PageInfo, User, VkError, ref_parser::RepoInfo};
+use crate::{GraphQLClient, VkError, ref_parser::RepoInfo};
 use std::collections::{HashMap, hash_map::Entry};
 
-/// Typed `ReviewsQuery` operation: the paginated pull-request review listing.
-///
-/// The response is decoded into the hand-written [`ReviewData`] via
-/// [`GraphQLClient::paginate_operation_as`] rather than the generated
-/// `ResponseData` because the schema types `state` as the enum
-/// `PullRequestReviewState`, whereas the public [`PullRequestReview::state`] is
-/// a `String` that must preserve the wire value verbatim (including any future
-/// or unknown state). Decoding into the hand-written struct avoids an
-/// enum round-trip while still validating the query at compile time.
-#[derive(GraphQLQuery)]
-#[graphql(
-    schema_path = "graphql/schema.docs.graphql",
-    query_path = "graphql/reviews.graphql",
-    variables_derives = "Clone",
-    response_derives = "Debug, Clone, PartialEq"
-)]
-pub struct ReviewsQuery;
+mod wire;
 
-impl CursorVariables for reviews_query::Variables {
-    fn set_cursor(&mut self, cursor: Option<String>) {
-        self.cursor = cursor;
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct PullRequestReview {
-    pub body: String,
-    /// Timestamp when the review was formally submitted.
-    ///
-    /// This may be `None` when the timestamp is missing or unknown.
-    pub submitted_at: Option<DateTime>,
-    pub state: String,
-    pub author: Option<User>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReviewData {
-    repository: RepositoryReviews,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RepositoryReviews {
-    #[serde(rename = "pullRequest")]
-    pull_request: PullRequestReviews,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PullRequestReviews {
-    reviews: ReviewConnection,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ReviewConnection {
-    nodes: Vec<PullRequestReview>,
-    page_info: PageInfo,
-}
+pub use wire::{PullRequestReview, ReviewsQuery};
+use wire::{ReviewData, reviews_query};
 
 /// Retrieve all reviews for a pull request by paging through the GitHub
 /// GraphQL API.
