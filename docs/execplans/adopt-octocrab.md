@@ -4,7 +4,7 @@ This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
 and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
-Status: DRAFT
+Status: IN PROGRESS
 
 ## Purpose / big picture
 
@@ -178,9 +178,11 @@ escalation, not workarounds.
   REST; GraphQL keeps the bespoke client on a hyper transport with
   `graphql_client` codegen. `graphql_client` 0.16 researched and confirmed
   transport-agnostic.
-- [ ] Stage A: author ADR `docs/adr-001-github-api-client-modernisation.md`
-  covering all three decisions; link from `docs/vk-design.md` and
-  `docs/contents.md`.
+- [x] (2026-07-09 15:30Z) Stage A: ADR
+  `docs/adr-001-github-api-client-modernisation.md` authored and linked from
+  `docs/vk-design.md` and `docs/contents.md`; octocrab `~0.54` added to
+  `Cargo.toml` (default features off; `default-client`, `rustls`, `rustls-ring`,
+  `timeout`; `retry` excluded deliberately).
 - [ ] PR 1: octocrab REST resolve path
   (`--features unstable-rest-resolve`); `tests/resolve.rs` green; octocrab
   dependency added with pin rationale.
@@ -211,6 +213,13 @@ escalation, not workarounds.
   `src/api/client/mod.rs:126-134`. Impact: parity is the goal; do not silently
   change redaction behaviour during the migration. Flagged for a possible
   follow-up outside this plan.
+- Observation: octocrab 0.54 with `default-features = false` fails to
+  compile unless one of its JWT crypto features is enabled, even when app (JWT)
+  auth is unused. Evidence: `compile_error!` at octocrab's `src/lib.rs:304`
+  during the first gate run. Impact: the dependency carries `jwt-rust-crypto`
+  (pure-Rust, matching the ring/rustls posture) alongside `default-client`,
+  `rustls`, `rustls-ring`, and `timeout`; this is the final feature set
+  anticipated by the Interfaces section.
 - Observation: octocrab's own GraphQL example delegates query typing to
   `graphql_client`, confirming the two tools' division of labour matches this
   plan's (octocrab does not provide typed GraphQL itself). Evidence:
@@ -572,7 +581,10 @@ Dependencies to add:
 
     # PR 1. Tilde pin: octocrab has shipped breaking changes in patch
     # releases (upstream issue 899); widen only after review.
-    octocrab = { version = "~0.54", default-features = false, features = ["rustls", "rustls-ring", "timeout"] }
+    # jwt-rust-crypto is mandatory under default-features = false.
+    octocrab = { version = "~0.54", default-features = false, features = [
+        "default-client", "jwt-rust-crypto", "rustls", "rustls-ring", "timeout",
+    ] }
 
     # PR 2 (promoted from dev-dependencies; align versions with the lockfile)
     hyper = "1"
