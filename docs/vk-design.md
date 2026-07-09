@@ -79,6 +79,11 @@ even when multiple comments reference the same code.
 
 ## Architecture
 
+The modernisation of `vk`'s GitHub API access — octocrab for the REST resolve
+path, a hyper transport for the bespoke GraphQL client, and `graphql_client`
+codegen for typed queries — is governed by
+[ADR 001](adr-001-github-api-client-modernisation.md).
+
 The code centres on these printing helpers:
 
 <!-- mdformat off -->
