@@ -8,14 +8,62 @@
 //! CLI flag `--show-outdated`. Utilities for filtering threads by file
 //! path are also provided.
 
+use graphql_client::GraphQLQuery;
 use serde::Deserialize;
-use serde_json::{Map, json};
-use std::{borrow::Cow, collections::HashSet};
+use std::collections::HashSet;
 
+use crate::api::CursorVariables;
+// `graphql_client` resolves the `URI` scalar (the comment `url` field) to a
+// type of the same name in scope of the threads/comment derives; the shared
+// alias supplies it.
+use crate::api::scalars::URI;
 use crate::boxed::BoxedStr;
-use crate::graphql_queries::{COMMENT_QUERY, THREADS_QUERY};
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, VkError};
+
+/// Typed `ThreadsQuery` operation: the paginated review-thread listing.
+///
+/// The generated `ResponseData` would require `isOutdated` on every thread,
+/// but the documented behaviour is that threads missing `isOutdated` are
+/// treated as current (see `docs/vk-design.md`). The response is therefore
+/// decoded into the hand-written [`ThreadData`] via
+/// [`GraphQLClient::paginate_operation_as`], which keeps that `#[serde(default)]`
+/// leniency while still validating the query against the vendored schema.
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/schema.docs.graphql",
+    query_path = "graphql/review_threads.graphql",
+    variables_derives = "Clone",
+    response_derives = "Debug, Clone, PartialEq"
+)]
+pub struct ThreadsQuery;
+
+/// Typed `CommentQuery` operation: per-thread comment paging via `node(id:)`.
+///
+/// Decoded into the hand-written [`NodeWrapper<CommentNode>`] for consistency
+/// with [`ThreadsQuery`] (both populate the shared [`ReviewComment`]) and to
+/// avoid mapping the `Node` interface's inline-fragment enum; the fixtures
+/// would also satisfy the generated `ResponseData`.
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/schema.docs.graphql",
+    query_path = "graphql/review_threads.graphql",
+    variables_derives = "Clone",
+    response_derives = "Debug, Clone, PartialEq"
+)]
+pub struct CommentQuery;
+
+impl CursorVariables for threads_query::Variables {
+    fn set_cursor(&mut self, cursor: Option<String>) {
+        self.cursor = cursor;
+    }
+}
+
+impl CursorVariables for comment_query::Variables {
+    fn set_cursor(&mut self, cursor: Option<String>) {
+        self.cursor = cursor;
+    }
+}
 
 #[derive(Debug, Deserialize, Default)]
 struct ThreadData {
@@ -215,18 +263,26 @@ pub async fn fetch_review_threads_with_options(
         i32::try_from(number).is_ok(),
         "pull-request number {number} exceeds GraphQL Int (i32) range",
     );
-    let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
+    // GraphQL `Int` maps to `i64`; a pull-request number beyond `i32::MAX`
+    // cannot be valid, so range-check as `i32` before widening.
+    let number = i64::from(i32::try_from(number).map_err(|_| VkError::InvalidNumber)?);
 
-    let mut vars = Map::new();
-    vars.insert("owner".into(), json!(repo.owner.clone()));
-    vars.insert("name".into(), json!(repo.name.clone()));
-    vars.insert("number".into(), json!(number_i32));
+    let variables = threads_query::Variables {
+        owner: repo.owner.clone(),
+        name: repo.name.clone(),
+        number,
+        cursor: None,
+    };
 
     let threads = client
-        .paginate_all(THREADS_QUERY, vars, None, |data: ThreadData| {
-            let conn = data.repository.pull_request.review_threads;
-            Ok((conn.nodes, conn.page_info))
-        })
+        .paginate_operation_as::<ThreadsQuery, ThreadData, ReviewThread, _>(
+            variables,
+            None,
+            |data: ThreadData| {
+                let conn = data.repository.pull_request.review_threads;
+                Ok((conn.nodes, conn.page_info))
+            },
+        )
         .await?;
 
     let mut threads = if options.include_resolved {
@@ -269,13 +325,14 @@ async fn fetch_all_comments(
         page_info,
     } = initial;
     if let Some(cursor) = page_info.next_cursor()? {
-        let mut vars = Map::new();
-        vars.insert("id".into(), json!(thread_id));
+        let variables = comment_query::Variables {
+            id: thread_id.to_string(),
+            cursor: None,
+        };
         let more = client
-            .paginate_all(
-                COMMENT_QUERY,
-                vars,
-                Some(Cow::Borrowed(cursor)),
+            .paginate_operation_as::<CommentQuery, NodeWrapper<CommentNode>, ReviewComment, _>(
+                variables,
+                Some(cursor.to_string()),
                 |wrapper: NodeWrapper<CommentNode>| {
                     let conn = wrapper
                         .node

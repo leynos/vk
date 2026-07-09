@@ -323,6 +323,15 @@ escalation, not workarounds.
   errors) was removed along with its retry-classifier arm; `VkError` is not
   exported from `src/lib.rs`, so this is not a public API change. Date/Author:
   2026-07-09, PR 2 implementation.
+- Decision: in PR 3, a missing repository or issue in the Issue
+  operation's response now surfaces as `VkError::BadResponse`
+  ("issue #N not found") instead of the previous accidental
+  `BadResponseSerde` (the old hand-written struct made `issue`
+  non-optional, so a null issue failed deserialization). The generated
+  types make the nullability explicit, and no test pinned the old text;
+  the clearer semantic error is deliberate. A malformed present issue
+  still yields `BadResponseSerde` with the same path. Date/Author:
+  2026-07-09, PR 3 pilot migration.
 - Decision: record the programme in a new ADR,
   `docs/adr-001-github-api-client-modernisation.md`. Rationale: no ADRs exist;
   the bespoke-client choice was never recorded. AGENTS.md requires substantive

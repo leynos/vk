@@ -3,12 +3,43 @@
 //! The module defines GraphQL query structures and pagination helpers so callers
 //! can fetch pull-request reviews and collate the latest review from each author.
 
-use chrono::{DateTime, Utc};
+use graphql_client::GraphQLQuery;
 use serde::Deserialize;
-use serde_json::{Map, json};
 
+// `graphql_client` resolves the `DateTime` scalar in `reviews.graphql` to a
+// type of the same name in scope of the derive; the shared alias supplies it.
+// It is `chrono::DateTime<chrono::Utc>`, so it doubles as the field type for
+// `PullRequestReview::submitted_at`. The test module imports `chrono::DateTime`
+// explicitly, which shadows this glob-free alias where a generic `DateTime<Utc>`
+// is needed.
+use crate::api::CursorVariables;
+use crate::api::scalars::DateTime;
 use crate::{GraphQLClient, PageInfo, User, VkError, ref_parser::RepoInfo};
 use std::collections::{HashMap, hash_map::Entry};
+
+/// Typed `ReviewsQuery` operation: the paginated pull-request review listing.
+///
+/// The response is decoded into the hand-written [`ReviewData`] via
+/// [`GraphQLClient::paginate_operation_as`] rather than the generated
+/// `ResponseData` because the schema types `state` as the enum
+/// `PullRequestReviewState`, whereas the public [`PullRequestReview::state`] is
+/// a `String` that must preserve the wire value verbatim (including any future
+/// or unknown state). Decoding into the hand-written struct avoids an
+/// enum round-trip while still validating the query at compile time.
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/schema.docs.graphql",
+    query_path = "graphql/reviews.graphql",
+    variables_derives = "Clone",
+    response_derives = "Debug, Clone, PartialEq"
+)]
+pub struct ReviewsQuery;
+
+impl CursorVariables for reviews_query::Variables {
+    fn set_cursor(&mut self, cursor: Option<String>) {
+        self.cursor = cursor;
+    }
+}
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -17,7 +48,7 @@ pub struct PullRequestReview {
     /// Timestamp when the review was formally submitted.
     ///
     /// This may be `None` when the timestamp is missing or unknown.
-    pub submitted_at: Option<DateTime<Utc>>,
+    pub submitted_at: Option<DateTime>,
     pub state: String,
     pub author: Option<User>,
 }
@@ -47,24 +78,6 @@ struct ReviewConnection {
     nodes: Vec<PullRequestReview>,
     page_info: PageInfo,
 }
-
-const REVIEWS_QUERY: &str = r"
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          reviews(first: 100, after: $cursor) {
-            nodes {
-              body
-              state
-              submittedAt
-              author { login }
-            }
-            pageInfo { hasNextPage endCursor }
-          }
-        }
-      }
-    }
-";
 
 /// Retrieve all reviews for a pull request by paging through the GitHub
 /// GraphQL API.
@@ -101,17 +114,25 @@ pub async fn fetch_reviews(
         i32::try_from(number).is_ok(),
         "pull-request number {number} exceeds GraphQL Int (i32) range",
     );
-    let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
+    // GraphQL `Int` maps to `i64`; a pull-request number beyond `i32::MAX`
+    // cannot be valid, so range-check as `i32` before widening.
+    let number = i64::from(i32::try_from(number).map_err(|_| VkError::InvalidNumber)?);
 
-    let mut vars = Map::new();
-    vars.insert("owner".into(), json!(repo.owner.clone()));
-    vars.insert("name".into(), json!(repo.name.clone()));
-    vars.insert("number".into(), json!(number_i32));
+    let variables = reviews_query::Variables {
+        owner: repo.owner.clone(),
+        name: repo.name.clone(),
+        number,
+        cursor: None,
+    };
     client
-        .paginate_all(REVIEWS_QUERY, vars, None, |data: ReviewData| {
-            let conn = data.repository.pull_request.reviews;
-            Ok((conn.nodes, conn.page_info))
-        })
+        .paginate_operation_as::<ReviewsQuery, ReviewData, PullRequestReview, _>(
+            variables,
+            None,
+            |data: ReviewData| {
+                let conn = data.repository.pull_request.reviews;
+                Ok((conn.nodes, conn.page_info))
+            },
+        )
         .await
 }
 
@@ -203,7 +224,10 @@ mod tests {
     use crate::ref_parser::RepoInfo;
     use crate::test_utils::{TestClient, start_server};
     use crate::{GraphQLClient, User, VkError};
-    use chrono::{TimeZone, Utc};
+    // Explicit `chrono::DateTime` shadows the `scalars::DateTime` alias pulled
+    // in by `use super::*`, so the `DateTime<Utc>` case parameters below resolve
+    // to the generic chrono type.
+    use chrono::{DateTime, TimeZone, Utc};
     #[cfg(debug_assertions)]
     use futures::FutureExt;
     use rstest::rstest;

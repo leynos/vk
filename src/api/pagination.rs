@@ -2,6 +2,20 @@
 
 use crate::VkError;
 
+/// Set the pagination cursor on a generated `Variables` struct.
+///
+/// `graphql_client` renders each operation's variables as a typed struct, so
+/// the untyped cursor injection used by [`super::GraphQLClient::fetch_page`]
+/// (which mutates a JSON map) does not apply. Paginated operations implement
+/// this trait so [`super::GraphQLClient::paginate_operation`] can advance the
+/// cursor between pages without knowing the concrete variables type.
+///
+/// Passing `None` clears the cursor, requesting the first page.
+pub(crate) trait CursorVariables {
+    /// Replace the `after`/`cursor` variable with `cursor`.
+    fn set_cursor(&mut self, cursor: Option<String>);
+}
+
 /// Retrieve all pages from a cursor-based connection.
 ///
 /// The `fetch` closure is called repeatedly with the current cursor until the

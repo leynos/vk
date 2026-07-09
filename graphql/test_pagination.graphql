@@ -1,0 +1,13 @@
+query PageTestQuery($cursor: String) {
+  viewer {
+    repositories(first: 1, after: $cursor) {
+      nodes {
+        name
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
