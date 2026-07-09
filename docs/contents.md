@@ -27,6 +27,13 @@
 - [Documentation style guide](documentation-style-guide.md): Use this for
   spelling, formatting, and document-structure rules.
 
+## Architecture decision records
+
+- [ADR 001: GitHub API client modernisation](adr-001-github-api-client-modernisation.md):
+  Use this for the accepted decision to serve REST through octocrab, move the
+  bespoke GraphQL client onto a hyper transport, and add `graphql_client`
+  codegen for typed queries.
+
 ## Migration guides
 
 - [Ortho Config v0.6.0 migration guide](ortho-config-v0-6-0-migration-guide.md):
