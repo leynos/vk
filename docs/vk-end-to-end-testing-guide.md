@@ -76,6 +76,18 @@ integration (CI) pipeline.
 
 ### Architectural Overview of the Chosen Testing Stack
 
+> **Correction — how the harness actually works.** This guide was originally
+> written around a Man-in-the-Middle (MITM) proxy design, and much of the
+> discussion below still describes that aspirational approach. The implemented
+> harness does not proxy or intercept traffic and performs no TLS
+> interception. Instead, the helpers in `tests/utils/mod.rs` (`start_mitm`,
+> `start_mitm_capture`, and `vk_cmd`) start plain hyper loopback stub servers
+> and point the `vk` binary straight at them through the `GITHUB_GRAPHQL_URL`
+> and `GITHUB_API_URL` environment variables. The `third-wheel` crate is used
+> only for the hyper types it re-exports in some unit-test helpers; it is not
+> run as a proxy. Treat MITM-proxy passages that follow as background context
+> rather than a description of the current implementation.
+
 To achieve a hermetic and comprehensive E2E testing environment for `vk`, this
 guide employs a carefully selected "testing triad" of Rust crates. Each
 component serves a distinct and complementary purpose, working in concert to
@@ -88,16 +100,17 @@ provide a holistic solution.
   for success or failure and inspecting the contents of the standard error
   (`stderr`) stream for user-facing error messages.[^8]
 
-- `third-wheel`: This crate provides the critical network isolation layer. It
-  is a Man-in-the-Middle (MITM) proxy, written in Rust, that can be embedded
-  directly within the test harness.[^11] Its role is to intercept all outgoing
-  HTTP requests that
-
-  `vk` attempts to make to the GitHub GraphQL API. Instead of allowing these
-  requests to reach the internet, `third-wheel` captures them and returns
-  controlled, predefined responses from local fixture files. This makes the
-  tests completely independent of the network and ensures that the API's
-  behaviour is deterministic for every test run.
+- `third-wheel`: In the implemented harness this crate is not run as a proxy.
+  It is a Man-in-the-Middle (MITM) proxy, written in Rust,[^11] but the tests
+  use only the hyper types it re-exports in some unit-test helpers. Network
+  isolation is instead achieved by running plain hyper loopback stub servers
+  (see `tests/utils/mod.rs`) and pointing `vk` at them via the
+  `GITHUB_GRAPHQL_URL` and `GITHUB_API_URL` environment variables. Rather than
+  intercepting traffic, these stub servers receive the binary's requests
+  directly and return controlled, predefined responses. This makes the tests
+  completely independent of the network and ensures that the API's behaviour is
+  deterministic for every test run. The MITM-proxy descriptions that follow are
+  retained as background on the original design.
 
 - `insta`: This crate is the output verifier, specialized for snapshot testing.
   Given that `vk` produces complex, styled terminal output via `termimad`,
@@ -111,8 +124,8 @@ provide a holistic solution.
   approach is vastly superior to manual string assertions for validating rich
   UIs.[^14]
 
-Together, these three tools form a powerful and cohesive system. `assert_cmd`
-drives the application, `third-wheel` controls its external environment, and
+Together, these tools form a powerful and cohesive system. `assert_cmd` drives
+the application, loopback stub servers control its external environment, and
 `insta` verifies its final output. This architecture enables the creation of a
 test suite that is robust, maintainable, and provides the highest degree of
 confidence in the correctness of the `vk` CLI.
@@ -259,34 +272,51 @@ this test provides high confidence that:
 With this foundation in place, the next step is to introduce the complexity of
 API mocking.
 
-## Deterministic API Behaviour via Mocking with third-wheel
+## Deterministic API behaviour via loopback stub servers
+
+> **Note:** The implemented harness uses loopback stub servers, not a MITM
+> proxy. This section preserves the original MITM-proxy design as background;
+> the stub-server approach that the tests actually use is described at the end
+> of the section and in `tests/utils/mod.rs`.
 
 To create a truly hermetic test suite for a network-dependent application like
 `vk`, it is imperative to isolate it from the actual network. Making live calls
 to the GitHub API during tests is untenable; it would make the tests slow,
 flaky (dependent on network conditions and API availability), and would require
 valid authentication tokens, posing a security risk in CI environments. The
-solution is to mock the API.
+solution is to serve mock responses locally.
 
-### The Role of a Man-in-the-Middle (MITM) Proxy in Testing
+### Background: the role of a Man-in-the-Middle (MITM) proxy in testing
+
+The following describes the aspirational MITM-proxy design and is retained as
+background rather than a description of the implemented harness.
 
 While one could attempt to mock the `GraphQLClient` struct within `vk`'s source
 code, this approach has significant drawbacks for E2E testing. It would require
 modifying the application code specifically for testing (e.g., with
 `#[cfg(test)]` attributes), which moves away from true black-box testing.
 
-A superior approach is to use a Man-in-the-Middle (MITM) proxy. This technique
-involves placing a server *between* the application under test and the real API
+One design uses a Man-in-the-Middle (MITM) proxy. This technique involves
+placing a server *between* the application under test and the real API
 endpoint. This proxy transparently intercepts all outgoing network traffic. For
 testing, this allows us to capture requests intended for `api.github.com` and
 return a controlled, deterministic response without the request ever leaving
 the local machine. This method requires zero changes to the `vk` source code,
 preserving the integrity of the black-box testing model.
 
-The `third-wheel` crate is ideal for this purpose because it is a lightweight
-MITM proxy written in Rust.[^11] This allows it to be embedded and controlled
-programmatically from within the test code itself, eliminating the complexity
-of managing a separate, external proxy process.[^11]
+The `third-wheel` crate was originally chosen for this purpose because it is a
+lightweight MITM proxy written in Rust.[^11]
+
+### What the implemented harness does instead
+
+Rather than proxying traffic, the tests point `vk` directly at a local stub
+server. The helpers in `tests/utils/mod.rs` (`start_mitm` and
+`start_mitm_capture`, whose names are historical) bind a plain hyper server to
+a loopback port and dispatch each request to a shared response handler. The
+`vk_cmd` helper then sets the `GITHUB_GRAPHQL_URL` and `GITHUB_API_URL`
+environment variables so the binary sends its requests to that stub server. No
+proxying or TLS interception occurs, and `third-wheel` is present only for the
+hyper types it re-exports in some unit-test helpers.
 
 ### Step-by-Step: Embedding the third-wheel Mock Server
 
