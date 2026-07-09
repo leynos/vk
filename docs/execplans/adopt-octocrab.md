@@ -192,8 +192,12 @@ escalation, not workarounds.
   via builder `add_header` with a direct `http` dependency; `tests/resolve.rs`
   green unchanged; design doc updated; all gates green; CodeRabbit review
   completed with zero findings; draft pull request opened as leynos/vk#194.
-- [ ] PR 2: hyper transport inside `GraphQLClient`; reqwest removed;
-  `cargo tree -i reqwest` fails; full suite green.
+- [ ] PR 2 (completed: `src/api/client/transport.rs` added and
+  `GraphQLClient` delegating to it; reqwest removed from the graph entirely —
+  `cargo tree -i reqwest` finds nothing in normal, dev, and all-features
+  graphs; all gates green; remaining: design-doc update, CodeRabbit review, PR
+  opened) — original criteria: hyper transport inside `GraphQLClient`; reqwest
+  removed; `cargo tree -i reqwest` fails; full suite green.
 - [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a
   conversion layer, typed pagination; raw query constants deleted; full suite
   green.
@@ -304,6 +308,20 @@ escalation, not workarounds.
   documented behaviour in `docs/vk-design.md` and protects against GitHub
   changing its default API version; dropping it silently would contradict the
   design document. Date/Author: 2026-07-09, PR 1 implementation.
+- Decision: PR 2 transport details. The hyper connector uses webpki
+  roots with the ring provider, matching what reqwest's `rustls-tls` feature
+  expanded to (verified against reqwest 0.12.23's manifest); `https_or_http`
+  keeps the loopback test servers working. The total-request timeout is one
+  `tokio::time::timeout` spanning send plus body collection, mirroring reqwest's
+  `.timeout()`; a timeout maps to `VkError::RequestContext`, which
+  `should_retry` already classifies as transient. System proxies
+  (`HTTP(S)_PROXY`) and redirects are deliberately not supported by the new
+  transport — reqwest honoured both by default, but neither is used or tested
+  on the GraphQL path; both are documented in the transport module. The
+  binary-internal `VkError::Request` variant (constructed only from reqwest
+  errors) was removed along with its retry-classifier arm; `VkError` is not
+  exported from `src/lib.rs`, so this is not a public API change. Date/Author:
+  2026-07-09, PR 2 implementation.
 - Decision: record the programme in a new ADR,
   `docs/adr-001-github-api-client-modernisation.md`. Rationale: no ADRs exist;
   the bespoke-client choice was never recorded. AGENTS.md requires substantive

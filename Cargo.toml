@@ -10,7 +10,6 @@ repository = "https://github.com/leynos/vk"
 
 [dependencies]
 clap = { version = "4.5.47", features = ["derive"] }
-reqwest = { version = "0.12.23", features = ["json", "rustls-tls"] }
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
 serde_path_to_error = "0.1.17"
@@ -25,6 +24,29 @@ anyhow = "1.0"
 backon = "1.5.2"
 html5ever = "0.35.0"
 http = "1"
+# GraphQL transport stack (replaces reqwest). `hyper-util`'s legacy pooled
+# client over a `hyper-rustls` connector reproduces the connection pooling and
+# rustls TLS that reqwest supplied. The `server` feature on `hyper-util` and
+# the plain `hyper`/`http-body-util` crates are also exercised by the
+# integration tests, so a single runtime entry covers both uses.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = [
+    "client-legacy",
+    "http1",
+    "tokio",
+    "server",
+] }
+# webpki-roots + ring matches reqwest's `rustls-tls` feature, which expands to
+# `rustls-tls-webpki-roots` (Mozilla's bundled roots) with the ring provider;
+# see docs/adr-001-github-api-client-modernisation.md. Defaults are disabled to
+# keep aws-lc-rs out of the graph so ring remains the sole crypto provider.
+hyper-rustls = { version = "0.27", default-features = false, features = [
+    "ring",
+    "webpki-roots",
+    "http1",
+    "tls12",
+] }
+http-body-util = "0.1"
 markup5ever_rcdom = "0.35.0"
 # Tilde pin: octocrab has shipped breaking changes in patch releases
 # (upstream issue 899); widen only after review. The `retry` feature is
@@ -59,9 +81,6 @@ tokio = { version = "1.36.0", features = ["full"] }
 serde_json = "1.0"
 predicates = "3.1"
 mockall = "0.13.1"
-hyper = "1.6.0"
-hyper-util = { version = "0.1.17", features = ["server", "http1", "tokio"] }
-http-body-util = "0.1"
 bytes = "1"
 futures = "0.3"
 insta = { version = "1.43", features = ["redactions"] }

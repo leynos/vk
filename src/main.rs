@@ -100,8 +100,6 @@ type SharedConfigError = Arc<ortho_config::OrthoError>;
 pub enum VkError {
     #[error("unable to determine repository")]
     RepoNotFound,
-    #[error("request failed: {0}")]
-    Request(#[from] Box<reqwest::Error>),
     #[error("request failed when running {context}: {source}")]
     RequestContext {
         context: Box<str>,
@@ -160,7 +158,6 @@ macro_rules! boxed_error_from {
     };
 }
 
-boxed_error_from!(reqwest::Error, Request);
 boxed_error_from!(std::io::Error, Io);
 
 impl From<ortho_config::OrthoError> for VkError {
