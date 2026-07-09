@@ -314,6 +314,29 @@ escalation, not workarounds.
   documented behaviour in `docs/vk-design.md` and protects against GitHub
   changing its default API version; dropping it silently would contradict the
   design document. Date/Author: 2026-07-09, PR 1 implementation.
+- Decision: PR 2 transport details. The hyper connector uses webpki
+  roots with the ring provider, matching what reqwest's `rustls-tls` feature
+  expanded to (verified against reqwest 0.12.23's manifest); `https_or_http`
+  keeps the loopback test servers working. The total-request timeout is one
+  `tokio::time::timeout` spanning send plus body collection, mirroring reqwest's
+  `.timeout()`; a timeout maps to `VkError::RequestContext`, which
+  `should_retry` already classifies as transient. System proxies
+  (`HTTP(S)_PROXY`) and redirects are deliberately not supported by the new
+  transport — reqwest honoured both by default, but neither is used or tested
+  on the GraphQL path; both are documented in the transport module. The
+  binary-internal `VkError::Request` variant (constructed only from reqwest
+  errors) was removed along with its retry-classifier arm; `VkError` is not
+  exported from `src/lib.rs`, so this is not a public API change. Date/Author:
+  2026-07-09, PR 2 implementation.
+- Decision: in PR 3, a missing repository or issue in the Issue
+  operation's response now surfaces as `VkError::BadResponse`
+  ("issue #N not found") instead of the previous accidental
+  `BadResponseSerde` (the old hand-written struct made `issue`
+  non-optional, so a null issue failed deserialization). The generated
+  types make the nullability explicit, and no test pinned the old text;
+  the clearer semantic error is deliberate. A malformed present issue
+  still yields `BadResponseSerde` with the same path. Date/Author:
+  2026-07-09, PR 3 pilot migration.
 - Decision: record the programme in a new ADR,
   `docs/adr-001-github-api-client-modernisation.md`. Rationale: no ADRs exist;
   the bespoke-client choice was never recorded. AGENTS.md requires substantive

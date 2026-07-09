@@ -1,0 +1,61 @@
+query ThreadsQuery($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          comments(first: 100) {
+            nodes {
+              body
+              diffHunk
+              originalPosition
+              position
+              path
+              url
+              author {
+                __typename
+                login
+              }
+            }
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}
+
+query CommentQuery($id: ID!, $cursor: String) {
+  node(id: $id) {
+    __typename
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $cursor) {
+        nodes {
+          body
+          diffHunk
+          originalPosition
+          position
+          path
+          url
+          author {
+            __typename
+            login
+          }
+        }
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+      }
+    }
+  }
+}
