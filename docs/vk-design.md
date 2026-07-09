@@ -154,6 +154,14 @@ merges an optional cursor into a variables map and rejects non-object input
 upfront. The `paginate_all` helper loops until `PageInfo` indicates completion,
 discarding any items fetched before an error occurs.
 
+Requests are sent by a private hyper-based transport
+([src/api/client/transport.rs](../src/api/client/transport.rs)) that uses
+rustls with Mozilla's webpki roots; this replaces the former `reqwest` client.
+The total-request timeout spans both sending the request and collecting the
+response body. Unlike the previous client, this transport supports neither
+system proxies (`HTTP(S)_PROXY`) nor HTTP redirects, neither of which the
+GraphQL path uses. These transport choices are governed by ADR 001.
+
 ## Utility
 
 Splitting the printing logic into reusable `write_*` functions enables testing
