@@ -106,9 +106,6 @@ pub enum VkError {
     /// The repository could not be determined from the available references.
     #[error("unable to determine repository")]
     RepoNotFound,
-    /// A GitHub request failed before a response could be handled.
-    #[error("request failed: {0}")]
-    Request(#[from] Box<reqwest::Error>),
     /// A GitHub request failed while running the named operation.
     #[error("request failed when running {context}: {source}")]
     RequestContext {
@@ -206,7 +203,6 @@ macro_rules! boxed_error_from {
     };
 }
 
-boxed_error_from!(reqwest::Error, Request);
 boxed_error_from!(std::io::Error, Io);
 
 impl From<ortho_config::OrthoError> for VkError {
