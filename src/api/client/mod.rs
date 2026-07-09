@@ -12,8 +12,6 @@ use backon::Retryable;
 // submodule, which would otherwise shadow it.
 use ::http::header::HeaderMap;
 use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
-use std::borrow::Cow;
 use tokio::time::sleep;
 use tracing::warn;
 
@@ -22,15 +20,14 @@ use crate::boxed::BoxedStr;
 use vk::environment;
 
 use self::helpers::{
-    BODY_SNIPPET_LEN, VALUE_SNIPPET_LEN, build_headers, handle_graphql_errors, operation_name,
-    snippet,
+    BODY_SNIPPET_LEN, VALUE_SNIPPET_LEN, build_headers, handle_graphql_errors, snippet,
 };
 use self::http::HttpResponse;
 use self::transport::Transport;
 use self::types::GraphQLResponse;
 use super::retry::{RetryConfig, build_retry_builder, should_retry};
 
-pub use self::types::{Endpoint, Query, Token};
+pub use self::types::{Endpoint, Token};
 
 #[cfg(test)]
 mod tests;
@@ -214,9 +211,9 @@ impl GraphQLClient {
     /// Send `payload` for `operation`, applying the shared retry loop and
     /// deserializing the successful response into `T`.
     ///
-    /// This is the common core behind [`run_query`](Self::run_query) and
-    /// [`run_operation`](Self::run_operation): both build the request envelope
-    /// (by hand or via `graphql_client` codegen) and then delegate the POST,
+    /// This is the common core behind [`run_operation`](Self::run_operation)
+    /// and [`run_operation_as`](Self::run_operation_as): both build the request
+    /// envelope via `graphql_client` codegen and then delegate the POST,
     /// jittered-backoff retry, transcript logging, and `serde_path_to_error`
     /// diagnostics to this helper so the machinery is defined once.
     ///
@@ -244,36 +241,14 @@ impl GraphQLClient {
         .await
     }
 
-    /// Execute a GraphQL query using this client.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`VkError`] if the request fails or the response cannot be
-    /// deserialized.
-    pub async fn run_query<V, T>(&self, query: impl Into<Query>, variables: V) -> Result<T, VkError>
-    where
-        V: serde::Serialize,
-        T: DeserializeOwned,
-    {
-        let query = query.into();
-        let op_name = operation_name(query.as_ref());
-        let operation = op_name.map_or_else(|| snippet(query.as_ref(), 64), str::to_string);
-        let mut payload = json!({ "query": query.as_ref(), "variables": &variables });
-        if let (Some(_), Some(obj)) = (op_name, payload.as_object_mut()) {
-            obj.insert("operationName".into(), json!(operation.clone()));
-        }
-        self.run_payload::<T>(&payload, &operation).await
-    }
-
     /// Execute a `graphql_client` codegen'd GraphQL operation using this client.
     ///
-    /// The operation's `QueryBody` serializes to the same
-    /// `{"query", "variables", "operationName"}` envelope that
-    /// [`run_query`](Self::run_query) builds by hand, and the codegen'd
-    /// operation name replaces the runtime string-sniffing of `run_query`. The
-    /// request then shares the same POST, retry, transcript, and
-    /// deserialization core, so behaviour (retries, error text, transcript
-    /// shape) is identical to the string-based path.
+    /// The operation's `QueryBody` serializes to the standard
+    /// `{"query", "variables", "operationName"}` envelope, and the request is
+    /// dispatched through the shared POST, retry, transcript, and
+    /// deserialization core ([`run_payload`](Self::run_payload)), so behaviour
+    /// (retries, error text, transcript shape) matches the retired string-based
+    /// path exactly.
     ///
     /// # Errors
     ///
@@ -333,60 +308,5 @@ impl GraphQLClient {
             VkError::BadResponse(format!("serialising {operation} variables: {e}").boxed())
         })?;
         self.run_payload::<T>(&payload, &operation).await
-    }
-
-    /// Execute a GraphQL query and merge an optional cursor into the variables.
-    ///
-    /// This wraps [`run_query`], injecting the `cursor` field when provided so
-    /// callers need only supply the base variables for paginated queries. If the
-    /// `variables` already contain a `cursor` key it will be overwritten.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`VkError::BadResponse`] if `variables` serialize to a non-object
-    /// value, or propagates any error from the underlying request.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// use serde_json::{Map, Value, json};
-    /// use vk::api::GraphQLClient;
-    /// # async fn run(client: GraphQLClient) -> Result<(), vk::VkError> {
-    /// let mut vars = Map::new();
-    /// vars.insert("id".to_string(), json!(1));
-    /// let data: Value = client.fetch_page("query", None, vars).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    /// ```no_run
-    /// use serde_json::json;
-    /// use vk::api::GraphQLClient;
-    /// # async fn run(client: GraphQLClient) {
-    ///     let err = client
-    ///         .fetch_page::<serde_json::Value, _>("query", None, json!(null))
-    ///         .await;
-    ///     assert!(err.is_err());
-    /// # }
-    /// ```
-    pub async fn fetch_page<T, V>(
-        &self,
-        query: impl Into<Query>,
-        cursor: Option<Cow<'_, str>>,
-        variables: V,
-    ) -> Result<T, VkError>
-    where
-        V: serde::Serialize,
-        T: DeserializeOwned,
-    {
-        let query = query.into();
-        let mut variables = serde_json::to_value(variables).map_err(|e| {
-            VkError::BadResponse(format!("serialising fetch_page variables: {e}").boxed())
-        })?;
-        let obj = variables.as_object_mut().ok_or_else(|| {
-            VkError::BadResponse("variables for fetch_page must be a JSON object".boxed())
-        })?;
-        if let Some(c) = cursor {
-            obj.insert("cursor".into(), Value::String(c.into_owned()));
-        }
-        self.run_query(query, variables).await
     }
 }

@@ -354,6 +354,21 @@ escalation, not workarounds.
   for the planned extraction into a shared crate. This supersedes the earlier
   intent to port those tests and remove the surface. Date/Author: 2026-07-09,
   PR 3 implementation.
+- Decision (supersedes the previous entry): the string-based query
+  surface (`run_query`, `fetch_page`, `paginate_all`, `paginate`, `Query`) IS
+  removed after all. The earlier "keep as escape hatch" entry was recorded
+  while the implementation agent appeared stalled; the agent in fact completed
+  the sanctioned removal, porting every characterization assertion (retry
+  counts on missing-data/5xx/HTML bodies, the four error-detail cases,
+  cursor-in-request capture) to the shared `run_payload` core and the typed
+  pagination path with identical assertions, so coverage is preserved with a
+  smaller surface. `fetch_page_rejects_non_object_variables` was retired, not
+  ported: typed `Variables` structs are objects by construction, so the guarded
+  failure mode no longer exists. A raw-query escape hatch can be reintroduced
+  at shared-crate extraction time if a consumer needs it. The commit message of
+  "Redesign resolve thread lookup onto reviewThreads" states the surface was
+  retained — this entry corrects the record. Date/Author: 2026-07-09, PR 3
+  implementation.
 - Decision: record the programme in a new ADR,
   `docs/adr-001-github-api-client-modernisation.md`. Rationale: no ADRs exist;
   the bespoke-client choice was never recorded. AGENTS.md requires substantive
