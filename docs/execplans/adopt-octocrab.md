@@ -199,11 +199,21 @@ escalation, not workarounds.
   and e2e testing guide corrected; all gates green; CodeRabbit review completed
   with zero findings; draft pull request opened as leynos/vk#195 (stacked on PR
   1).
-- [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a
-  conversion layer, typed pagination; raw query constants deleted; full suite
-  green.
-- [ ] Documentation pass per PR (`docs/vk-design.md` and the e2e guide
-  correction in whichever PR touches it first); retrospective completed.
+- [x] (2026-07-09 21:10Z) PR 3 implementation complete: schema vendored
+  (72,911 lines); all six operations in named `.graphql` documents;
+  `run_operation`/`run_operation_as`/`paginate_operation_as` plus the
+  `CursorVariables` trait (red-green tested); domain structs preserved behind
+  conversions; `src/graphql_queries.rs` and the string query surface deleted
+  with characterization tests ported; the resolve thread-lookup latent bug fixed
+  (`reviewThreads`/`fullDatabaseId`); wire-submodule split restores the
+  400-line limit; compile-fail demonstrated
+  (`No field named titleTYPO on Issue`) and reverted; clean build 17 s versus
+  the 46 s baseline (well within tolerance); full suite green.
+- [x] (2026-07-09 21:20Z) Documentation pass complete across all PRs:
+  `docs/vk-design.md` networking and resolve sections rewritten for the typed
+  path, e2e guide MITM correction (PR 2), `docs/repository-layout.md` gains the
+  `graphql/` entry; users' guide reviewed, no change needed. Remaining: PR 3
+  CodeRabbit review and draft PR.
 
 ## Surprises & discoveries
 
@@ -374,7 +384,27 @@ escalation, not workarounds.
 
 ## Outcomes & retrospective
 
-To be completed as milestones land and at the end of the work.
+Interim (2026-07-09, all three PRs implemented; PRs 1 and 2 reviewed clean by
+CodeRabbit; PR 3 review pending):
+
+- The programme delivered its purpose: one HTTP stack (hyper/rustls),
+  octocrab serving REST, and compile-time-checked GraphQL, with the observable
+  behaviour pinned by the suite preserved throughout.
+- Biggest surprise: codegen validation exposed that the resolve
+  thread-lookup query selected a field (`PullRequest.reviewComments`) that does
+  not exist in GitHub's schema — `vk resolve` could never have worked against
+  the live API. The compile-time checking paid for itself before the PR even
+  landed.
+- The `_as` escape hatch (schema-checked query, hand-written
+  deserialization target) proved the pivotal design move: it let every lenient
+  documented behaviour survive codegen strictness and kept serde error paths
+  byte-identical.
+- Lesson: octocrab's semver-loose history and hidden feature coupling
+  (`jwt-rust-crypto` mandatory under `default-features = false`) justify the
+  tilde pin twice over.
+- Lesson (process): two construction agents racing one file set caused
+  formatting/lint churn; sequencing construction strictly would have saved
+  several gate iterations.
 
 ## Context and orientation
 
@@ -656,7 +686,23 @@ outside it are `tee` logs under `/tmp`.
 
 ## Artifacts and notes
 
-Record here, as milestones complete: the final octocrab feature set, the
+Recorded evidence:
+
+- octocrab final feature set: `default-client`, `jwt-rust-crypto`,
+  `rustls`, `rustls-ring`, `timeout` (no `retry`).
+- Clean `cargo build --all-features`: 46 s pre-codegen baseline, 17 s
+  after PR 3 on the same machine (variance dominated by cache warmth; the
+  schema-parsing derives are immaterial).
+- Compile-fail evidence: a deliberate `titleTYPO` field in
+  `graphql/issue.graphql` fails `cargo check` with "No field named titleTYPO on
+  Issue"; reverted.
+- Transcript parity: `cargo test --test e2e -- --ignored e2e_pr_42`
+  passes on the hyper transport and the typed path (replay is sequential,
+  insensitive to query text).
+- reqwest absence: `cargo tree -i reqwest` reports the package is not
+  found in normal, dev, and all-features graphs.
+
+Also to record as milestones complete: the final octocrab feature set, the
 `cargo tree -d` duplicate report, the clean-build baseline and post-PR 3 delta,
 a sample transcript line proving format parity, and the closing test counts.
 

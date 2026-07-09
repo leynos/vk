@@ -13,6 +13,7 @@ listing.
 ├── .github/
 ├── docs/
 │   └── execplans/
+├── graphql/
 ├── src/
 │   ├── api/
 │   ├── branch_pr/
@@ -42,6 +43,9 @@ _Figure 1: Compact repository tree for contributor orientation._
   documentation.
 - `docs/execplans/`: Living implementation plans that record progress,
   decisions, and handoff context.
+- `graphql/`: Vendored GitHub GraphQL schema and the operation documents that
+  `graphql_client` codegen validates against it at compile time. See
+  [graphql/README.md](../graphql/README.md).
 - `src/`: Rust source code for the `vk` library and command-line application.
 - `src/api/`: GitHub API access, pagination, and retry behaviour.
 - `src/branch_pr/`: Pull request discovery for the current Git branch.
