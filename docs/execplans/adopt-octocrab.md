@@ -104,10 +104,13 @@ escalation, not workarounds.
   methods to `GraphQLClient` and deprecate (not remove) the string-based
   `run_query`/`fetch_page`/`paginate_all` surface if call-site migration leaves
   them unused.
-- Dependencies: this plan pre-approves `octocrab` (PR 1), promotion of
-  `hyper`, `hyper-util`, `hyper-rustls`, and `http-body-util` from
-  dev-dependencies to runtime dependencies (PR 2), and `graphql_client` (PR 3).
-  Any further new direct dependency requires escalation.
+- Dependencies: this plan pre-approves `octocrab` and `http` (PR 1 —
+  `http` is already in the tree; `reqwest::header` re-exports it, and
+  octocrab's `add_header` and PR 2's transport interface both need it
+  directly), promotion of `hyper`, `hyper-util`, `hyper-rustls`, and
+  `http-body-util` from dev-dependencies to runtime dependencies (PR 2),
+  and `graphql_client` (PR 3). Any further new direct dependency requires
+  escalation.
 - Behaviour: if preserving an asserted behaviour (error text, transcript
   format, header set, retry counts) proves impossible, stop and present
   options; do not weaken tests to fit.
@@ -183,9 +186,13 @@ escalation, not workarounds.
   `docs/vk-design.md` and `docs/contents.md`; octocrab `~0.54` added to
   `Cargo.toml` (default features off; `default-client`, `rustls`, `rustls-ring`,
   `timeout`; `retry` excluded deliberately).
-- [ ] PR 1: octocrab REST resolve path
-  (`--features unstable-rest-resolve`); `tests/resolve.rs` green; octocrab
-  dependency added with pin rationale.
+- [ ] PR 1: octocrab REST resolve path (completed: `src/resolve/rest.rs`
+  reworked onto octocrab via the raw `_post` route with `RestClient::new`
+  and `post_reply` signatures and semantics preserved, `github_client`
+  deleted, `x-github-api-version` and `Accept` headers restored via
+  builder `add_header` with a direct `http` dependency,
+  `tests/resolve.rs` green unchanged; remaining: design-doc update,
+  CodeRabbit review, PR opened). (2026-07-09 16:40Z)
 - [ ] PR 2: hyper transport inside `GraphQLClient`; reqwest removed;
   `cargo tree -i reqwest` fails; full suite green.
 - [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a
@@ -279,6 +286,27 @@ escalation, not workarounds.
   at the edges of the transport and typed modules rather than woven through
   them. Extraction itself is out of scope for this plan. Date/Author:
   2026-07-09, follow-up review discussion.
+- Decision: PR 1 uses octocrab's raw `_post` route for the reply, not the
+  typed `pulls(...).comment(id).reply(...)` route. Rationale: the typed
+  route funnels non-2xx responses through octocrab's `Error::GitHub`,
+  whose display carries neither the request path nor the HTTP status code
+  that `tests/resolve.rs` asserts in stderr; `_post` returns the raw
+  `http::Response`, keeping the 404-non-fatal / other-non-2xx-fatal
+  mapping and error text in `vk`'s hands. Timeout mapping: reqwest's
+  single total-request timeout becomes octocrab's read plus write
+  timeouts (closest analogue; octocrab has no total-request timeout), and
+  `connect_timeout` maps directly. Date/Author: 2026-07-09, PR 1
+  implementation.
+- Decision: in PR 1, keep octocrab's own `User-Agent: octocrab` on the
+  REST path (no test asserts the REST user agent, and octocrab hard-codes
+  its value first in the header list), but restore the
+  `x-github-api-version: 2022-11-28` pin and the
+  `Accept: application/vnd.github+json` header via the builder's
+  `add_header`, using a direct `http` dependency. Rationale: the
+  API-version pin is documented behaviour in `docs/vk-design.md` and
+  protects against GitHub changing its default API version; dropping it
+  silently would contradict the design document. Date/Author: 2026-07-09,
+  PR 1 implementation.
 - Decision: record the programme in a new ADR,
   `docs/adr-001-github-api-client-modernisation.md`. Rationale: no ADRs exist;
   the bespoke-client choice was never recorded. AGENTS.md requires substantive
