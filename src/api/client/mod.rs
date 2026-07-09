@@ -4,10 +4,13 @@ mod helpers;
 mod http;
 mod pagination;
 mod transcript;
+mod transport;
 mod types;
 
 use backon::Retryable;
-use reqwest::header::HeaderMap;
+// `::http` disambiguates the extern crate from this module's own `http`
+// submodule, which would otherwise shadow it.
+use ::http::header::HeaderMap;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::borrow::Cow;
@@ -20,9 +23,10 @@ use vk::environment;
 
 use self::helpers::{
     BODY_SNIPPET_LEN, VALUE_SNIPPET_LEN, build_headers, handle_graphql_errors, operation_name,
-    payload_snippet, snippet,
+    snippet,
 };
 use self::http::HttpResponse;
+use self::transport::Transport;
 use self::types::GraphQLResponse;
 use super::retry::{RetryConfig, build_retry_builder, should_retry};
 
@@ -36,7 +40,7 @@ mod tests;
 /// The client handles authentication headers and optional request
 /// transcription for debugging.
 pub struct GraphQLClient {
-    client: reqwest::Client,
+    transport: Transport,
     headers: HeaderMap,
     endpoint: Endpoint,
     transcript: Option<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>,
@@ -104,7 +108,7 @@ impl GraphQLClient {
             .map_err(|e| VkError::Io(Box::new(e)))?;
         let headers = build_headers(&token)?;
         Ok(Self {
-            client: reqwest::Client::new(),
+            transport: Transport::new()?,
             headers,
             endpoint,
             transcript,
@@ -123,50 +127,29 @@ impl GraphQLClient {
         payload: &serde_json::Value,
         operation: &str,
     ) -> Result<HttpResponse, VkError> {
-        let snip = payload_snippet(payload);
-        let make_ctx = |status: Option<u16>| {
-            let base = format!("operation {operation}; {snip}");
-            match status {
-                Some(s) => format!("{base}; status {s}"),
-                None => base,
-            }
-            .boxed()
-        };
-
-        let response = self
-            .client
-            .post(self.endpoint.as_str())
-            .headers(self.headers.clone())
-            .json(payload)
-            .timeout(self.retry.request_timeout)
-            .send()
-            .await
-            .map_err(|e| VkError::RequestContext {
-                context: make_ctx(None),
-                source: e.into(),
-            })?;
-        let status = response.status();
-        let status_u16 = status.as_u16();
-        let status_err = response.error_for_status_ref().err();
-        let body = response.text().await.map_err(|e| VkError::RequestContext {
-            context: make_ctx(Some(status_u16)),
-            source: e.into(),
-        })?;
-        let resp = HttpResponse {
-            status: status_u16,
-            body,
-        };
+        let resp = self
+            .transport
+            .post_json(
+                &self.endpoint,
+                &self.headers,
+                payload,
+                self.retry.request_timeout,
+            )
+            .await?;
         self.log_transcript(payload, operation, &resp);
-        if !(200..300).contains(&status_u16) {
-            let source: Box<dyn std::error::Error + Send + Sync> = match status_err {
-                Some(e) => Box::new(e),
-                None => Box::new(std::io::Error::other(format!(
-                    "unexpected status {status_u16} without reqwest error"
-                ))),
-            };
+        if !(200..300).contains(&resp.status) {
+            // The transport surfaces every completed HTTP response, so a
+            // non-2xx status is classified here. reqwest gave this a
+            // status-specific source error via `error_for_status_ref`; an
+            // `io::Error` carrying the same status reproduces the displayed
+            // information without the reqwest dependency.
+            let source: Box<dyn std::error::Error + Send + Sync> = Box::new(std::io::Error::other(
+                format!("HTTP status {}", resp.status),
+            ));
             return Err(VkError::RequestContext {
                 context: format!(
-                    "HTTP status {status_u16} | body snippet: {}",
+                    "HTTP status {} | body snippet: {}",
+                    resp.status,
                     snippet(&resp.body, BODY_SNIPPET_LEN)
                 )
                 .boxed(),

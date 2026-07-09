@@ -197,8 +197,12 @@ escalation, not workarounds.
   headers, and status handling, and reconciled the documentation findings.
 - [x] (2026-08-03) Documentation review follow-up corrected the dependency
   record, documentation index, Oxford spelling, and REST ownership guidance.
-- [ ] PR 2: hyper transport inside `GraphQLClient`; reqwest removed;
-  `cargo tree -i reqwest` fails; full suite green.
+- [ ] PR 2 (completed: `src/api/client/transport.rs` added and
+  `GraphQLClient` delegating to it; reqwest removed from the graph entirely —
+  `cargo tree -i reqwest` finds nothing in normal, dev, and all-features
+  graphs; all gates green; remaining: design-doc update, CodeRabbit review, PR
+  opened) — original criteria: hyper transport inside `GraphQLClient`; reqwest
+  removed; `cargo tree -i reqwest` fails; full suite green.
 - [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a
   conversion layer, typed pagination; raw query constants deleted; full suite
   green.
