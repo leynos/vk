@@ -28,19 +28,21 @@ jobs:
           format: lcov
           use-cargo-nextest: 'false'
           with-ratchet: 'true'
-      # The `mode: check` step is deliberately not wired in yet: CodeScene
-      # project 70277 has no coverage-gates configuration, so
-      # `cs-coverage check` would fail every run with "HTTP call
-      # succeeded, but the received project-config isn't valid. Lacks the
-      # gates configuration." — a CodeScene-side per-project setting, not
-      # a CI defect (see ddlint#287 and chutoro#156, which hit the
-      # byte-identical error). Add the check step in a fast-follow PR
-      # once coverage-main.yml has uploaded to main at least once and the
-      # gate is confirmed to resolve, or once CodeScene confirms the
-      # project's coverage gate is enabled. `cs-coverage upload` is not
-      # run here either: CodeScene only accepts uploads for branches it
-      # analyses (main), so uploading from a pull-request head fails;
-      # main-branch coverage is uploaded by coverage-main.yml instead.
+      # `cs-coverage upload` is not run here: CodeScene only accepts
+      # uploads for branches it analyses (main), so uploading from a
+      # pull-request head fails; main-branch coverage is uploaded by
+      # coverage-main.yml instead.
+      - name: Check coverage against CodeScene gates
+        env:
+          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
+        if: env.CS_ACCESS_TOKEN != '' && github.event_name == 'pull_request'
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@927edd45ae77be4251a8a18ca9eb5613a2e32cbd
+        with:
+          format: lcov
+          mode: check
+          project-url: https://api.codescene.io/v2/projects/70277
+          access-token: ${{ env.CS_ACCESS_TOKEN }}
+          installer-checksum: ${{ vars.CODESCENE_CLI_SHA256 }}
 
   # Exercise the experimental REST-based resolve path, ensuring lints and tests
   # pass when the `unstable-rest-resolve` feature is enabled.
