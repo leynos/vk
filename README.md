@@ -1,5 +1,8 @@
 # View Komments (vk)
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](
+https://deepwiki.com/leynos/vk)
+
 `vk` stands for **View Komments** because `vc` was already taken back in the
 1970s, and no one argues with a greybeard. This command line tool fetches
 unresolved GitHub code review comments for a pull request and displays them
