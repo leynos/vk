@@ -1,0 +1,15 @@
+query PrForBranchQuery($owner: String!, $name: String!, $headRef: String!) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(headRefName: $headRef, first: 10, states: [OPEN, MERGED]) {
+      nodes {
+        number
+        headRepository {
+          owner {
+            __typename
+            login
+          }
+        }
+      }
+    }
+  }
+}

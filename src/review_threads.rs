@@ -8,132 +8,18 @@
 //! CLI flag `--show-outdated`. Utilities for filtering threads by file
 //! path are also provided.
 
-use serde::Deserialize;
-use serde_json::{Map, json};
-use std::{borrow::Cow, collections::HashSet};
+use std::collections::HashSet;
 
 use crate::boxed::BoxedStr;
-use crate::graphql_queries::{COMMENT_QUERY, THREADS_QUERY};
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, VkError};
 
-#[derive(Debug, Deserialize, Default)]
-struct ThreadData {
-    repository: Repository,
-}
+mod wire;
 
-#[derive(Debug, Deserialize, Default)]
-struct Repository {
-    #[serde(rename = "pullRequest")]
-    pull_request: PullRequest,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct PullRequest {
-    #[serde(rename = "reviewThreads")]
-    review_threads: ReviewThreadConnection,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct NodeWrapper<T> {
-    node: Option<T>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct CommentNode {
-    comments: CommentConnection,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct Connection<T> {
-    pub nodes: Vec<T>,
-    #[serde(rename = "pageInfo")]
-    pub page_info: PageInfo,
-}
-
-type ReviewThreadConnection = Connection<ReviewThread>;
-pub type CommentConnection = Connection<ReviewComment>;
-
-/// Details of a single review thread.
-#[derive(Debug, Deserialize, Default)]
-pub struct ReviewThread {
-    pub id: String,
-    #[serde(rename = "isResolved")]
-    pub is_resolved: bool,
-    #[serde(default, rename = "isOutdated")]
-    pub is_outdated: bool,
-    pub comments: CommentConnection,
-}
-
-/// A single review comment.
-#[derive(Debug, Deserialize, Default)]
-pub struct ReviewComment {
-    pub body: String,
-    #[serde(rename = "diffHunk")]
-    pub diff_hunk: String,
-    #[serde(rename = "originalPosition")]
-    pub original_position: Option<i32>,
-    pub position: Option<i32>,
-    pub path: String,
-    pub url: String,
-    pub author: Option<User>,
-}
-
-/// Pagination information returned by GitHub's GraphQL API.
-#[derive(Debug, Deserialize, Default, Clone)]
-pub struct PageInfo {
-    #[serde(rename = "hasNextPage")]
-    pub has_next_page: bool,
-    #[serde(rename = "endCursor")]
-    pub end_cursor: Option<String>,
-}
-
-impl PageInfo {
-    /// Return the cursor for the next page when available.
-    /// Returns `Ok(None)` when there are no more pages.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`VkError::BadResponse`] when `has_next_page` is `true` but
-    /// `end_cursor` is absent.
-    ///
-    /// # Examples
-    /// ```
-    /// use vk::PageInfo;
-    /// let info = PageInfo { has_next_page: true, end_cursor: Some("c1".into()) };
-    /// assert_eq!(info.next_cursor().expect("cursor"), Some("c1"));
-    /// ```
-    /// ```
-    /// use vk::PageInfo;
-    /// let info = PageInfo { has_next_page: true, end_cursor: None };
-    /// assert!(info.next_cursor().is_err());
-    /// ```
-    /// ```
-    /// use vk::PageInfo;
-    /// let info = PageInfo { has_next_page: false, end_cursor: None };
-    /// assert_eq!(info.next_cursor().expect("cursor"), None);
-    /// ```
-    #[inline]
-    #[must_use = "inspect the returned cursor to advance pagination"]
-    pub fn next_cursor(&self) -> Result<Option<&str>, VkError> {
-        match (self.has_next_page, self.end_cursor.as_deref()) {
-            (true, Some(cursor)) => Ok(Some(cursor)),
-            (true, None) => Err(VkError::BadResponse(
-                format!(
-                    "PageInfo invariant violated: hasNextPage=true but endCursor missing | pageInfo: {self:?}"
-                )
-                .boxed(),
-            )),
-            (false, _) => Ok(None),
-        }
-    }
-}
-
-/// Minimal user representation for authorship information.
-#[derive(Debug, Deserialize, Default, Clone)]
-pub struct User {
-    pub login: String,
-}
+pub use wire::{
+    CommentConnection, CommentQuery, PageInfo, ReviewComment, ReviewThread, ThreadsQuery, User,
+};
+use wire::{CommentNode, NodeWrapper, ThreadData, comment_query, threads_query};
 
 /// Options controlling which review threads to include.
 ///
@@ -215,18 +101,26 @@ pub async fn fetch_review_threads_with_options(
         i32::try_from(number).is_ok(),
         "pull-request number {number} exceeds GraphQL Int (i32) range",
     );
-    let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
+    // GraphQL `Int` maps to `i64`; a pull-request number beyond `i32::MAX`
+    // cannot be valid, so range-check as `i32` before widening.
+    let number = i64::from(i32::try_from(number).map_err(|_| VkError::InvalidNumber)?);
 
-    let mut vars = Map::new();
-    vars.insert("owner".into(), json!(repo.owner.clone()));
-    vars.insert("name".into(), json!(repo.name.clone()));
-    vars.insert("number".into(), json!(number_i32));
+    let variables = threads_query::Variables {
+        owner: repo.owner.clone(),
+        name: repo.name.clone(),
+        number,
+        cursor: None,
+    };
 
     let threads = client
-        .paginate_all(THREADS_QUERY, vars, None, |data: ThreadData| {
-            let conn = data.repository.pull_request.review_threads;
-            Ok((conn.nodes, conn.page_info))
-        })
+        .paginate_operation_as::<ThreadsQuery, ThreadData, ReviewThread, _>(
+            variables,
+            None,
+            |data: ThreadData| {
+                let conn = data.repository.pull_request.review_threads;
+                Ok((conn.nodes, conn.page_info))
+            },
+        )
         .await?;
 
     let mut threads = if options.include_resolved {
@@ -269,13 +163,14 @@ async fn fetch_all_comments(
         page_info,
     } = initial;
     if let Some(cursor) = page_info.next_cursor()? {
-        let mut vars = Map::new();
-        vars.insert("id".into(), json!(thread_id));
+        let variables = comment_query::Variables {
+            id: thread_id.to_string(),
+            cursor: None,
+        };
         let more = client
-            .paginate_all(
-                COMMENT_QUERY,
-                vars,
-                Some(Cow::Borrowed(cursor)),
+            .paginate_operation_as::<CommentQuery, NodeWrapper<CommentNode>, ReviewComment, _>(
+                variables,
+                Some(cursor.to_string()),
                 |wrapper: NodeWrapper<CommentNode>| {
                     let conn = wrapper
                         .node

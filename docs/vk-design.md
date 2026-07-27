@@ -56,14 +56,19 @@ even when multiple comments reference the same code.
   octocrab's raw request route. If the REST reply fails the command aborts
   without calling `resolveReviewThread`, does not retry, and does not apply
   backoff; missing comments return a warning and continue. The resolver pages
-  through the pull request's `reviewComments` connection using typed `serde`
-  structures (see `src/resolve/graphql.rs`), matching the requested
-  `databaseId` and extracting the owning thread identifier. Pagination detects
-  repeated or non-advancing cursors and aborts with an error rather than
-  looping indefinitely. This subcommand requires `GITHUB_TOKEN` with sufficient
-  scopes (resolving threads and posting replies require `repo`); if absent, it
-  aborts rather than performing anonymous calls. Resolution steps emit debug
-  spans via `tracing` to aid diagnostics; the binary initialises
+  through the pull request's `reviewThreads` connection using typed
+  `graphql_client` operations (see `src/resolve/graphql.rs`), scanning each
+  thread's first 100 comments for the requested `fullDatabaseId` and extracting
+  the owning thread identifier. The earlier design paged a flat
+  `reviewComments` connection, a field that does not exist in GitHub's
+  published schema and only ever worked against mocked responses; codegen
+  validation exposed the latent bug. An accepted limitation follows: a comment
+  beyond the first 100 comments of a single thread is not found. Pagination
+  detects repeated or non-advancing cursors and aborts with an error rather
+  than looping indefinitely. This subcommand requires `GITHUB_TOKEN` with
+  sufficient scopes (resolving threads and posting replies require `repo`); if
+  absent, it aborts rather than performing anonymous calls. Resolution steps
+  emit debug spans via `tracing` to aid diagnostics; the binary initialises
   `tracing_subscriber::fmt()` with an environment filter, so running with
   `RUST_LOG=vk=debug` (or a more specific filter) surfaces the spans on stderr.
 
@@ -137,22 +142,37 @@ When the reference includes a `#discussion_r<ID>` fragment, the command fetches
 all threads, including resolved ones, and selects the one containing the
 specified comment, trimming the thread so printing begins with that entry.
 
-Networking logic resides in [src/api/mod.rs](../src/api/mod.rs). It exposes the
-`GraphQLClient` alongside `run_query`, `fetch_page`, and `paginate_all` helpers
-used throughout the application. The client employs lightweight `Token`,
-`Endpoint`, and `Query` types to avoid parameter mix-ups and accepts borrowed
-cursors via `Cow<'_, str>` to prevent needless allocation. For example:
+Networking logic resides in [src/api/mod.rs](../src/api/mod.rs), which exposes
+the `GraphQLClient` alongside the `Token`, `Endpoint`, and `RetryConfig` types.
+Every GraphQL operation is a named document under
+[graphql/](../graphql/README.md) that `graphql_client`'s
+`#[derive(GraphQLQuery)]` codegen validates against the vendored GitHub schema
+at compile time; a malformed query or a selection the schema no longer supports
+fails the build rather than a runtime request. `GraphQLClient::run_operation`
+executes one such operation and returns its generated `ResponseData`.
 
-```rust
-fetch_page("query", Some(Cow::Borrowed("c1")), vars).await?;
-fetch_page("query", Some(Cow::Owned(String::from("c2"))), vars).await?;
-```
+Where a generated `ResponseData` would be stricter than an operation's
+documented behaviour, `run_operation_as` and its paginated counterpart
+`paginate_operation_as` build the query from the codegen type — so the
+selection is still schema-checked — but decode the wire body into the
+hand-written domain structs instead. This preserves the lenient decoding the
+tests and fixtures depend on (for example a review thread missing `isOutdated`
+is treated as current) while keeping the `serde_path_to_error` diagnostic paths
+unchanged. Cursor pagination is driven through the `CursorVariables` trait,
+implemented per paginated operation to advance the cursor between pages; the
+loop stops after a 1,000-page cap to guard against repeating cursors, and any
+items fetched before an error are discarded so a failed traversal yields only
+the error. GitHub's custom scalars (`DateTime`, `URI`, `HTML`, `BigInt`) are
+mapped to Rust types in [src/api/scalars.rs](../src/api/scalars.rs). The
+schema-refresh procedure lives in [graphql/README.md](../graphql/README.md).
 
-`run_query` retries transient request failures with `backon`'s jittered
-exponential backoff, attempting each query up to five times. `fetch_page`
-merges an optional cursor into a variables map and rejects non-object input
-upfront. The `paginate_all` helper loops until `PageInfo` indicates completion,
-discarding any items fetched before an error occurs.
+Each operation dispatches through a shared core that applies `backon`'s
+jittered exponential backoff, attempting each request up to five times, then
+records the transcript, checks the HTTP status, and deserializes the response.
+The wire shapes and domain conversions for a given operation live in a `wire`
+submodule beside the consumer (for example
+[src/review_threads/wire.rs](../src/review_threads/wire.rs)), isolating the
+generated-type-adjacent decoding from the fetching and filtering behaviour.
 
 Requests are sent by a private hyper-based transport
 ([src/api/client/transport.rs](../src/api/client/transport.rs)) that uses
@@ -246,9 +266,9 @@ apply jitter. By default, the client tries a query up to five times, waiting
 spread out as delays grow. Empty responses include the HTTP status, the
 operation name, and a short response-body snippet to aid triage. Error contexts
 also carry a redacted snippet of the request payload, replacing sensitive
-fields such as `token` with `<redacted>`. Because `run_query` only returns
-after a full page has been fetched, `paginate_all` never appends partial
-results, preserving order and avoiding duplicates.
+fields such as `token` with `<redacted>`. Because each operation only returns
+after a full page has been fetched, `paginate_operation_as` never appends
+partial results, preserving order and avoiding duplicates.
 
 The diagram below illustrates how deserialization errors surface the JSON path
 and a response snippet, helping developers quickly locate schema mismatches.
@@ -345,7 +365,7 @@ sequenceDiagram
     RefParse->>Git: git_root(), repo info
     Git-->>RefParse: repo context
     RefParse->>BranchPR: fetch_pr_for_branch(client, repo, branch)
-    BranchPR->>API: GraphQL PR_FOR_BRANCH_QUERY
+    BranchPR->>API: GraphQL PrForBranchQuery
     API-->>BranchPR: PR nodes
     BranchPR-->>RefParse: PR number
     RefParse-->>Cmd: PrContext (repo, number)

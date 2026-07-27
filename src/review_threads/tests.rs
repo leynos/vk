@@ -113,10 +113,7 @@ async fn path_variant_client(
 
 #[rstest]
 #[tokio::test]
-async fn run_query_missing_nodes_reports_path(
-    repo: RepoInfo,
-    #[future] missing_nodes_client: TestClient,
-) {
+async fn missing_nodes_reports_path(repo: RepoInfo, #[future] missing_nodes_client: TestClient) {
     let TestClient { client, join, .. } = missing_nodes_client.await;
     let result =
         fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())

@@ -4,7 +4,7 @@ This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
 and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
-Status: IN PROGRESS
+Status: COMPLETE (awaiting review/merge of PRs #194, #195, #196)
 
 ## Purpose / big picture
 
@@ -199,11 +199,24 @@ escalation, not workarounds.
   and e2e testing guide corrected; all gates green; CodeRabbit review completed
   with zero findings; draft pull request opened as leynos/vk#195 (stacked on PR
   1).
-- [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a
-  conversion layer, typed pagination; raw query constants deleted; full suite
-  green.
-- [ ] Documentation pass per PR (`docs/vk-design.md` and the e2e guide
-  correction in whichever PR touches it first); retrospective completed.
+- [x] (2026-07-09 21:10Z) PR 3 implementation complete: schema vendored
+  (72,911 lines); all six operations in named `.graphql` documents;
+  `run_operation`/`run_operation_as`/`paginate_operation_as` plus the
+  `CursorVariables` trait (red-green tested); domain structs preserved behind
+  conversions; `src/graphql_queries.rs` and the string query surface deleted
+  with characterization tests ported; the resolve thread-lookup latent bug fixed
+  (`reviewThreads`/`fullDatabaseId`); wire-submodule split restores the
+  400-line limit; compile-fail demonstrated
+  (`No field named titleTYPO on Issue`) and reverted; clean build 17 s versus
+  the 46 s baseline (well within tolerance); full suite green.
+- [x] (2026-07-09 21:20Z) Documentation pass complete across all PRs:
+  `docs/vk-design.md` networking and resolve sections rewritten for the typed
+  path, e2e guide MITM correction (PR 2), `docs/repository-layout.md` gains the
+  `graphql/` entry; users' guide reviewed, no change needed.
+- [x] (2026-07-09 21:50Z) PR 3 CodeRabbit review completed with zero
+  findings against the cumulative diff from main; draft pull request opened as
+  leynos/vk#196 (stacked on PR 2). Plan status COMPLETE pending review and
+  merges.
 
 ## Surprises & discoveries
 
@@ -323,6 +336,47 @@ escalation, not workarounds.
   errors) was removed along with its retry-classifier arm; `VkError` is not
   exported from `src/lib.rs`, so this is not a public API change. Date/Author:
   2026-07-09, PR 2 implementation.
+- Decision: in PR 3, a missing repository or issue in the Issue
+  operation's response now surfaces as `VkError::BadResponse` ("issue #N not
+  found") instead of the previous accidental `BadResponseSerde` (the old
+  hand-written struct made `issue` non-optional, so a null issue failed
+  deserialization). The generated types make the nullability explicit, and no
+  test pinned the old text; the clearer semantic error is deliberate. A
+  malformed present issue still yields `BadResponseSerde` with the same path.
+  Date/Author: 2026-07-09, PR 3 pilot migration.
+- Decision: the resolve thread-lookup query was redesigned onto
+  `repository.pullRequest.reviewThreads` because the field it previously
+  selected (`PullRequest.reviewComments`) does not exist in GitHub's published
+  schema — a latent production bug that only mocked tests kept green, exposed
+  by codegen validation. The new operation matches comments by `fullDatabaseId`
+  (the schema deprecates `databaseId`), carried as a `BigInt` string scalar.
+  Accepted limitation: a comment beyond the first 100 comments of one thread is
+  not found (same class of cap as the old flat query's page size). Date/Author:
+  2026-07-09, PR 3 implementation.
+- Decision: keep the string-based query surface (`run_query`,
+  `fetch_page`, `paginate_all`, `paginate`, `Query`) after the last production
+  consumer moved to typed operations. Rationale: it is a thin wrapper over the
+  shared `run_payload` core, remains fully exercised by the characterization
+  tests (retry counts, error text, transcript, cursor merging, page caps),
+  carries no lint debt, and a raw-query escape hatch is deliberately valuable
+  for the planned extraction into a shared crate. This supersedes the earlier
+  intent to port those tests and remove the surface. Date/Author: 2026-07-09,
+  PR 3 implementation.
+- Decision (supersedes the previous entry): the string-based query
+  surface (`run_query`, `fetch_page`, `paginate_all`, `paginate`, `Query`) IS
+  removed after all. The earlier "keep as escape hatch" entry was recorded
+  while the implementation agent appeared stalled; the agent in fact completed
+  the sanctioned removal, porting every characterization assertion (retry
+  counts on missing-data/5xx/HTML bodies, the four error-detail cases,
+  cursor-in-request capture) to the shared `run_payload` core and the typed
+  pagination path with identical assertions, so coverage is preserved with a
+  smaller surface. `fetch_page_rejects_non_object_variables` was retired, not
+  ported: typed `Variables` structs are objects by construction, so the guarded
+  failure mode no longer exists. A raw-query escape hatch can be reintroduced
+  at shared-crate extraction time if a consumer needs it. The commit message of
+  "Redesign resolve thread lookup onto reviewThreads" states the surface was
+  retained — this entry corrects the record. Date/Author: 2026-07-09, PR 3
+  implementation.
 - Decision: record the programme in a new ADR,
   `docs/adr-001-github-api-client-modernisation.md`. Rationale: no ADRs exist;
   the bespoke-client choice was never recorded. AGENTS.md requires substantive
@@ -333,7 +387,27 @@ escalation, not workarounds.
 
 ## Outcomes & retrospective
 
-To be completed as milestones land and at the end of the work.
+Interim (2026-07-09, all three PRs implemented; PRs 1 and 2 reviewed clean by
+CodeRabbit; PR 3 review pending):
+
+- The programme delivered its purpose: one HTTP stack (hyper/rustls),
+  octocrab serving REST, and compile-time-checked GraphQL, with the observable
+  behaviour pinned by the suite preserved throughout.
+- Biggest surprise: codegen validation exposed that the resolve
+  thread-lookup query selected a field (`PullRequest.reviewComments`) that does
+  not exist in GitHub's schema — `vk resolve` could never have worked against
+  the live API. The compile-time checking paid for itself before the PR even
+  landed.
+- The `_as` escape hatch (schema-checked query, hand-written
+  deserialization target) proved the pivotal design move: it let every lenient
+  documented behaviour survive codegen strictness and kept serde error paths
+  byte-identical.
+- Lesson: octocrab's semver-loose history and hidden feature coupling
+  (`jwt-rust-crypto` mandatory under `default-features = false`) justify the
+  tilde pin twice over.
+- Lesson (process): two construction agents racing one file set caused
+  formatting/lint churn; sequencing construction strictly would have saved
+  several gate iterations.
 
 ## Context and orientation
 
@@ -615,7 +689,23 @@ outside it are `tee` logs under `/tmp`.
 
 ## Artifacts and notes
 
-Record here, as milestones complete: the final octocrab feature set, the
+Recorded evidence:
+
+- octocrab final feature set: `default-client`, `jwt-rust-crypto`,
+  `rustls`, `rustls-ring`, `timeout` (no `retry`).
+- Clean `cargo build --all-features`: 46 s pre-codegen baseline, 17 s
+  after PR 3 on the same machine (variance dominated by cache warmth; the
+  schema-parsing derives are immaterial).
+- Compile-fail evidence: a deliberate `titleTYPO` field in
+  `graphql/issue.graphql` fails `cargo check` with "No field named titleTYPO on
+  Issue"; reverted.
+- Transcript parity: `cargo test --test e2e -- --ignored e2e_pr_42`
+  passes on the hyper transport and the typed path (replay is sequential,
+  insensitive to query text).
+- reqwest absence: `cargo tree -i reqwest` reports the package is not
+  found in normal, dev, and all-features graphs.
+
+Also to record as milestones complete: the final octocrab feature set, the
 `cargo tree -d` duplicate report, the clean-build baseline and post-PR 3 delta,
 a sample transcript line proving format parity, and the closing test counts.
 
