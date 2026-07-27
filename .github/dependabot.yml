@@ -9,6 +9,8 @@ updates:
       - "github-actions"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
 
   # Enable version updates for Cargo
   - package-ecosystem: "cargo"
@@ -19,3 +21,6 @@ updates:
       - "cargo"
     schedule:
       interval: "daily"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
