@@ -24,7 +24,19 @@ chrono = { version = "0.4.42", features = ["serde", "clock"] }
 anyhow = "1.0"
 backon = "1.5.2"
 html5ever = "0.35.0"
+http = "1"
 markup5ever_rcdom = "0.35.0"
+# Tilde pin: octocrab has shipped breaking changes in patch releases
+# (upstream issue 899); widen only after review. The `retry` feature is
+# deliberately excluded so the REST reply path stays retry-free (see
+# docs/adr-001-github-api-client-modernisation.md).
+octocrab = { version = "~0.54", default-features = false, features = [
+    "default-client",
+    "jwt-rust-crypto",
+    "rustls",
+    "rustls-ring",
+    "timeout",
+] }
 ortho_config = "0.8.0"
 base64 = "0.22.1"
 tracing = "0.1"

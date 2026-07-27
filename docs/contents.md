@@ -27,6 +27,13 @@
 - [Documentation style guide](documentation-style-guide.md): Use this for
   spelling, formatting, and document-structure rules.
 
+## Architecture decision records
+
+- [ADR 001: GitHub API client modernisation](adr-001-github-api-client-modernisation.md):
+  Use this for the accepted decision to serve REST through octocrab, move the
+  bespoke GraphQL client onto a hyper transport, and add `graphql_client`
+  codegen for typed queries.
+
 ## Migration guides
 
 - [Ortho Config v0.6.0 migration guide](ortho-config-v0-6-0-migration-guide.md):
@@ -39,5 +46,9 @@
 
 - [Execution plans](execplans/): Use this directory for living implementation
   plans that need to survive context handoffs.
+  - [Adopt octocrab](execplans/adopt-octocrab.md): Use this for the living
+    plan to modernise GitHub API access — octocrab for REST, a hyper
+    transport for the bespoke GraphQL client, and `graphql_client` codegen
+    for typed queries.
   - [Adopt Ortho Config v0.8.0](execplans/adopt-ortho-config-v0-8-0.md): Use
     this for the recorded plan behind the v0.8.0 configuration adoption work.
