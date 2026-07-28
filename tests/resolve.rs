@@ -4,7 +4,10 @@
 
 use assert_cmd::prelude::*;
 use http_body_util::Full;
-use hyper::{Response, StatusCode};
+use hyper::{
+    Response, StatusCode,
+    header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE},
+};
 use predicates::prelude::*;
 use serde_json::Value;
 use std::borrow::ToOwned;
@@ -134,13 +137,34 @@ async fn resolve_flows(#[case] pages: Vec<Page>, #[case] expected_posts: usize) 
 async fn run_reply_flow(
     rest_status: StatusCode,
 ) -> (Vec<String>, Vec<u8>, Vec<u8>, std::process::ExitStatus) {
-    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let clone = Arc::clone(&calls);
     *handler.lock().expect("lock handler") = Box::new(move |req| {
         let mut vec = clone.lock().expect("lock");
         let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
         vec.push(format!("{} {}", req.method(), req.uri().path()));
+        if req.uri().path().ends_with("/replies") {
+            assert_eq!(req.body().as_ref(), br#"{"body":"done"}"#);
+            assert_eq!(
+                req.headers().get(AUTHORIZATION).expect("authorization"),
+                "Bearer dummy"
+            );
+            assert_eq!(
+                req.headers().get(ACCEPT).expect("accept"),
+                "application/vnd.github+json"
+            );
+            assert_eq!(
+                req.headers()
+                    .get("x-github-api-version")
+                    .expect("GitHub API version"),
+                "2022-11-28"
+            );
+            assert_eq!(
+                req.headers().get(CONTENT_TYPE).expect("content type"),
+                "application/json"
+            );
+        }
         let status = if req.uri().path().ends_with("/replies") {
             rest_status
         } else {
@@ -157,7 +181,7 @@ async fn run_reply_flow(
         };
         Response::builder()
             .status(status)
-            .header("Content-Type", "application/json")
+            .header(CONTENT_TYPE, "application/json")
             .body(Full::from(body))
             .expect("response")
     });
@@ -232,6 +256,53 @@ async fn resolve_flows_reply(
         );
     }
     assert_eq!(calls.as_slice(), expected);
+}
+
+#[tokio::test]
+async fn resolve_reply_honours_total_http_timeout() {
+    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    *handler.lock().expect("lock handler") = Box::new(move |req| {
+        if req.uri().path().ends_with("/replies") {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+        }
+        let body = if req.uri().path() == "/graphql" {
+            r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
+        } else {
+            "{}"
+        };
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Full::from(body))
+            .expect("response")
+    });
+    let output = tokio::task::spawn_blocking(move || {
+        vk_cmd(addr)
+            .args([
+                "--http-timeout",
+                "1",
+                "resolve",
+                "https://github.com/o/r/pull/83#discussion_r1",
+                "-m",
+                "done",
+            ])
+            .output()
+            .expect("run command")
+    })
+    .await
+    .expect("spawn blocking");
+    shutdown.shutdown().await;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "expected timeout; stderr: {stderr}"
+    );
+    assert!(
+        predicate::str::contains("post reply to /repos/o/r/pulls/83/comments/1/replies")
+            .and(predicate::str::contains("deadline has elapsed"))
+            .eval(&stderr),
+        "stderr: {stderr}"
+    );
 }
 
 #[cfg(feature = "unstable-rest-resolve")]

@@ -1,4 +1,4 @@
-# Architectural decision record (ADR) 001: GitHub API client modernisation
+# Architectural decision record (ADR) 001: GitHub API client modernization
 
 ## Status
 
@@ -40,7 +40,7 @@ arrangement carries four problems:
 - Bespoke REST plumbing (authentication, base-URI handling, header
   construction) that duplicates what a maintained library already provides.
 
-The question this record settles is how to modernise GitHub API access without
+The question this record settles is how to modernize GitHub API access without
 regressing the observable behaviour that the test suite pins: command output,
 error-message fragments, retry semantics, transcript format, authentication
 precedence, and the environment-variable endpoint overrides.
@@ -56,7 +56,7 @@ precedence, and the environment-variable endpoint overrides.
   exact error text; neither may change.
 - Converge on a single HTTP stack rather than maintaining two.
 - Gain compile-time validation of GraphQL queries and their variables.
-- Minimise bespoke plumbing by delegating maintained concerns to a library
+- Minimize bespoke plumbing by delegating maintained concerns to a library
   where doing so does not compromise observability.
 - Keep TLS rustls-only; introduce no native-tls or OpenSSL dependency.
 - Remain compatible with the minimum supported Rust version (MSRV) of 1.89.
