@@ -29,10 +29,10 @@
 
 ## Architecture decision records
 
-- [ADR 001: GitHub API client modernisation](adr-001-github-api-client-modernisation.md):
+- [ADR 001: GitHub API client modernization](adr-001-github-api-client-modernisation.md):
   Use this for the accepted decision to serve REST through octocrab, move the
-  bespoke GraphQL client onto a hyper transport, and add `graphql_client`
-  codegen for typed queries.
+  bespoke GraphQL client onto hyper transport, and add `graphql_client` codegen
+  for typed queries.
 
 ## Migration guides
 
@@ -47,7 +47,7 @@
 - [Execution plans](execplans/): Use this directory for living implementation
   plans that need to survive context handoffs.
   - [Adopt octocrab](execplans/adopt-octocrab.md): Use this for the living
-    plan to modernise GitHub API access — octocrab for REST, a hyper
+    plan to modernize GitHub API access — octocrab for REST,
     transport for the bespoke GraphQL client, and `graphql_client` codegen
     for typed queries.
   - [Adopt Ortho Config v0.8.0](execplans/adopt-ortho-config-v0-8-0.md): Use
