@@ -1,4 +1,4 @@
-# Modernise GitHub API access: octocrab REST, hyper transport, typed GraphQL
+# Modernize GitHub API access: octocrab REST, hyper transport, typed GraphQL
 
 This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
@@ -132,7 +132,7 @@ escalation, not workarounds.
 - Risk: octocrab has shipped breaking changes in patch releases before
   (upstream issue 899). Severity: medium. Likelihood: medium. Mitigation: pin
   with a tilde requirement (`~0.54`) and record the reason in a `Cargo.toml`
-  comment and the ADR.
+  comment and the architectural decision record (ADR).
 - Risk: a direct hyper transport must reassemble what `reqwest` provided
   for free: connection pooling, TLS configuration, total-request timeout, and
   body collection. A subtle difference (for example timeout scope or TLS root
@@ -192,6 +192,9 @@ escalation, not workarounds.
   via builder `add_header` with a direct `http` dependency; `tests/resolve.rs`
   green unchanged; design doc updated; all gates green; CodeRabbit review
   completed with zero findings; draft pull request opened as leynos/vk#194.
+- [x] (2026-07-28) Review follow-up restored the total REST reply deadline,
+  strengthened raw POST coverage for the route, body, authentication, required
+  headers, and status handling, and reconciled the documentation findings.
 - [ ] PR 2: hyper transport inside `GraphQLClient`; reqwest removed;
   `cargo tree -i reqwest` fails; full suite green.
 - [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a
@@ -277,24 +280,24 @@ escalation, not workarounds.
   session.
 - Decision: design the refitted GraphQL client (PRs 2 and 3) for cheap
   future extraction into a shared crate. Rationale: the sibling project frankie
-  (a code-review TUI, currently REST-only octocrab) will need the GraphQL-only
-  review-thread surface (`isResolved`, `resolveReviewThread`) that motivated
-  this client, and the executor (transport, retry, transcript, typed
-  operations, cursor pagination) is the reusable part while query documents
-  stay per-project. Concretely: keep `VkError` and `vk::environment` coupling
-  at the edges of the transport and typed modules rather than woven through
-  them. Extraction itself is out of scope for this plan. Date/Author:
-  2026-07-09, follow-up review discussion.
+  (a code-review terminal user interface (TUI), currently REST-only octocrab)
+  will need the GraphQL-only review-thread surface (`isResolved`,
+  `resolveReviewThread`) that motivated this client, and the executor
+  (transport, retry, transcript, typed operations, cursor pagination) is the
+  reusable part while query documents stay per-project. Concretely: keep
+  `VkError` and `vk::environment` coupling at the edges of the transport and
+  typed modules rather than woven through them. Extraction itself is out of
+  scope for this plan. Date/Author: 2026-07-09, follow-up review discussion.
 - Decision: PR 1 uses octocrab's raw `_post` route for the reply, not the
   typed `pulls(...).comment(id).reply(...)` route. Rationale: the typed route
   funnels non-2xx responses through octocrab's `Error::GitHub`, whose display
   carries neither the request path nor the HTTP status code that
   `tests/resolve.rs` asserts in stderr; `_post` returns the raw
   `http::Response`, keeping the 404-non-fatal / other-non-2xx-fatal mapping and
-  error text in `vk`'s hands. Timeout mapping: reqwest's single total-request
-  timeout becomes octocrab's read plus write timeouts (closest analogue;
-  octocrab has no total-request timeout), and `connect_timeout` maps directly.
-  Date/Author: 2026-07-09, PR 1 implementation.
+  error text in `vk`'s hands. Timeout mapping: octocrab's read and write
+  timeouts remain configured, `connect_timeout` maps directly, and `post_reply`
+  additionally enforces reqwest's original total-request deadline. Date/Author:
+  2026-07-09, PR 1 implementation.
 - Decision: in PR 1, keep octocrab's own `User-Agent: octocrab` on the
   REST path (no test asserts the REST user agent, and octocrab hard-codes its
   value first in the header list), but restore the
@@ -318,9 +321,10 @@ To be completed as milestones land and at the end of the work.
 
 ## Context and orientation
 
-The repository is a single Rust crate (`vk`, edition 2024, MSRV 1.89) with
-sources under `src/` and integration tests under `tests/`. The `Makefile` is
-the canonical command runner. Read `AGENTS.md` before contributing.
+The repository is a single Rust crate (`vk`, edition 2024, minimum supported
+Rust version (MSRV) 1.89) with sources under `src/` and integration tests under
+`tests/`. The `Makefile` is the canonical command runner. Read `AGENTS.md`
+before contributing.
 
 The API layer, all under `src/api/`:
 
@@ -428,25 +432,26 @@ Add the dependency (final feature list recorded here after the spike; the
 `retry` feature is deliberately excluded so no retry layer exists, matching
 today's retry-free reply path):
 
-    # Tilde pin: octocrab has shipped breaking changes in patch releases
-    # (upstream issue 899); widen only after review.
-    octocrab = { version = "~0.54", default-features = false, features = ["rustls", "rustls-ring", "timeout"] }
+```toml
+# Tilde pin: octocrab has shipped breaking changes in patch releases
+# (upstream issue 899); widen only after review.
+octocrab = { version = "~0.54", default-features = false, features = [
+    "default-client", "jwt-rust-crypto", "rustls", "rustls-ring", "timeout",
+] }
+```
 
 Rework `src/resolve/rest.rs` behind its existing `pub(crate)` surface:
 `RestClient::new(token, api, timeout, connect_timeout)` builds an
 `octocrab::Octocrab` via `OctocrabBuilder` (`personal_token` when the token is
 non-empty, `base_uri` from the existing parameter → `GITHUB_API_URL` → default
-resolution, connect/read timeouts from the existing arguments). `post_reply`
-first attempts the typed route
-(`octocrab.pulls(owner, name).reply_to_comment(...)` or the closest current
-equivalent — verify the exact method against octocrab 0.54 during the spike);
-it must preserve the semantics `tests/resolve.rs` asserts: exact request path,
-404 mapped to a warning and success, other non-2xx mapped to a fatal `VkError`.
-If the typed model rejects the stub response bodies, enrich the stubs toward
-realistic fixtures (`tests/fixtures/review_comment.json` exists for this); if
-semantics still cannot be matched, fall back to `_post` with the hand-built
-route and record the outcome in the Decision Log. Delete `github_client` and
-the hand-rolled header constants. Acceptance:
+resolution, and connect/read/write timeouts from the existing arguments).
+`post_reply` additionally enforces the original total-request deadline and uses
+octocrab's raw `_post` route with the hand-built
+`/repos/{owner}/{name}/pulls/{pull_number}/comments/{comment_id}/replies`
+endpoint. It preserves the semantics `tests/resolve.rs` asserts: the exact
+request path, a 404 mapped to a warning and success, and every other non-2xx
+response mapped to a fatal `VkError` containing the route and status. Delete
+`github_client` and the hand-rolled header constants. Acceptance:
 `cargo test --features unstable-rest-resolve` and `make lint` (all-features)
 pass; `tests/resolve.rs` unchanged in what it asserts.
 
@@ -518,7 +523,9 @@ All commands run from the repository root
 (`/home/leynos/Projects/vk.worktrees/adopt-octocrab`). Long outputs go through
 `tee` to a log file for review, for example:
 
-    make test 2>&1 | tee "/tmp/test-vk-adopt-octocrab.out"
+```shell
+make test 2>&1 | tee "/tmp/test-vk-adopt-octocrab.out"
+```
 
 Per-milestone sequence (repeat for each commit within each PR):
 
@@ -534,16 +541,20 @@ Per-milestone sequence (repeat for each commit within each PR):
 
 Useful focused commands:
 
-    cargo test --features unstable-rest-resolve --test resolve 2>&1 | tee /tmp/test-vk-adopt-octocrab.out
-    cargo test api::client 2>&1 | tee /tmp/test-vk-adopt-octocrab.out
-    cargo test --test e2e -- --ignored e2e_pr_42 2>&1 | tee /tmp/test-vk-adopt-octocrab.out
-    cargo tree -i reqwest        # PR 2 exit: expect "package … not found"
-    cargo tree -d                # check duplicate transitive versions
-    curl -L https://docs.github.com/public/fpt/schema.docs.graphql -o graphql/schema.docs.graphql
+```shell
+cargo test --features unstable-rest-resolve --test resolve 2>&1 | tee /tmp/test-vk-adopt-octocrab.out
+cargo test api::client 2>&1 | tee /tmp/test-vk-adopt-octocrab.out
+cargo test --test e2e -- --ignored e2e_pr_42 2>&1 | tee /tmp/test-vk-adopt-octocrab.out
+cargo tree -i reqwest        # PR 2 exit: expect "package … not found"
+cargo tree -d                # check duplicate transitive versions
+curl -L https://docs.github.com/public/fpt/schema.docs.graphql -o graphql/schema.docs.graphql
+```
 
 Expected shape of a passing test run (counts will drift as tests are added):
 
-    test result: ok. 0 failed; finished in …
+```text
+test result: ok. 0 failed; finished in …
+```
 
 ## Validation and acceptance
 
@@ -604,58 +615,66 @@ a sample transcript line proving format parity, and the closing test counts.
 
 Dependencies to add:
 
-    # PR 1. Tilde pin: octocrab has shipped breaking changes in patch
-    # releases (upstream issue 899); widen only after review.
-    # jwt-rust-crypto is mandatory under default-features = false.
-    octocrab = { version = "~0.54", default-features = false, features = [
-        "default-client", "jwt-rust-crypto", "rustls", "rustls-ring", "timeout",
-    ] }
+```toml
+# PR 1. Tilde pin: octocrab has shipped breaking changes in patch
+# releases (upstream issue 899); widen only after review.
+# jwt-rust-crypto is mandatory under default-features = false.
+octocrab = { version = "~0.54", default-features = false, features = [
+    "default-client", "jwt-rust-crypto", "rustls", "rustls-ring", "timeout",
+] }
 
-    # PR 2 (promoted from dev-dependencies; align versions with the lockfile)
-    hyper = "1"
-    hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
-    hyper-rustls = { version = "0.27", features = ["webpki-roots", "http1", "ring"] }
-    http-body-util = "0.1"
+# PR 2 (promoted from dev-dependencies; align versions with the lockfile)
+hyper = "1"
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
+hyper-rustls = { version = "0.27", features = ["webpki-roots", "http1", "ring"] }
+http-body-util = "0.1"
 
-    # PR 3
-    graphql_client = "0.16"
+# PR 3
+graphql_client = "0.16"
+```
 
 Dependency to remove (PR 2): `reqwest`.
 
 In `src/api/client/transport.rs` (PR 2, new, private to `client`):
 
-    /// Owns the pooled hyper client used for GraphQL requests.
-    pub(super) struct Transport { /* hyper_util legacy client + HTTPS connector */ }
+```rust
+/// Owns the pooled hyper client used for GraphQL requests.
+pub(super) struct Transport { /* hyper_util legacy client + HTTPS connector */ }
 
-    impl Transport {
-        pub(super) fn new() -> Result<Self, VkError>;
+impl Transport {
+    pub(super) fn new() -> Result<Self, VkError>;
 
-        /// POST `payload` to `endpoint` with `headers`, honouring `timeout`
-        /// across the whole request, returning status and body.
-        pub(super) async fn post_json(
-            &self,
-            endpoint: &Endpoint,
-            headers: &http::HeaderMap,
-            payload: &serde_json::Value,
-            timeout: std::time::Duration,
-        ) -> Result<HttpResponse, VkError>;
-    }
+    /// POST `payload` to `endpoint` with `headers`, honouring `timeout`
+    /// across the whole request, returning status and body.
+    pub(super) async fn post_json(
+        &self,
+        endpoint: &Endpoint,
+        headers: &http::HeaderMap,
+        payload: &serde_json::Value,
+        timeout: std::time::Duration,
+    ) -> Result<HttpResponse, VkError>;
+}
+```
 
 In `src/api/client/mod.rs` (PR 3, added; string-based methods retained until
 unused, then deprecated per the Interface tolerance):
 
-    /// Execute a codegen'd GraphQL operation using this client.
-    pub async fn run_operation<Q: graphql_client::GraphQLQuery>(
-        &self,
-        variables: Q::Variables,
-    ) -> Result<Q::ResponseData, VkError>;
+```rust
+/// Execute a codegen'd GraphQL operation using this client.
+pub async fn run_operation<Q: graphql_client::GraphQLQuery>(
+    &self,
+    variables: Q::Variables,
+) -> Result<Q::ResponseData, VkError>;
+```
 
 In `src/api/pagination.rs` or a sibling module (PR 3):
 
-    /// Implemented by generated Variables types for paginated operations.
-    pub(crate) trait CursorVariables {
-        fn set_cursor(&mut self, cursor: Option<String>);
-    }
+```rust
+/// Implemented by generated Variables types for paginated operations.
+pub(crate) trait CursorVariables {
+    fn set_cursor(&mut self, cursor: Option<String>);
+}
+```
 
 Unchanged public surface (re-exported from `src/lib.rs` and `src/api/`):
 `GraphQLClient` and its constructors, `Endpoint`, `Token`, `Query`,
@@ -678,5 +697,5 @@ reqwest to a direct hyper transport; `graphql_client` codegen adds compile-time
 query checking. Delivery is three pull requests. The planned ADR was renamed
 from `adr-001-adopt-octocrab.md` to
 `adr-001-github-api-client-modernisation.md`. Constraints, tolerances, risks,
-decisions, and interfaces were rewritten to match; no implementation has begun
-and the plan awaits approval.
+decisions, and interfaces were rewritten to match. PR 1 is complete; PRs 2 and
+3 remain as authorized future work.

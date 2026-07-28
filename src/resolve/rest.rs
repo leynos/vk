@@ -23,6 +23,7 @@ use vk::environment;
 /// caller's authentication token.
 pub(crate) struct RestClient {
     client: Octocrab,
+    timeout: Duration,
     #[cfg(test)]
     request_count: AtomicUsize,
 }
@@ -37,9 +38,9 @@ impl RestClient {
     ///
     /// `personal_token` is only set when `token` is non-empty, preserving
     /// anonymous access. The `connect_timeout` maps directly onto octocrab's
-    /// connect timeout; octocrab exposes no single total-request timeout, so the
-    /// former reqwest total `timeout` is applied as the read and write timeouts,
-    /// the closest analogue octocrab offers.
+    /// connect timeout. The read and write timeouts are configured on octocrab,
+    /// and the original total-request deadline is retained for the complete
+    /// reply operation.
     ///
     /// Returns [`VkError::RequestContext`] when the base URI cannot be parsed or
     /// the client cannot be built.
@@ -86,6 +87,7 @@ impl RestClient {
             })?;
         Ok(Self {
             client,
+            timeout,
             #[cfg(test)]
             request_count: AtomicUsize::new(0),
         })
@@ -115,14 +117,20 @@ pub(crate) async fn post_reply(
     );
     #[cfg(test)]
     rest.request_count.fetch_add(1, Ordering::SeqCst);
-    let response = rest
-        .client
-        ._post(route.as_str(), Some(&json!({ "body": body })))
-        .await
-        .map_err(|e| VkError::RequestContext {
-            context: "post reply".boxed(),
-            source: Box::new(e),
-        })?;
+    let response = tokio::time::timeout(
+        rest.timeout,
+        rest.client
+            ._post(route.as_str(), Some(&json!({ "body": body }))),
+    )
+    .await
+    .map_err(|e| VkError::RequestContext {
+        context: format!("post reply to {route}").boxed(),
+        source: Box::new(e),
+    })?
+    .map_err(|e| VkError::RequestContext {
+        context: "post reply".boxed(),
+        source: Box::new(e),
+    })?;
     let status = response.status();
     if status.as_u16() == 404 {
         warn!(
