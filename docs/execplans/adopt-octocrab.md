@@ -183,8 +183,8 @@ escalation, not workarounds.
 - [x] (2026-07-09 15:30Z) Stage A: ADR
   `docs/adr-001-github-api-client-modernisation.md` authored and linked from
   `docs/vk-design.md` and `docs/contents.md`; octocrab `~0.54` added to
-  `Cargo.toml` (default features off; `default-client`, `rustls`, `rustls-ring`,
-  `timeout`; `retry` excluded deliberately).
+  `Cargo.toml` (default features off; `default-client`, `jwt-rust-crypto`,
+  `rustls`, `rustls-ring`, `timeout`; `retry` excluded deliberately).
 - [x] (2026-07-09 17:20Z) PR 1: octocrab REST resolve path complete.
   `src/resolve/rest.rs` reworked onto octocrab via the raw `_post` route with
   `RestClient::new` and `post_reply` signatures and semantics preserved,
@@ -195,6 +195,8 @@ escalation, not workarounds.
 - [x] (2026-07-28) Review follow-up restored the total REST reply deadline,
   strengthened raw POST coverage for the route, body, authentication, required
   headers, and status handling, and reconciled the documentation findings.
+- [x] (2026-08-03) Documentation review follow-up corrected the dependency
+  record, documentation index, Oxford spelling, and REST ownership guidance.
 - [ ] PR 2: hyper transport inside `GraphQLClient`; reqwest removed;
   `cargo tree -i reqwest` fails; full suite green.
 - [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a

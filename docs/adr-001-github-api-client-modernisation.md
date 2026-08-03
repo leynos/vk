@@ -163,7 +163,7 @@ for the authoritative migration sequence and progress.
 - GitHub's vendored public schema is roughly 1.5 MB, and each
   `#[derive(GraphQLQuery)]` re-parses it at compile time. The build-time impact
   is bounded by the tolerance recorded in the ExecPlan; operations are grouped
-  per document to amortise the parse.
+  per document to amortize the parse.
 - GitHub's custom scalars (`DateTime`, `URI`, `HTML`, and related types)
   require Rust type aliases in scope of each derive. A shared `scalars` module
   supplies them; a missing alias surfaces as an easily misread compile error.
