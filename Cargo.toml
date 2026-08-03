@@ -14,7 +14,7 @@ reqwest = { version = "0.12.23", features = ["json", "rustls-tls"] }
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
 serde_path_to_error = "0.1.17"
-tokio = { version = "1.36.0", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.36.0", features = ["rt-multi-thread", "macros", "time"] }
 termimad = "0.35.1"
 thiserror = "2.0.16"
 url = "2.5.0"
@@ -24,7 +24,18 @@ chrono = { version = "0.4.42", features = ["serde", "clock"] }
 anyhow = "1.0"
 backon = "1.5.2"
 html5ever = "0.35.0"
+http = "1"
 markup5ever_rcdom = "0.35.0"
+# Patch updates within octocrab 0.54 are accepted; widening to 0.55 requires
+# review. The `retry` feature is deliberately excluded so the REST reply path
+# stays retry-free (see docs/adr-001-github-api-client-modernisation.md).
+octocrab = { version = "~0.54", default-features = false, features = [
+    "default-client",
+    "jwt-rust-crypto",
+    "rustls",
+    "rustls-ring",
+    "timeout",
+] }
 ortho_config = "0.8.0"
 base64 = "0.23.0"
 tracing = "0.1"
