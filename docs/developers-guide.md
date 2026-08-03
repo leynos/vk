@@ -83,6 +83,23 @@ Before extracting a helper, port, or abstraction, check whether one already
 exists and document the new ownership boundary in the relevant design or
 developer document.
 
+### REST resolve client
+
+REST review-comment replies use octocrab through its raw `_post` route. The
+`http` and `octocrab` entries in `Cargo.toml` are direct dependencies: `http`
+supplies the header types, while octocrab owns authentication, base-URI
+handling, and request execution. The octocrab `retry` feature remains excluded
+so the reply path stays retry-free.
+
+The connection timeout maps to octocrab's connect timeout. The request timeout
+configures octocrab's read and write timeouts and also wraps the complete
+`_post` operation, preserving a total deadline across connection, write, and
+response-read work.
+
+Status interpretation remains in `vk`: the resolve client warns and continues
+for HTTP 404, accepts other successful statuses, and maps every other non-2xx
+status to `VkError::RequestContext` with the route and status.
+
 ## Documentation maintenance
 
 Update documentation in the same branch as the behaviour it describes:
