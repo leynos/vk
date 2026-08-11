@@ -5,12 +5,26 @@
 //! forks have PRs with the same branch name by filtering on the head repository
 //! owner.
 
+use graphql_client::GraphQLQuery;
 use serde::Deserialize;
-use serde_json::{Map, json};
 
-use crate::graphql_queries::PR_FOR_BRANCH_QUERY;
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, VkError};
+
+/// Typed `PrForBranchQuery` operation: the (non-paginated) PR-by-branch lookup.
+///
+/// The response is decoded into the hand-written [`PrForBranchData`] via
+/// [`GraphQLClient::run_operation_as`] rather than the generated `ResponseData`
+/// so the domain [`PrNode::number`] stays `u64` (the schema types it as `Int`,
+/// i.e. `i64`) and the direct-deserialization unit tests keep exercising the
+/// same structs. The query itself is still schema-checked at compile time.
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/schema.docs.graphql",
+    query_path = "graphql/pr_for_branch.graphql",
+    response_derives = "Debug, Clone, PartialEq"
+)]
+pub struct PrForBranchQuery;
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct PrForBranchData {
@@ -100,12 +114,15 @@ pub async fn fetch_pr_for_branch(
     branch: &str,
     head_owner: Option<&str>,
 ) -> Result<u64, VkError> {
-    let mut vars = Map::new();
-    vars.insert("owner".into(), json!(&repo.owner));
-    vars.insert("name".into(), json!(&repo.name));
-    vars.insert("headRef".into(), json!(branch));
+    let variables = pr_for_branch_query::Variables {
+        owner: repo.owner.clone(),
+        name: repo.name.clone(),
+        head_ref: branch.to_string(),
+    };
 
-    let data: PrForBranchData = client.run_query(PR_FOR_BRANCH_QUERY, vars).await?;
+    let data: PrForBranchData = client
+        .run_operation_as::<PrForBranchQuery, PrForBranchData>(variables)
+        .await?;
 
     let prs = &data.repository.pull_requests.nodes;
 
