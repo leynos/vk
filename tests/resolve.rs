@@ -136,6 +136,7 @@ async fn resolve_flows(#[case] pages: Vec<Page>, #[case] expected_posts: usize) 
 
 async fn run_reply_flow(
     rest_status: StatusCode,
+    api_uri_suffix: &str,
 ) -> (Vec<String>, Vec<u8>, Vec<u8>, std::process::ExitStatus) {
     let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -185,8 +186,10 @@ async fn run_reply_flow(
             .body(Full::from(body))
             .expect("response")
     });
+    let api_uri = format!("http://{addr}{api_uri_suffix}");
     let (stdout, stderr, status) = tokio::task::spawn_blocking(move || {
         let output = vk_cmd(addr)
+            .env("GITHUB_API_URL", api_uri)
             .args([
                 "resolve",
                 "https://github.com/o/r/pull/83#discussion_r1",
@@ -224,6 +227,20 @@ async fn run_reply_flow(
     ],
 )]
 #[case(
+    StatusCode::NO_CONTENT,
+    true,
+    &[
+        "POST /repos/o/r/pulls/83/comments/1/replies",
+        "POST /graphql",
+        "POST /graphql",
+    ],
+)]
+#[case(
+    StatusCode::MULTIPLE_CHOICES,
+    false,
+    &["POST /repos/o/r/pulls/83/comments/1/replies"],
+)]
+#[case(
     StatusCode::FORBIDDEN,
     false,
     &["POST /repos/o/r/pulls/83/comments/1/replies"],
@@ -238,7 +255,7 @@ async fn resolve_flows_reply(
     #[case] should_succeed: bool,
     #[case] expected: &'static [&'static str],
 ) {
-    let (calls, stdout, stderr, status) = run_reply_flow(rest_status).await;
+    let (calls, stdout, stderr, status) = run_reply_flow(rest_status, "").await;
     let stdout = String::from_utf8_lossy(&stdout);
     let stderr = String::from_utf8_lossy(&stderr);
     let code = rest_status.as_u16().to_string();
@@ -256,6 +273,26 @@ async fn resolve_flows_reply(
         );
     }
     assert_eq!(calls.as_slice(), expected);
+}
+
+#[tokio::test]
+#[rstest::rstest]
+#[case::without_trailing_slash("")]
+#[case::with_one_trailing_slash("/")]
+#[case::with_multiple_trailing_slashes("///")]
+async fn resolve_normalizes_api_uri_trailing_slashes(#[case] api_uri_suffix: &str) {
+    let (calls, stdout, stderr, status) = run_reply_flow(StatusCode::OK, api_uri_suffix).await;
+    assert!(status.success(), "status: {status:?}, stderr: {stderr:?}");
+    assert!(stdout.is_empty(), "unexpected stdout: {stdout:?}");
+    assert!(stderr.is_empty(), "unexpected stderr: {stderr:?}");
+    assert_eq!(
+        calls.as_slice(),
+        &[
+            "POST /repos/o/r/pulls/83/comments/1/replies",
+            "POST /graphql",
+            "POST /graphql",
+        ]
+    );
 }
 
 #[tokio::test]

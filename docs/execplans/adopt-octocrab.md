@@ -1,4 +1,4 @@
-# Modernize GitHub API access: octocrab REST, hyper transport, typed GraphQL
+# Octocrab REST migration (PR 1): hyper transport and typed GraphQL roadmap
 
 This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
@@ -9,11 +9,16 @@ Status: IN PROGRESS
 ## Purpose / big picture
 
 `vk` is a command-line tool that shows unresolved GitHub pull request review
-comments in the terminal. Today it talks to GitHub through two hand-rolled HTTP
-clients built directly on the `reqwest` crate: a GraphQL client
-(`src/api/client/`) used by every subcommand, and a REST client
-(`src/resolve/rest.rs`, compiled only under the `unstable-rest-resolve`
-feature) used to post a reply before resolving a review thread.
+comments in the terminal. Its bespoke GraphQL client (`src/api/client/`) still
+uses `reqwest` and is used by every subcommand. When the
+`unstable-rest-resolve` feature is enabled, the REST reply path in
+`src/resolve/rest.rs` uses Octocrab's raw `_post` route. Octocrab supplies the
+authentication and base-URI plumbing; the builder adds
+`x-github-api-version: 2022-11-28` and `Accept: application/vnd.github+json`.
+`post_reply` wraps the complete request in the total deadline, while Octocrab
+also receives the connect, read, and write timeout settings. A 404 warns and
+continues to GraphQL resolution; success does the same, while another non-2xx
+response aborts with the reply route and status in the diagnostic.
 
 An earlier draft of this plan proposed routing everything through
 [octocrab](https://docs.rs/octocrab). Review concluded octocrab is a weak fit
@@ -23,8 +28,7 @@ the REST side (typed pull-request APIs, maintained auth and base-URI plumbing).
 The revised programme is therefore three separable changes, delivered as three
 pull requests:
 
-1. PR 1 — adopt octocrab for the REST resolve path, replacing the bespoke
-   `reqwest`-based `RestClient`.
+1. PR 1 — adopt octocrab for the REST resolve path.
 2. PR 2 — replace `reqwest` inside the bespoke GraphQL client with a direct
    hyper transport, then remove `reqwest` from the dependency graph. The binary
    converges on one HTTP stack (hyper/rustls), shared with octocrab.
@@ -319,7 +323,17 @@ escalation, not workarounds.
 
 ## Outcomes & retrospective
 
-To be completed as milestones land and at the end of the work.
+PR 1 is complete. The REST reply path uses Octocrab's raw `_post` route and
+preserves the route, headers, total deadline, authentication, and
+404-non-fatal/other-non-2xx-fatal semantics. The recorded PR 1 validation ran
+`cargo test --features unstable-rest-resolve --test resolve` and the repository
+gates; the 2026-07-28 follow-up added total-deadline coverage and strengthened
+the route, body, authentication, header, and status assertions.
+
+PR 2 remains future work: replace `reqwest` in the bespoke GraphQL client with
+the planned hyper transport and verify its removal from the dependency graph.
+PR 3 remains future work: add typed GraphQL code generation and migrate the
+query call sites without changing the public domain types.
 
 ## Context and orientation
 
@@ -361,14 +375,14 @@ wire shape; the exported ones (`ReviewThread`, `ReviewComment`,
 `CommentConnection`, `PageInfo`, `PullRequestReview`, `Issue`, `User`) are
 public API and survive all three PRs.
 
-The REST path: `src/resolve/rest.rs` (only compiled with
-`--features unstable-rest-resolve`) builds a second `reqwest::Client`
-(`github_client`) and a `RestClient` whose base URL comes from the
-`GITHUB_API_URL` env var (default `https://api.github.com`). Its one operation,
-`post_reply`, POSTs to
-`repos/{owner}/{name}/pulls/{pull_number}/comments/{comment_id}/replies`,
-treating 404 as non-fatal (warn and continue) and other non-2xx as fatal, with
-no retry.
+The REST reply boundary (only compiled with `--features unstable-rest-resolve`)
+uses an Octocrab client with the resolved GitHub API base URL, defaulting to
+`https://api.github.com`. Its raw `_post` route posts to
+`repos/{owner}/{name}/pulls/{pull_number}/comments/{comment_id}/replies` with
+the pinned API-version and JSON `Accept` headers. The complete request is
+bounded by the total deadline, in addition to Octocrab's connect, read, and
+write timeouts. A 404 is non-fatal (warn and continue), another non-2xx status
+is fatal with the route and status retained, and the path has no retry.
 
 Authentication: `src/auth.rs::resolve_github_token` implements the precedence
 chain; no `gh` CLI integration exists. The token is a plain string handed to
@@ -521,9 +535,8 @@ GraphQL section rewrite and schema-refresh procedure (PR 3), and
 
 ## Concrete steps
 
-All commands run from the repository root
-(`/home/leynos/Projects/vk.worktrees/adopt-octocrab`). Long outputs go through
-`tee` to a log file for review, for example:
+All commands run from the repository root. Long outputs go through `tee` to a
+log file for review, for example:
 
 ```shell
 make test 2>&1 | tee "/tmp/test-vk-adopt-octocrab.out"
@@ -597,21 +610,32 @@ Quality criteria: all gates above; documentation gates (`make markdownlint`,
 `make nixie`) for the ADR, design-doc, and `graphql/README.md` changes;
 build-time delta within the stated tolerance for PR 3.
 
+PR 1 uses a finite integration partition. `proptest` is not used because this
+behaviour is integration-only via Octocrab, not a pure function over which
+generated inputs would add useful coverage. The bounded tests cover zero, one,
+and multiple trailing slashes in the API URI, plus representative success, 404,
+and other non-2xx status classes.
+
 ## Idempotence and recovery
 
 Every step is an ordinary source edit gated by the test suite; re-running any
-command is safe. Each PR (and each commit within it) is independent, so a
-failed attempt is abandoned with `git restore` / `git reset --hard HEAD`
-without affecting completed work. The schema download is re-runnable and
+command is safe. If a plan step fails, inspect `git diff --name-only` and use
+targeted `git restore -- path/to/reviewed-file` only for files changed by that
+failed step. Preserve unrelated work and completed commits; do not use an
+unconditional hard reset. The schema download is re-runnable and
 version-controlled once vendored. Nothing in this plan touches user data, CI
 configuration, or anything outside the repository; the only files written
 outside it are `tee` logs under `/tmp`.
 
 ## Artifacts and notes
 
-Record here, as milestones complete: the final octocrab feature set, the
-`cargo tree -d` duplicate report, the clean-build baseline and post-PR 3 delta,
-a sample transcript line proving format parity, and the closing test counts.
+PR 1 artifact and evidence: Octocrab is configured with the recorded feature
+set, `tests/resolve.rs` verifies the raw reply route, headers, body,
+authentication, status handling, URI normalisation, and total deadline, and the
+recorded PR 1 gate run is green. The remaining artifacts are the PR 2
+`cargo tree -d` duplicate report and clean-build comparison, followed by the PR
+3 sample transcript line, schema/code-generation evidence, and closing test
+counts.
 
 ## Interfaces and dependencies
 
