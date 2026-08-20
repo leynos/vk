@@ -100,6 +100,19 @@ Status interpretation remains in `vk`: the resolve client warns and continues
 for HTTP 404, accepts other successful statuses, and maps every other non-2xx
 status to `VkError::RequestContext` with the route and status.
 
+The REST reply boundary emits bounded metrics through the `metrics` crate. The
+`vk.resolve.rest_reply.requests.total` counter and
+`vk.resolve.rest_reply.duration.seconds` histogram use the fixed `outcome`,
+`status_class`, and `failure_category` labels. `outcome` is one of `success`,
+`not_found`, or `failure`; `status_class` is one of `1xx`, `2xx`, `3xx`,
+`4xx`, `5xx`, `other`, or `none`; and `failure_category` is one of `none`,
+`http_status`, `timeout`, or `transport`. The `vk.resolve.rest_reply.timeouts.total`
+counter has no labels.
+These signals measure attempts, elapsed time, and total-deadline expirations
+without adding repository, comment, route, or raw-error values to metric
+cardinality. The module records metrics through the configured recorder and
+does not install a global recorder itself.
+
 ## Documentation maintenance
 
 Update documentation in the same branch as the behaviour it describes:

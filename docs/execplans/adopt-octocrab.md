@@ -610,11 +610,24 @@ Quality criteria: all gates above; documentation gates (`make markdownlint`,
 `make nixie`) for the ADR, design-doc, and `graphql/README.md` changes;
 build-time delta within the stated tolerance for PR 3.
 
-PR 1 uses a finite integration partition. `proptest` is not used because this
-behaviour is integration-only via Octocrab, not a pure function over which
-generated inputs would add useful coverage. The bounded tests cover zero, one,
-and multiple trailing slashes in the API URI, plus representative success, 404,
-and other non-2xx status classes.
+PR 1 extracts the URI-normalisation and status-classification invariants into
+pure helpers. `proptest` exercises arbitrary trailing-slash counts and every
+valid HTTP status code: normalisation removes all trailing slashes and is
+idempotent, while classification treats only 404 as warn-and-continue, 2xx as
+success, and every other status as fatal. The integration tests retain exact
+route, header, body, authentication, and total-deadline coverage for the raw
+Octocrab request.
+
+The REST reply boundary also emits three bounded observability signals:
+`vk.resolve.rest_reply.requests.total` counts attempts,
+`vk.resolve.rest_reply.duration.seconds` records elapsed time, and
+`vk.resolve.rest_reply.timeouts.total` counts total-deadline expirations. The
+counter and histogram use only the fixed `outcome`, `status_class`, and
+`failure_category` labels. Their values are respectively `success`,
+`not_found`, or `failure`; `1xx`, `2xx`, `3xx`, `4xx`, `5xx`, `other`, or
+`none`; and `none`, `http_status`, `timeout`, or `transport`. The timeout
+counter is unlabelled; no request identifiers, routes, repository names, or raw
+errors enter metric labels.
 
 ## Idempotence and recovery
 
