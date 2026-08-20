@@ -13,6 +13,10 @@ use std::time::Duration;
 mod graphql;
 #[cfg(feature = "unstable-rest-resolve")]
 mod rest;
+#[cfg(feature = "unstable-rest-resolve")]
+mod rest_invariants;
+#[cfg(feature = "unstable-rest-resolve")]
+mod rest_metrics;
 
 /// Comment location within a pull request review thread.
 #[derive(Copy, Clone, Debug)]

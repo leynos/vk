@@ -26,6 +26,7 @@ backon = "1.5.2"
 html5ever = "0.35.0"
 http = "1"
 markup5ever_rcdom = "0.35.0"
+metrics = "0.24.6"
 # Patch updates within octocrab 0.54 are accepted; widening to 0.55 requires
 # review. The `retry` feature is deliberately excluded so the REST reply path
 # stays retry-free (see docs/adr-001-github-api-client-modernisation.md).
@@ -64,6 +65,8 @@ http-body-util = "0.1"
 bytes = "1"
 futures = "0.3"
 insta = { version = "1.43", features = ["redactions"] }
+metrics-util = { version = "0.20.4", features = ["debugging"] }
+proptest = "1.11.0"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

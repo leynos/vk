@@ -6,14 +6,18 @@
 //! `vk`'s control: a 404 is non-fatal (warn and continue), and any other
 //! non-2xx status is fatal.
 
-use super::CommentRef;
+use super::{
+    CommentRef,
+    rest_invariants::{ReplyStatus, classify_reply_status, normalize_api_base_url},
+    rest_metrics::{ReplyAttemptOutcome, record_reply_attempt},
+};
 use crate::{VkError, boxed::BoxedStr};
 use http::header::{ACCEPT, HeaderName};
 use octocrab::Octocrab;
 use serde_json::json;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::warn;
 use vk::environment;
 
@@ -50,13 +54,11 @@ impl RestClient {
         timeout: Duration,
         connect_timeout: Duration,
     ) -> Result<Self, VkError> {
-        let mut base = api
-            .map(str::to_owned)
-            .or_else(|| environment::var("GITHUB_API_URL").ok())
-            .unwrap_or_else(|| "https://api.github.com".into());
-        while base.ends_with('/') {
-            base.pop();
-        }
+        let base = normalize_api_base_url(
+            api.map(str::to_owned)
+                .or_else(|| environment::var("GITHUB_API_URL").ok())
+                .unwrap_or_else(|| "https://api.github.com".into()),
+        );
         let mut builder =
             Octocrab::builder()
                 .base_uri(base.as_str())
@@ -117,38 +119,76 @@ pub(crate) async fn post_reply(
     );
     #[cfg(test)]
     rest.request_count.fetch_add(1, Ordering::SeqCst);
+    let started_at = Instant::now();
     let response = tokio::time::timeout(
         rest.timeout,
         rest.client
             ._post(route.as_str(), Some(&json!({ "body": body }))),
     )
-    .await
-    .map_err(|e| VkError::RequestContext {
-        context: format!("post reply to {route}").boxed(),
-        source: Box::new(e),
-    })?
-    .map_err(|e| VkError::RequestContext {
-        context: "post reply".boxed(),
-        source: Box::new(e),
-    })?;
+    .await;
+    let response = match response {
+        Ok(Ok(response)) => response,
+        Ok(Err(error)) => {
+            record_reply_attempt(started_at, ReplyAttemptOutcome::TransportFailure);
+            return Err(VkError::RequestContext {
+                context: "post reply".boxed(),
+                source: Box::new(error),
+            });
+        }
+        Err(error) => {
+            record_reply_attempt(started_at, ReplyAttemptOutcome::Timeout);
+            return Err(VkError::RequestContext {
+                context: format!("post reply to {route}").boxed(),
+                source: Box::new(error),
+            });
+        }
+    };
     let status = response.status();
-    if status.as_u16() == 404 {
-        warn!(
-            "reply target not found (route={route}): {}/{} comment {} in PR #{}",
-            reference.repo.owner, reference.repo.name, reference.comment_id, reference.pull_number
-        );
-        // Treat missing original comment as non-fatal: continue to resolve.
-        return Ok(());
+    match classify_reply_status(status) {
+        ReplyStatus::NotFound => {
+            record_reply_attempt(
+                started_at,
+                ReplyAttemptOutcome::Response {
+                    status,
+                    result: ReplyStatus::NotFound,
+                },
+            );
+            warn!(
+                "reply target not found (route={route}): {}/{} comment {} in PR #{}",
+                reference.repo.owner,
+                reference.repo.name,
+                reference.comment_id,
+                reference.pull_number
+            );
+            // Treat missing original comment as non-fatal: continue to resolve.
+            Ok(())
+        }
+        ReplyStatus::Success => {
+            record_reply_attempt(
+                started_at,
+                ReplyAttemptOutcome::Response {
+                    status,
+                    result: ReplyStatus::Success,
+                },
+            );
+            Ok(())
+        }
+        ReplyStatus::Failure => {
+            record_reply_attempt(
+                started_at,
+                ReplyAttemptOutcome::Response {
+                    status,
+                    result: ReplyStatus::Failure,
+                },
+            );
+            Err(VkError::RequestContext {
+                context: format!("post reply to {route}").boxed(),
+                source: Box::new(std::io::Error::other(format!(
+                    "unexpected HTTP status {status}"
+                ))),
+            })
+        }
     }
-    if status.is_success() {
-        return Ok(());
-    }
-    Err(VkError::RequestContext {
-        context: format!("post reply to {route}").boxed(),
-        source: Box::new(std::io::Error::other(format!(
-            "unexpected HTTP status {status}"
-        ))),
-    })
 }
 
 #[cfg(test)]
