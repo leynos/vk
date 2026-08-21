@@ -78,38 +78,139 @@ pub(super) fn record_reply_attempt(started_at: Instant, outcome: ReplyAttemptOut
 
 #[cfg(test)]
 mod tests {
+    //! Tests for REST reply metrics.
+
     use super::*;
+    use crate::{
+        ref_parser::RepoInfo,
+        resolve::{
+            CommentRef,
+            rest::{RestClient, post_reply},
+        },
+    };
+    use bytes::Bytes;
+    use http_body_util::Full;
+    use hyper::{Response, service::service_fn};
+    use hyper_util::{
+        rt::{TokioExecutor, TokioIo},
+        server::conn::auto,
+    };
     use metrics::{Key, Label, with_local_recorder};
     use metrics_util::{
         MetricKind,
         debugging::{DebugValue, DebuggingRecorder},
     };
+    use rstest::rstest;
+    use std::{convert::Infallible, time::Duration};
+    use tokio::{net::TcpListener, runtime::Builder};
 
-    #[test]
-    fn records_bounded_response_and_timeout_metrics() {
+    #[derive(Copy, Clone)]
+    enum ReplyAttempt {
+        Success,
+        NotFound,
+        Failure,
+        Timeout,
+        TransportFailure,
+    }
+
+    impl ReplyAttempt {
+        fn expected_labels(self) -> (&'static str, &'static str, &'static str) {
+            match self {
+                Self::Success => ("success", "2xx", "none"),
+                Self::NotFound => ("not_found", "4xx", "none"),
+                Self::Failure => ("failure", "5xx", "http_status"),
+                Self::Timeout => ("failure", "none", "timeout"),
+                Self::TransportFailure => ("failure", "none", "transport"),
+            }
+        }
+
+        fn should_succeed(self) -> bool {
+            matches!(self, Self::Success | Self::NotFound)
+        }
+
+        fn is_timeout(self) -> bool {
+            matches!(self, Self::Timeout)
+        }
+
+        async fn serve(self, listener: TcpListener) {
+            let (stream, _) = listener.accept().await.expect("accept REST request");
+            match self {
+                Self::Success => serve_response(stream, StatusCode::OK).await,
+                Self::NotFound => serve_response(stream, StatusCode::NOT_FOUND).await,
+                Self::Failure => serve_response(stream, StatusCode::INTERNAL_SERVER_ERROR).await,
+                Self::Timeout => {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    drop(stream);
+                }
+                Self::TransportFailure => drop(stream),
+            }
+        }
+    }
+
+    async fn serve_response(stream: tokio::net::TcpStream, status: StatusCode) {
+        let service = service_fn(move |_| async move {
+            Ok::<_, Infallible>(
+                Response::builder()
+                    .status(status)
+                    .body(Full::new(Bytes::new()))
+                    .expect("build REST response"),
+            )
+        });
+        let _ = auto::Builder::new(TokioExecutor::new())
+            .serve_connection(TokioIo::new(stream), service)
+            .await;
+    }
+
+    #[rstest]
+    #[case::success(ReplyAttempt::Success)]
+    #[case::not_found(ReplyAttempt::NotFound)]
+    #[case::failure(ReplyAttempt::Failure)]
+    #[case::timeout(ReplyAttempt::Timeout)]
+    #[case::transport_failure(ReplyAttempt::TransportFailure)]
+    fn records_bounded_metrics_for_each_reply_outcome(#[case] attempt: ReplyAttempt) {
         let recorder = DebuggingRecorder::new();
         let snapshotter = recorder.snapshotter();
         with_local_recorder(&recorder, || {
-            record_reply_attempt(
-                Instant::now(),
-                ReplyAttemptOutcome::Response {
-                    status: StatusCode::NOT_FOUND,
-                    result: ReplyStatus::NotFound,
-                },
-            );
-            record_reply_attempt(Instant::now(), ReplyAttemptOutcome::Timeout);
+            let runtime = Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build test runtime");
+            let result = runtime.block_on(async {
+                let listener = TcpListener::bind("127.0.0.1:0")
+                    .await
+                    .expect("bind REST stub");
+                let address = listener.local_addr().expect("get REST stub address");
+                let server = tokio::spawn(attempt.serve(listener));
+                let rest = RestClient::new(
+                    "token",
+                    Some(&format!("http://{address}")),
+                    Duration::from_millis(20),
+                    Duration::from_secs(1),
+                )
+                .expect("build REST client");
+                let repo = RepoInfo {
+                    owner: "octocat".into(),
+                    name: "hello-world".into(),
+                };
+                let reference = CommentRef {
+                    repo: &repo,
+                    pull_number: 1,
+                    comment_id: 42,
+                };
+                let result = post_reply(&rest, reference, "reply").await;
+                server.abort();
+                let _ = server.await;
+                result
+            });
+            assert_eq!(result.is_ok(), attempt.should_succeed());
         });
 
         let snapshot = snapshotter.snapshot().into_vec();
+        let (outcome, status_class, failure_category) = attempt.expected_labels();
         let reply_labels = vec![
-            Label::new("outcome", "not_found"),
-            Label::new("status_class", "4xx"),
-            Label::new("failure_category", "none"),
-        ];
-        let timeout_labels = vec![
-            Label::new("outcome", "failure"),
-            Label::new("status_class", "none"),
-            Label::new("failure_category", "timeout"),
+            Label::new("outcome", outcome),
+            Label::new("status_class", status_class),
+            Label::new("failure_category", failure_category),
         ];
         assert!(snapshot.iter().any(|(key, _, _, value)| {
             *key == metrics_util::CompositeKey::new(
@@ -120,15 +221,16 @@ mod tests {
         assert!(snapshot.iter().any(|(key, unit, _, value)| {
             *key == metrics_util::CompositeKey::new(
                 MetricKind::Histogram,
-                Key::from_parts(REQUEST_DURATION, timeout_labels.clone()),
+                Key::from_parts(REQUEST_DURATION, reply_labels.clone()),
             ) && *unit == Some(Unit::Seconds)
                 && matches!(value, DebugValue::Histogram(samples) if samples.len() == 1)
         }));
-        assert!(snapshot.iter().any(|(key, _, _, value)| {
+        let has_timeout_counter = snapshot.iter().any(|(key, _, _, value)| {
             *key == metrics_util::CompositeKey::new(
                 MetricKind::Counter,
                 Key::from_name(TIMEOUT_COUNT),
             ) && *value == DebugValue::Counter(1)
-        }));
+        });
+        assert_eq!(has_timeout_counter, attempt.is_timeout());
     }
 }

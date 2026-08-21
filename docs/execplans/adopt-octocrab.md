@@ -610,9 +610,9 @@ Quality criteria: all gates above; documentation gates (`make markdownlint`,
 `make nixie`) for the ADR, design-doc, and `graphql/README.md` changes;
 build-time delta within the stated tolerance for PR 3.
 
-PR 1 extracts the URI-normalisation and status-classification invariants into
+PR 1 extracts the URI-normalization and status-classification invariants into
 pure helpers. `proptest` exercises arbitrary trailing-slash counts and every
-valid HTTP status code: normalisation removes all trailing slashes and is
+valid HTTP status code: normalization removes all trailing slashes and is
 idempotent, while classification treats only 404 as warn-and-continue, 2xx as
 success, and every other status as fatal. The integration tests retain exact
 route, header, body, authentication, and total-deadline coverage for the raw
@@ -644,7 +644,7 @@ outside it are `tee` logs under `/tmp`.
 
 PR 1 artifact and evidence: Octocrab is configured with the recorded feature
 set, `tests/resolve.rs` verifies the raw reply route, headers, body,
-authentication, status handling, URI normalisation, and total deadline, and the
+authentication, status handling, URI normalization, and total deadline, and the
 recorded PR 1 gate run is green. The remaining artifacts are the PR 2
 `cargo tree -d` duplicate report and clean-build comparison, followed by the PR
 3 sample transcript line, schema/code-generation evidence, and closing test

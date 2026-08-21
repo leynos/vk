@@ -1,7 +1,7 @@
 //! Pure invariants for the REST review-comment reply boundary.
 //!
 //! The REST transport owns HTTP I/O, while this module owns the two stable
-//! decisions that are useful to test independently: base-URI normalisation and
+//! decisions that are useful to test independently: base-URI normalization and
 //! reply-status handling.
 
 use http::StatusCode;
@@ -50,6 +50,8 @@ pub(super) fn status_class(status: StatusCode) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for REST reply invariants.
+
     use super::*;
     use proptest::prelude::*;
 

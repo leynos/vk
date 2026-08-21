@@ -295,12 +295,14 @@ async fn resolve_normalizes_api_uri_trailing_slashes(#[case] api_uri_suffix: &st
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn resolve_reply_honours_total_http_timeout() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     *handler.lock().expect("lock handler") = Box::new(move |req| {
         if req.uri().path().ends_with("/replies") {
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            tokio::task::block_in_place(|| {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+            });
         }
         let body = if req.uri().path() == "/graphql" {
             r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#

@@ -154,11 +154,13 @@ pub(crate) async fn post_reply(
                 },
             );
             warn!(
-                "reply target not found (route={route}): {}/{} comment {} in PR #{}",
-                reference.repo.owner,
-                reference.repo.name,
-                reference.comment_id,
-                reference.pull_number
+                route = %route,
+                owner = reference.repo.owner,
+                repo = reference.repo.name,
+                pull_number = reference.pull_number,
+                comment_id = reference.comment_id,
+                state = "not_found",
+                "reply target not found"
             );
             // Treat missing original comment as non-fatal: continue to resolve.
             Ok(())

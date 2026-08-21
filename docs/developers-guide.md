@@ -12,7 +12,7 @@ Read these documents before changing behaviour or architecture:
   gates.
 - [Documentation contents](contents.md): index of long-lived project
   documentation.
-- [GitHub API client modernisation ADR](adr-001-github-api-client-modernisation.md):
+- [GitHub API client modernization ADR](adr-001-github-api-client-modernisation.md):
   accepted REST and GraphQL client decisions.
 - [Octocrab adoption ExecPlan](execplans/adopt-octocrab.md): implementation
   plan for the REST client migration.
