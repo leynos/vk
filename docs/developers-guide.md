@@ -12,6 +12,10 @@ Read these documents before changing behaviour or architecture:
   gates.
 - [Documentation contents](contents.md): index of long-lived project
   documentation.
+- [GitHub API client modernization ADR](adr-001-github-api-client-modernisation.md):
+  accepted REST and GraphQL client decisions.
+- [Octocrab adoption ExecPlan](execplans/adopt-octocrab.md): implementation
+  plan for the REST client migration.
 - [Repository layout](repository-layout.md): path responsibilities and source
   tree conventions.
 - [VK design](vk-design.md): application architecture and behaviour rationale.
@@ -82,6 +86,36 @@ reuse policy.
 Before extracting a helper, port, or abstraction, check whether one already
 exists and document the new ownership boundary in the relevant design or
 developer document.
+
+### REST resolve client
+
+REST review-comment replies use octocrab through its raw `_post` route. The
+`http` and `octocrab` entries in `Cargo.toml` are direct dependencies: `http`
+supplies the header types, while octocrab owns authentication, base-URI
+handling, and request execution. The octocrab `retry` feature remains excluded
+so the reply path stays retry-free.
+
+The connection timeout maps to octocrab's connect timeout. The request timeout
+configures octocrab's read and write timeouts and also wraps the complete
+`_post` operation, preserving a total deadline across connection, write, and
+response-read work.
+
+Status interpretation remains in `vk`: the resolve client warns and continues
+for HTTP 404, accepts other successful statuses, and maps every other non-2xx
+status to `VkError::RequestContext` with the route and status.
+
+The REST reply boundary emits bounded metrics through the `metrics` crate. The
+`vk.resolve.rest_reply.requests.total` counter and
+`vk.resolve.rest_reply.duration.seconds` histogram use the fixed `outcome`,
+`status_class`, and `failure_category` labels. `outcome` is one of `success`,
+`not_found`, or `failure`; `status_class` is one of `1xx`, `2xx`, `3xx`, `4xx`,
+`5xx`, `other`, or `none`; and `failure_category` is one of `none`,
+`http_status`, `timeout`, or `transport`. The
+`vk.resolve.rest_reply.timeouts.total` counter has no labels. These signals
+measure attempts, elapsed time, and total-deadline expirations without adding
+repository, comment, route, or raw-error values to metric cardinality. The
+module records metrics through the configured recorder and does not install a
+global recorder itself.
 
 ## Documentation maintenance
 

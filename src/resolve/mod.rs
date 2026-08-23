@@ -13,12 +13,19 @@ use std::time::Duration;
 mod graphql;
 #[cfg(feature = "unstable-rest-resolve")]
 mod rest;
+#[cfg(feature = "unstable-rest-resolve")]
+mod rest_invariants;
+#[cfg(feature = "unstable-rest-resolve")]
+mod rest_metrics;
 
 /// Comment location within a pull request review thread.
 #[derive(Copy, Clone, Debug)]
 pub struct CommentRef<'a> {
+    /// Repository containing the comment.
     pub repo: &'a RepoInfo,
+    /// Pull-request number containing the comment.
     pub pull_number: u64,
+    /// Database identifier of the comment.
     pub comment_id: u64,
 }
 

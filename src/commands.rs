@@ -29,15 +29,22 @@ use tracing::{debug, error, warn};
 #[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
 
+/// Default total HTTP timeout for REST comment resolution, in seconds.
 #[cfg(feature = "unstable-rest-resolve")]
 const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 10;
+/// Default connection timeout for REST comment resolution, in seconds.
 #[cfg(feature = "unstable-rest-resolve")]
 const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 5;
 
+/// Context shared by the pull-request output and fetching stages.
 struct PrContext {
+    /// Repository containing the pull request.
     repo: RepoInfo,
+    /// Pull request number.
     number: u64,
+    /// Optional discussion comment used to narrow the output.
     comment_id: Option<u64>,
+    /// GraphQL client used to fetch pull-request data.
     client: GraphQLClient,
 }
 
@@ -66,6 +73,7 @@ fn build_graphql_client(
     }
 }
 
+/// Convert a printer error into the command error type.
 fn map_printer_error(err: anyhow::Error) -> VkError {
     if let Some(io) = err.downcast_ref::<std::io::Error>() {
         return VkError::Io(Box::new(std::io::Error::new(io.kind(), err)));
@@ -107,6 +115,7 @@ where
     false
 }
 
+/// Warn when authentication or a UTF-8 terminal locale is unavailable.
 fn warn_on_missing_token_and_locale(token: &str) {
     if token.is_empty() {
         warn!("GitHub token not set, using anonymous API access");
@@ -116,6 +125,7 @@ fn warn_on_missing_token_and_locale(token: &str) {
     }
 }
 
+/// Return whether an error chain contains a broken-pipe I/O error.
 fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
     err.chain().any(|c| {
         c.downcast_ref::<std::io::Error>()
@@ -123,10 +133,12 @@ fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
     })
 }
 
+/// Return whether an I/O error kind indicates a closed output pipe.
 fn is_broken_pipe_kind(kind: ErrorKind) -> bool {
     kind == ErrorKind::BrokenPipe
 }
 
+/// Print a banner and report whether output stopped because of a broken pipe.
 fn handle_banner<F>(print: F, label: &str) -> bool
 where
     F: FnOnce() -> std::io::Result<()>,
@@ -140,6 +152,7 @@ where
     false
 }
 
+/// Print the latest review decisions, stopping on a broken pipe.
 fn print_reviews_block(skin: &MadSkin, reviews: Vec<PullRequestReview>) -> bool {
     let latest = latest_reviews(reviews);
     let stdout = std::io::stdout();
@@ -153,6 +166,7 @@ fn print_reviews_block(skin: &MadSkin, reviews: Vec<PullRequestReview>) -> bool 
     false
 }
 
+/// Print review threads, stopping on a broken pipe.
 fn print_threads_block(skin: &MadSkin, threads: Vec<ReviewThread>) -> bool {
     for thread in threads {
         if let Err(e) = print_thread(skin, &thread) {
@@ -224,6 +238,7 @@ fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<BranchContext, 
     })
 }
 
+/// Format a repository as its `owner/name` path.
 fn format_repo(repo: &RepoInfo) -> String {
     format!("{}/{}", repo.owner, repo.name)
 }
@@ -497,6 +512,7 @@ pub async fn run_resolve(
     }
 }
 
+/// Return whether the first configured locale variable is UTF-8.
 fn locale_is_utf8() -> bool {
     for key in ["LC_ALL", "LC_CTYPE", "LANG"] {
         if let Ok(value) = environment::var(key) {

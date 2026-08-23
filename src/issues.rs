@@ -8,20 +8,28 @@ use crate::{GraphQLClient, VkError};
 use serde::Deserialize;
 use serde_json::{Map, json};
 
+/// GraphQL data returned for an issue lookup.
 #[derive(Deserialize)]
 struct IssueData {
+    /// Repository containing the requested issue.
     repository: IssueRepository,
 }
 
+/// Repository portion of an issue lookup response.
 #[derive(Deserialize)]
 struct IssueRepository {
+    /// Requested issue.
     issue: Issue,
 }
 
 /// Minimal issue representation returned by the GitHub API.
 #[derive(Deserialize)]
+///
+/// The title and body are retained for display by the command layer.
 pub struct Issue {
+    /// Issue title.
     pub title: String,
+    /// Issue body in Markdown.
     pub body: String,
 }
 

@@ -6,22 +6,12 @@ use html5ever::tendril::TendrilSink as _;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use std::borrow::Cow;
 use std::default::Default;
+/// Carriage-return character normalized from input text.
 const CARRIAGE_RETURN: char = '\r';
+/// Line-feed character used as the normalized line ending.
 const LINE_FEED: char = '\n';
 
-/// Collapse root `<details>` blocks in the given text.
-///
-/// Each root-level `<details>` tag is replaced by the contents of its
-/// direct `<summary>` child prefixed with a triangle marker. Nested
-/// `<details>` blocks are discarded.
-///
-/// # Examples
-///
-/// ```
-/// use vk::html::collapse_details;
-/// let input = "<details><summary>hi</summary><p>hidden</p></details>";
-/// assert_eq!(collapse_details(input), "\u{25B6} hi\n");
-/// ```
+/// Normalize carriage returns to line feeds while preserving other text.
 fn normalize_line_endings(input: &str) -> Cow<'_, str> {
     if !input.contains(CARRIAGE_RETURN) {
         return Cow::Borrowed(input);
@@ -42,6 +32,19 @@ fn normalize_line_endings(input: &str) -> Cow<'_, str> {
     Cow::Owned(owned)
 }
 
+/// Collapse root `<details>` blocks in the given text.
+///
+/// Each root-level `<details>` tag is replaced by the contents of its direct
+/// `<summary>` child prefixed with a triangle marker. Nested `<details>` blocks
+/// are discarded.
+///
+/// # Examples
+///
+/// ```
+/// use vk::html::collapse_details;
+/// let input = "<details><summary>hi</summary><p>hidden</p></details>";
+/// assert_eq!(collapse_details(input), "\u{25B6} hi\n");
+/// ```
 #[must_use]
 pub fn collapse_details(input: &str) -> String {
     let normalised = normalize_line_endings(input);
@@ -53,6 +56,7 @@ pub fn collapse_details(input: &str) -> String {
     out
 }
 
+/// Walk a node tree, preserving visible text and replacing root details.
 fn collapse_node(node: &Handle, out: &mut String, in_details: bool) {
     match &node.data {
         NodeData::Element { name, .. }
@@ -75,10 +79,12 @@ fn collapse_node(node: &Handle, out: &mut String, in_details: bool) {
     }
 }
 
+/// Return whether this details node is a collapsible root with a summary.
 fn should_collapse_details(node: &Handle, in_details: bool) -> bool {
     !in_details && find_summary_text(node).is_some()
 }
 
+/// Append a compact marker and the direct summary text for a details node.
 fn write_collapsed_summary(node: &Handle, out: &mut String) {
     if let Some(summary) = find_summary_text(node) {
         out.push('\u{25B6}');
@@ -88,6 +94,7 @@ fn write_collapsed_summary(node: &Handle, out: &mut String) {
     }
 }
 
+/// Find and collect the text from a node's direct summary child.
 fn find_summary_text(node: &Handle) -> Option<String> {
     node.children
         .borrow()
@@ -100,16 +107,13 @@ fn find_summary_text(node: &Handle) -> Option<String> {
         })
 }
 
+/// Collect descendant text in document order without rendering markup.
 fn collect_text(node: &Handle) -> String {
     let mut text = String::new();
-    let mut stack = vec![node.clone()];
-    while let Some(current) = stack.pop() {
-        let children = current.children.borrow();
-        for child in children.iter().rev() {
-            match &child.data {
-                NodeData::Text { contents } => text.push_str(&contents.borrow()),
-                _ => stack.push(child.clone()),
-            }
+    for child in node.children.borrow().iter() {
+        match &child.data {
+            NodeData::Text { contents } => text.push_str(&contents.borrow()),
+            _ => text.push_str(&collect_text(child)),
         }
     }
     text
@@ -118,7 +122,35 @@ fn collect_text(node: &Handle) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::borrow::Cow;
+
+    proptest! {
+        #[test]
+        fn collapse_preserves_inline_summary_text_order(
+            prefix in "[a-z]{1,20}",
+            before_nested in "[a-z]{1,20}",
+            nested in "[a-z]{1,20}",
+            after_nested in "[a-z]{1,20}",
+            suffix in "[a-z]{1,20}",
+        ) {
+            let input = format!(
+                concat!(
+                    "<details><summary>{}<span>{}",
+                    "<em>{}</em>{}</span>{}",
+                    "</summary>hidden</details>"
+                ),
+                prefix,
+                before_nested,
+                nested,
+                after_nested,
+                suffix,
+            );
+            let expected = format!("\u{25B6} {prefix}{before_nested}{nested}{after_nested}{suffix}\n");
+
+            prop_assert_eq!(collapse_details(&input), expected);
+        }
+    }
 
     #[test]
     fn collapse_replaces_root_details() {

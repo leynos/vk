@@ -53,6 +53,7 @@ use thiserror::Error;
 pub use auth::resolve_github_token;
 use commands::{run_issue, run_pr, run_resolve};
 
+/// Supported top-level command-line subcommands.
 #[derive(Subcommand, Deserialize, Serialize, Clone, Debug)]
 enum Commands {
     /// Show unresolved pull request comments
@@ -72,6 +73,7 @@ enum Commands {
     Resolve(ResolveArgs),
 }
 
+/// Parsed command-line arguments for the `vk` binary.
 #[derive(Debug, Parser)]
 #[command(
     name = "vk",
@@ -81,12 +83,15 @@ enum Commands {
     arg_required_else_help = true
 )]
 struct Cli {
+    /// Subcommand to execute.
     #[command(subcommand)]
     command: crate::Commands,
+    /// Global options shared by every subcommand.
     #[command(flatten)]
     global: GlobalArgs,
 }
 
+/// Shared ownership wrapper for configuration errors.
 type SharedConfigError = Arc<ortho_config::OrthoError>;
 
 /// Error type for the `vk` binary.
@@ -98,53 +103,94 @@ type SharedConfigError = Arc<ortho_config::OrthoError>;
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum VkError {
+    /// The repository could not be determined from the available references.
     #[error("unable to determine repository")]
     RepoNotFound,
+    /// A GitHub request failed before a response could be handled.
     #[error("request failed: {0}")]
     Request(#[from] Box<reqwest::Error>),
+    /// A GitHub request failed while running the named operation.
     #[error("request failed when running {context}: {source}")]
     RequestContext {
+        /// Operation being performed when the request failed.
         context: Box<str>,
+        /// Underlying request error.
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    /// A supplied repository or pull-request reference is invalid.
     #[error("invalid reference")]
     InvalidRef,
+    /// The repository is in detached HEAD state and has no branch to inspect.
     #[error("cannot auto-detect PR: repository is in detached HEAD state")]
     DetachedHead,
+    /// No GitHub token was supplied for an operation that requires one.
     #[error("GitHub token not set")]
     MissingAuth,
+    /// A pull-request number could not be parsed or is outside the valid range.
     #[error("pull request number out of range")]
     InvalidNumber,
+    /// A URL contained an unexpected resource segment.
     #[error("expected URL path segment in {expected:?}, found '{found}'")]
     WrongResourceType {
+        /// Resource segments accepted at this location.
         expected: &'static [&'static str],
+        /// Resource segment found in the supplied URL.
         found: Box<str>,
     },
+    /// A review thread did not contain the expected comment path.
     #[error("missing comment path at index {index} in thread {thread_id}")]
-    EmptyCommentPath { thread_id: Box<str>, index: usize },
+    EmptyCommentPath {
+        /// Review-thread identifier containing the missing path.
+        thread_id: Box<str>,
+        /// Position at which the path segment was expected.
+        index: usize,
+    },
+    /// A requested review comment was not found.
     #[error("comment {comment_id} not found")]
-    CommentNotFound { comment_id: u64 },
+    CommentNotFound {
+        /// Identifier of the missing comment.
+        comment_id: u64,
+    },
+    /// No pull request was found for the supplied branch.
     #[error("no pull request found for branch '{branch}'")]
-    NoPrForBranch { branch: Box<str> },
+    NoPrForBranch {
+        /// Branch for which no pull request exists.
+        branch: Box<str>,
+    },
+    /// An API request or local processing step failed with a textual diagnostic.
+    ///
+    /// This includes unsuccessful API responses and local failures such as
+    /// request serialization errors or pagination exceeding its page limit.
     #[error("bad response: {0}")]
     BadResponse(Box<str>),
+    /// The API returned no data for a successful GraphQL operation.
     #[error("empty GraphQL response (status {status}) for {operation}: {snippet}")]
     EmptyResponse {
+        /// HTTP status returned by the API.
         status: u16,
+        /// GraphQL operation that produced the response.
         operation: Box<str>,
+        /// Bounded response excerpt retained for diagnostics.
         snippet: Box<str>,
     },
+    /// The API response could not be deserialized.
     #[error("malformed response (status {status}): {message} | snippet:{snippet}")]
     BadResponseSerde {
+        /// HTTP status returned by the API.
         status: u16,
+        /// Deserialization error message.
         message: Box<str>,
+        /// Bounded response excerpt retained for diagnostics.
         snippet: Box<str>,
     },
+    /// The API returned one or more GraphQL errors.
     #[error("API errors: {0}")]
     ApiErrors(Box<str>),
+    /// An I/O operation failed.
     #[error("io error: {0}")]
     Io(#[from] Box<std::io::Error>),
+    /// Configuration loading or validation failed.
     #[error("configuration error: {0}")]
     Config(#[from] SharedConfigError),
 }
@@ -169,6 +215,7 @@ impl From<ortho_config::OrthoError> for VkError {
     }
 }
 
+/// Pattern that recognizes UTF-8 locale identifiers.
 pub(crate) static UTF8_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").expect("valid regex"));
 

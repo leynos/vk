@@ -10,44 +10,58 @@ use serde_json::{Map, json};
 use crate::{GraphQLClient, PageInfo, User, VkError, ref_parser::RepoInfo};
 use std::collections::{HashMap, hash_map::Entry};
 
+/// A pull-request review returned by the GitHub API.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestReview {
+    /// Review body in Markdown.
     pub body: String,
     /// Timestamp when the review was formally submitted.
     ///
     /// This may be `None` when the timestamp is missing or unknown.
     pub submitted_at: Option<DateTime<Utc>>,
+    /// GitHub review state, such as `APPROVED` or `COMMENTED`.
     pub state: String,
+    /// Author of the review, when available.
     pub author: Option<User>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Top-level response for the review query.
 struct ReviewData {
+    /// Repository response data.
     repository: RepositoryReviews,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Repository response data for reviews.
 struct RepositoryReviews {
     #[serde(rename = "pullRequest")]
+    /// Pull-request response data.
     pull_request: PullRequestReviews,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Pull-request response data for reviews.
 struct PullRequestReviews {
+    /// Review connection returned by GitHub.
     reviews: ReviewConnection,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// A paginated connection of pull-request reviews.
 struct ReviewConnection {
+    /// Reviews returned in this page.
     nodes: Vec<PullRequestReview>,
+    /// Pagination metadata for this page.
     page_info: PageInfo,
 }
 
+/// GraphQL query used to retrieve pull-request reviews.
 const REVIEWS_QUERY: &str = r"
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {

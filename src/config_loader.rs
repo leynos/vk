@@ -42,6 +42,7 @@ fn validate_explicit_config_path() -> ortho_config::OrthoResult<()> {
     validate_explicit_config_path_value(std::env::var_os(EXPLICIT_CONFIG_PATH_ENV).as_deref())
 }
 
+/// Validate an optional explicit configuration path value.
 fn validate_explicit_config_path_value(raw: Option<&OsStr>) -> ortho_config::OrthoResult<()> {
     let Some(raw) = raw else {
         return Ok(());

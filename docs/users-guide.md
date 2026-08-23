@@ -110,7 +110,13 @@ vk resolve https://github.com/leynos/vk/pull/191#discussion_r123456789 \
   --message "Addressed in the latest commit."
 ```
 
-If the reply fails, the command stops before resolving the thread.
+`--http-timeout SECS` sets the total deadline for the REST reply request,
+including connection, request, and response handling; its default is 10 seconds.
+`--connect-timeout SECS` sets the connection deadline; its default is 5
+seconds. A 404 response from the reply endpoint emits a warning and continues
+with GraphQL resolution. Any other non-2xx response or a timeout aborts before
+GraphQL resolution, retaining the reply route and status or deadline details in
+the diagnostic.
 
 ## Troubleshoot terminal output
 

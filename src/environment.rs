@@ -7,8 +7,10 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+/// Lazily initialized mutex that serializes process-wide environment access.
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
+/// Acquire the process-wide environment mutex.
 fn lock() -> MutexGuard<'static, ()> {
     ENV_LOCK
         .get_or_init(|| Mutex::new(()))

@@ -16,9 +16,12 @@ use parse::{GITHUB_RE, ResourceType, parse_reference, strip_git_suffix};
 /// Fragment prefix for discussion comment IDs in GitHub URLs.
 const DISCUSSION_FRAGMENT: &str = "#discussion_r";
 
+/// A parsed GitHub repository owner and name.
 #[derive(Debug, Clone)]
 pub struct RepoInfo {
+    /// Repository owner or organization.
     pub owner: String,
+    /// Repository name.
     pub name: String,
 }
 

@@ -14,7 +14,7 @@ reqwest = { version = "0.12.23", features = ["json", "rustls-tls"] }
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1.0.113"
 serde_path_to_error = "0.1.17"
-tokio = { version = "1.36.0", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.36.0", features = ["rt-multi-thread", "macros", "time"] }
 termimad = "0.35.1"
 thiserror = "2.0.16"
 url = "2.5.0"
@@ -24,7 +24,19 @@ chrono = { version = "0.4.42", features = ["serde", "clock"] }
 anyhow = "1.0"
 backon = "1.5.2"
 html5ever = "0.35.0"
+http = "1"
 markup5ever_rcdom = "0.35.0"
+metrics = "0.24.6"
+# Patch updates within octocrab 0.54 are accepted; widening to 0.55 requires
+# review. The `retry` feature is deliberately excluded so the REST reply path
+# stays retry-free (see docs/adr-001-github-api-client-modernisation.md).
+octocrab = { version = "~0.54", default-features = false, features = [
+    "default-client",
+    "jwt-rust-crypto",
+    "rustls",
+    "rustls-ring",
+    "timeout",
+] }
 ortho_config = "0.9.0"
 base64 = "0.23.0"
 tracing = "0.1"
@@ -53,6 +65,8 @@ http-body-util = "0.1"
 bytes = "1"
 futures = "0.3"
 insta = { version = "1.43", features = ["redactions"] }
+metrics-util = { version = "0.20.4", features = ["debugging"] }
+proptest = "1.11.0"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
@@ -65,6 +79,7 @@ pkg-fmt = "tgz"
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 trivially_copy_pass_by_ref = "warn"
+missing_docs_in_private_items = "deny"
 
 # 1. hygiene
 # Unfortunately, due to an 'unused-braces' false postive with
@@ -102,3 +117,15 @@ string_lit_as_bytes    = "deny"
 
 # 6. numerical foot-guns
 float_arithmetic = "deny"
+
+[lints.rust]
+missing_docs = "deny"
+
+[lints.rustdoc]
+missing_crate_level_docs = "deny"
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+bare_urls = "deny"
+invalid_html_tags = "deny"
+invalid_codeblock_attributes = "deny"
+unescaped_backticks = "deny"

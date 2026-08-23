@@ -1,5 +1,6 @@
 //! GraphQL query strings used to fetch issues and review threads.
 
+/// Fetch review threads and their comments for a pull request.
 pub const THREADS_QUERY: &str = r"
     query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -29,6 +30,7 @@ pub const THREADS_QUERY: &str = r"
     }
 ";
 
+/// Fetch comments belonging to one review thread.
 pub const COMMENT_QUERY: &str = r"
     query($id: ID!, $cursor: String) {
       node(id: $id) {
@@ -50,6 +52,7 @@ pub const COMMENT_QUERY: &str = r"
     }
 ";
 
+/// Fetch the title and body of one issue.
 pub const ISSUE_QUERY: &str = r"
     query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) {
