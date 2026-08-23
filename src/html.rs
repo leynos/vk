@@ -110,14 +110,10 @@ fn find_summary_text(node: &Handle) -> Option<String> {
 /// Collect descendant text in document order without rendering markup.
 fn collect_text(node: &Handle) -> String {
     let mut text = String::new();
-    let mut stack = vec![node.clone()];
-    while let Some(current) = stack.pop() {
-        let children = current.children.borrow();
-        for child in children.iter().rev() {
-            match &child.data {
-                NodeData::Text { contents } => text.push_str(&contents.borrow()),
-                _ => stack.push(child.clone()),
-            }
+    for child in node.children.borrow().iter() {
+        match &child.data {
+            NodeData::Text { contents } => text.push_str(&contents.borrow()),
+            _ => text.push_str(&collect_text(child)),
         }
     }
     text
@@ -126,7 +122,35 @@ fn collect_text(node: &Handle) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::borrow::Cow;
+
+    proptest! {
+        #[test]
+        fn collapse_preserves_inline_summary_text_order(
+            prefix in "[a-z]{1,20}",
+            before_nested in "[a-z]{1,20}",
+            nested in "[a-z]{1,20}",
+            after_nested in "[a-z]{1,20}",
+            suffix in "[a-z]{1,20}",
+        ) {
+            let input = format!(
+                concat!(
+                    "<details><summary>{}<span>{}",
+                    "<em>{}</em>{}</span>{}",
+                    "</summary>hidden</details>"
+                ),
+                prefix,
+                before_nested,
+                nested,
+                after_nested,
+                suffix,
+            );
+            let expected = format!("\u{25B6} {prefix}{before_nested}{nested}{after_nested}{suffix}\n");
+
+            prop_assert_eq!(collapse_details(&input), expected);
+        }
+    }
 
     #[test]
     fn collapse_replaces_root_details() {

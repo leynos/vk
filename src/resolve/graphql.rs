@@ -46,11 +46,11 @@ pub(crate) struct ReviewCommentsQuery<'a> {
 #[allow(clippy::ref_option, reason = "automock generates &Option")]
 /// Fetches pages of review comments for a pull request.
 pub(crate) trait ReviewCommentsFetcher {
-    #[allow(
+    /// Fetch one page of review comments.
+    #[expect(
         clippy::elidable_lifetime_names,
         reason = "automock requires explicit lifetime for query struct"
     )]
-    /// Fetch one page of review comments.
     async fn fetch_review_comments<'a>(
         &self,
         query: ReviewCommentsQuery<'a>,
@@ -58,7 +58,7 @@ pub(crate) trait ReviewCommentsFetcher {
 }
 
 impl ReviewCommentsFetcher for GraphQLClient {
-    #[allow(
+    #[expect(
         clippy::elidable_lifetime_names,
         reason = "automock requires explicit lifetime for query struct"
     )]

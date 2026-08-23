@@ -31,6 +31,11 @@ pub struct ShutdownHandle {
 }
 
 impl ShutdownHandle {
+    /// Create a shutdown handle for a running MITM server.
+    pub(super) fn new(join: JoinHandle<()>, stop: oneshot::Sender<()>) -> Self {
+        Self { join, stop }
+    }
+
     /// Signal the server to stop and await shutdown.
     pub async fn shutdown(self) {
         let _ = self.stop.send(());
@@ -99,7 +104,7 @@ pub async fn start_mitm() -> Result<(SocketAddr, Handler, ShutdownHandle), std::
         }
     });
 
-    Ok((addr, handler, ShutdownHandle { join, stop: tx }))
+    Ok((addr, handler, ShutdownHandle::new(join, tx)))
 }
 
 /// Start an HTTP server forwarding requests to a shared handler while capturing request bodies for assertions.
@@ -171,7 +176,7 @@ pub async fn start_mitm_capture()
         }
     });
 
-    Ok((addr, handler, ShutdownHandle { join, stop: tx }))
+    Ok((addr, handler, ShutdownHandle::new(join, tx)))
 }
 /// Create a `vk` command configured for testing.
 ///

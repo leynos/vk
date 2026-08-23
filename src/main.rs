@@ -158,7 +158,10 @@ pub enum VkError {
         /// Branch for which no pull request exists.
         branch: Box<str>,
     },
-    /// The API returned an unsuccessful response with a textual body.
+    /// An API request or local processing step failed with a textual diagnostic.
+    ///
+    /// This includes unsuccessful API responses and local failures such as
+    /// request serialization errors or pagination exceeding its page limit.
     #[error("bad response: {0}")]
     BadResponse(Box<str>),
     /// The API returned no data for a successful GraphQL operation.

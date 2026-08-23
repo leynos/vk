@@ -4,6 +4,7 @@
 
 use assert_cmd::prelude::*;
 use bytes::Bytes;
+use futures::FutureExt as _;
 use http_body_util::Full;
 use hyper::{
     Request, Response, StatusCode,
@@ -15,6 +16,7 @@ use std::borrow::ToOwned;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
+mod resolve_async_mitm;
 mod utils;
 use utils::{start_mitm, start_mitm_capture, vk_cmd};
 
@@ -24,7 +26,6 @@ struct Page {
     comment_id: u32,
     thread_id: &'static str,
 }
-
 impl Page {
     fn next(end_cursor: &'static str, comment_id: u32, thread_id: &'static str) -> Self {
         Self {
@@ -33,7 +34,6 @@ impl Page {
             thread_id,
         }
     }
-
     fn last_with(comment_id: u32, thread_id: &'static str) -> Self {
         Self {
             end_cursor: None,
@@ -41,7 +41,6 @@ impl Page {
             thread_id,
         }
     }
-
     fn body(&self) -> String {
         self.end_cursor.map_or_else(
             || {
@@ -302,23 +301,27 @@ async fn resolve_normalizes_api_uri_trailing_slashes(#[case] api_uri_suffix: &st
 
 #[tokio::test(flavor = "multi_thread")]
 async fn resolve_reply_honours_total_http_timeout() {
-    let (addr, handler, shutdown) = start_mitm().await.expect("start server");
+    let (addr, handler, shutdown) = resolve_async_mitm::start_async_mitm()
+        .await
+        .expect("start server");
     *handler.lock().expect("lock handler") = Box::new(move |req| {
-        if req.uri().path().ends_with("/replies") {
-            tokio::task::block_in_place(|| {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-            });
-        }
+        let is_reply = req.uri().path().ends_with("/replies");
         let body = if req.uri().path() == "/graphql" {
             r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
         } else {
             "{}"
         };
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(CONTENT_TYPE, "application/json")
-            .body(Full::from(body))
-            .expect("response")
+        async move {
+            if is_reply {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, "application/json")
+                .body(Full::from(body))
+                .expect("response")
+        }
+        .boxed()
     });
     let output = tokio::task::spawn_blocking(move || {
         vk_cmd(addr)
