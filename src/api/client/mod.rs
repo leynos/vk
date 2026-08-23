@@ -26,7 +26,7 @@ use self::helpers::{
     snippet,
 };
 use self::http::HttpResponse;
-use self::transport::Transport;
+use self::transport::{PostJsonRequest, Transport};
 use self::types::GraphQLResponse;
 use super::retry::{RetryConfig, build_retry_builder, should_retry};
 
@@ -134,12 +134,12 @@ impl GraphQLClient {
     ) -> Result<HttpResponse, VkError> {
         let resp = self
             .transport
-            .post_json(
-                &self.endpoint,
-                &self.headers,
+            .post_json(PostJsonRequest {
+                endpoint: &self.endpoint,
+                headers: &self.headers,
                 payload,
-                self.retry.request_timeout,
-            )
+                timeout: self.retry.request_timeout,
+            })
             .await?;
         self.log_transcript(payload, operation, &resp);
         if !(200..300).contains(&resp.status) {

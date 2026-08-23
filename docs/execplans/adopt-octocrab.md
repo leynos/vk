@@ -685,17 +685,20 @@ In `src/api/client/transport.rs` (PR 2, new, private to `client`):
 /// Owns the pooled hyper client used for GraphQL requests.
 pub(super) struct Transport { /* hyper_util legacy client + HTTPS connector */ }
 
+pub(super) struct PostJsonRequest<'a> {
+    pub(super) endpoint: &'a Endpoint,
+    pub(super) headers: &'a http::HeaderMap,
+    pub(super) payload: &'a serde_json::Value,
+    pub(super) timeout: std::time::Duration,
+}
+
 impl Transport {
     pub(super) fn new() -> Result<Self, VkError>;
 
-    /// POST `payload` to `endpoint` with `headers`, honouring `timeout`
-    /// across the whole request, returning status and body.
+    /// Send a JSON POST request and return its status and body.
     pub(super) async fn post_json(
         &self,
-        endpoint: &Endpoint,
-        headers: &http::HeaderMap,
-        payload: &serde_json::Value,
-        timeout: std::time::Duration,
+        request: PostJsonRequest<'_>,
     ) -> Result<HttpResponse, VkError>;
 }
 ```

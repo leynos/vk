@@ -7,7 +7,7 @@ use tokio::time::Duration;
 /// Configuration for retrying failed GraphQL requests.
 #[derive(Clone, Copy, Debug)]
 pub struct RetryConfig {
-    /// Total number of attempts including the initial request.
+    /// Number of retries permitted after the initial request.
     pub attempts: usize,
     /// Base delay for the exponential backoff.
     pub base_delay: Duration,

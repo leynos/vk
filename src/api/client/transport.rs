@@ -17,7 +17,7 @@
 //!   default; the GraphQL POST target never issues one in practice, so a 3xx
 //!   would surface as a non-2xx error exactly like any other unexpected status.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use http::header::CONTENT_TYPE;
 use http::{HeaderMap, HeaderValue, Method, Request, Uri};
@@ -37,7 +37,23 @@ use crate::boxed::BoxedStr;
 
 /// Owns the pooled hyper client used for GraphQL requests.
 pub(super) struct Transport {
+    /// Pooled client shared by every GraphQL request.
     client: Client<HttpsConnector<HttpConnector>, Full<Bytes>>,
+}
+
+/// Inputs for one JSON POST through the GraphQL transport.
+///
+/// Grouping the request data keeps the transport boundary cohesive as the
+/// caller preserves the existing GraphQL request contract.
+pub(super) struct PostJsonRequest<'a> {
+    /// GraphQL endpoint to receive the request.
+    pub(super) endpoint: &'a Endpoint,
+    /// Headers applied to the request.
+    pub(super) headers: &'a HeaderMap,
+    /// JSON payload serialized into the request body.
+    pub(super) payload: &'a Value,
+    /// Deadline covering request submission and body collection.
+    pub(super) timeout: Duration,
 }
 
 impl Transport {
@@ -68,8 +84,7 @@ impl Transport {
         Ok(Self { client })
     }
 
-    /// POST `payload` to `endpoint` with `headers`, honouring `timeout` across
-    /// the whole request, returning the response status and body.
+    /// Send a JSON POST request and return its status and body.
     ///
     /// The `timeout` bounds the entire exchange (connection, send, and body
     /// collection), mirroring reqwest's `.timeout()` scope. A timeout maps to a
@@ -85,11 +100,14 @@ impl Transport {
     /// body cannot be collected.
     pub(super) async fn post_json(
         &self,
-        endpoint: &Endpoint,
-        headers: &HeaderMap,
-        payload: &Value,
-        timeout: Duration,
+        request: PostJsonRequest<'_>,
     ) -> Result<HttpResponse, VkError> {
+        let PostJsonRequest {
+            endpoint,
+            headers,
+            payload,
+            timeout,
+        } = request;
         // Reconstruct the same request-context strings the reqwest client
         // produced: the operation name (or a query snippet fallback) and a
         // redacted payload snippet. Derived from the payload so this transport
@@ -113,41 +131,38 @@ impl Transport {
             }
         })?;
 
-        let exchange = async {
-            let response =
-                self.client
-                    .request(request)
-                    .await
-                    .map_err(|e| VkError::RequestContext {
-                        context: make_ctx(None),
-                        source: Box::new(e),
-                    })?;
-            let status = response.status().as_u16();
-            let collected =
-                response
-                    .into_body()
-                    .collect()
-                    .await
-                    .map_err(|e| VkError::RequestContext {
-                        context: make_ctx(Some(status)),
-                        source: Box::new(e),
-                    })?;
-            // Lossily decode, matching reqwest's UTF-8 text handling; decoding
-            // never fails, so only a collection error can surface above.
-            let body = String::from_utf8_lossy(&collected.to_bytes()).into_owned();
-            Ok::<HttpResponse, VkError>(HttpResponse { status, body })
-        };
-
-        match tokio::time::timeout(timeout, exchange).await {
-            Ok(result) => result,
-            Err(_elapsed) => Err(VkError::RequestContext {
+        let started_at = Instant::now();
+        let response = tokio::time::timeout(timeout, self.client.request(request))
+            .await
+            .map_err(|_| request_timeout_error(make_ctx(None), timeout))?
+            .map_err(|e| VkError::RequestContext {
                 context: make_ctx(None),
-                source: Box::new(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    format!("request timed out after {timeout:?}"),
-                )),
-            }),
-        }
+                source: Box::new(e),
+            })?;
+        let status = response.status().as_u16();
+        let remaining = timeout.saturating_sub(started_at.elapsed());
+        let collected = tokio::time::timeout(remaining, response.into_body().collect())
+            .await
+            .map_err(|_| request_timeout_error(make_ctx(Some(status)), timeout))?
+            .map_err(|e| VkError::RequestContext {
+                context: make_ctx(Some(status)),
+                source: Box::new(e),
+            })?;
+        // Lossily decode, matching reqwest's UTF-8 text handling; decoding
+        // never fails, so only a collection error can surface above.
+        let body = String::from_utf8_lossy(&collected.to_bytes()).into_owned();
+        Ok(HttpResponse { status, body })
+    }
+}
+
+/// Convert an elapsed request deadline into the established error shape.
+fn request_timeout_error(context: Box<str>, timeout: Duration) -> VkError {
+    VkError::RequestContext {
+        context,
+        source: Box::new(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            format!("request timed out after {timeout:?}"),
+        )),
     }
 }
 
