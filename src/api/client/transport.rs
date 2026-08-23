@@ -84,7 +84,7 @@ impl Transport {
         Ok(Self { client })
     }
 
-    /// Send a JSON POST request and return its status and body.
+    /// Send the supplied `request` as a JSON POST and return its status and body.
     ///
     /// The `timeout` bounds the entire exchange (connection, send, and body
     /// collection), mirroring reqwest's `.timeout()` scope. A timeout maps to a
