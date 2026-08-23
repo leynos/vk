@@ -3,9 +3,10 @@
 #![cfg(feature = "unstable-rest-resolve")]
 
 use assert_cmd::prelude::*;
+use bytes::Bytes;
 use http_body_util::Full;
 use hyper::{
-    Response, StatusCode,
+    Request, Response, StatusCode,
     header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE},
 };
 use predicates::prelude::*;
@@ -134,6 +135,28 @@ async fn resolve_flows(#[case] pages: Vec<Page>, #[case] expected_posts: usize) 
     run_resolve_flow(pages, expected_posts).await;
 }
 
+fn assert_reply_request(req: &Request<Bytes>) {
+    assert_eq!(req.body().as_ref(), br#"{"body":"done"}"#);
+    assert_eq!(
+        req.headers().get(AUTHORIZATION).expect("authorization"),
+        "Bearer dummy"
+    );
+    assert_eq!(
+        req.headers().get(ACCEPT).expect("accept"),
+        "application/vnd.github+json"
+    );
+    assert_eq!(
+        req.headers()
+            .get("x-github-api-version")
+            .expect("GitHub API version"),
+        "2022-11-28"
+    );
+    assert_eq!(
+        req.headers().get(CONTENT_TYPE).expect("content type"),
+        "application/json"
+    );
+}
+
 async fn run_reply_flow(
     rest_status: StatusCode,
     api_uri_suffix: &str,
@@ -146,25 +169,7 @@ async fn run_reply_flow(
         let gql_calls = vec.iter().filter(|c| c.ends_with("/graphql")).count();
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         if req.uri().path().ends_with("/replies") {
-            assert_eq!(req.body().as_ref(), br#"{"body":"done"}"#);
-            assert_eq!(
-                req.headers().get(AUTHORIZATION).expect("authorization"),
-                "Bearer dummy"
-            );
-            assert_eq!(
-                req.headers().get(ACCEPT).expect("accept"),
-                "application/vnd.github+json"
-            );
-            assert_eq!(
-                req.headers()
-                    .get("x-github-api-version")
-                    .expect("GitHub API version"),
-                "2022-11-28"
-            );
-            assert_eq!(
-                req.headers().get(CONTENT_TYPE).expect("content type"),
-                "application/json"
-            );
+            assert_reply_request(req);
         }
         let status = if req.uri().path().ends_with("/replies") {
             rest_status

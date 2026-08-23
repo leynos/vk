@@ -12,7 +12,10 @@ use super::{
     rest_metrics::{ReplyAttemptOutcome, record_reply_attempt},
 };
 use crate::{VkError, boxed::BoxedStr};
-use http::header::{ACCEPT, HeaderName};
+use http::{
+    StatusCode,
+    header::{ACCEPT, HeaderName},
+};
 use octocrab::Octocrab;
 use serde_json::json;
 #[cfg(test)]
@@ -145,7 +148,16 @@ pub(crate) async fn post_reply(
             });
         }
     };
-    let status = response.status();
+    handle_reply_response(response.status(), started_at, reference, route.as_str())
+}
+
+/// Record and map a completed reply response according to its HTTP status.
+fn handle_reply_response(
+    status: StatusCode,
+    started_at: Instant,
+    reference: CommentRef<'_>,
+    route: &str,
+) -> Result<(), VkError> {
     match classify_reply_status(status) {
         ReplyStatus::NotFound => {
             record_reply_attempt(
