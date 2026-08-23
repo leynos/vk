@@ -246,6 +246,60 @@ async fn run_query_retries_html_5xx_then_succeeds() {
     join.abort();
     let _ = join.await;
 }
+
+#[tokio::test]
+async fn run_query_retains_status_when_response_body_times_out() {
+    let (mut sender, body) = Body::channel();
+    let response_body = Arc::new(Mutex::new(Some(body)));
+    let service = make_service_fn(move |_connection| {
+        let response_body = Arc::clone(&response_body);
+        async move {
+            Ok::<_, Infallible>(service_fn(move |_request| {
+                let response_body = Arc::clone(&response_body);
+                async move {
+                    let body = response_body
+                        .lock()
+                        .expect("lock response body")
+                        .take()
+                        .expect("serve one response");
+                    Ok::<_, Infallible>(
+                        Response::builder()
+                            .status(StatusCode::SERVICE_UNAVAILABLE)
+                            .body(body)
+                            .expect("response"),
+                    )
+                }
+            }))
+        }
+    });
+    let server = Server::bind(&"127.0.0.1:0".parse().expect("parse address")).serve(service);
+    let address = server.local_addr();
+    let server_task = tokio::spawn(async move {
+        let _ = server.await;
+    });
+    let sender_task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let _ = sender.send_data("{}".into()).await;
+    });
+    let retry = RetryConfig {
+        attempts: 0,
+        base_delay: Duration::ZERO,
+        request_timeout: Duration::from_millis(20),
+        jitter: false,
+    };
+    let client =
+        GraphQLClient::with_endpoint_retry("token", format!("http://{address}"), None, retry)
+            .expect("create client");
+
+    let error = client
+        .run_query::<_, Value>("query SlowBody { viewer { login } }", json!({}))
+        .await
+        .expect_err("body collection times out");
+
+    assert!(error.to_string().contains("status 503"), "{error}");
+    sender_task.abort();
+    server_task.abort();
+}
 #[derive(Debug)]
 struct TestCase {
     responses: Vec<String>,

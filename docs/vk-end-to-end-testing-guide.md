@@ -145,9 +145,9 @@ release binary, keeping it lean and free of unnecessary code.
 
 The following dependencies are required to build the complete E2E test suite for
 `vk`. Each one plays a specific, interconnected role within the test
-architecture. For instance, the `third-wheel` mock server is asynchronous and
-therefore requires the `tokio` runtime to execute. The mock server, in turn,
-needs to serve predefined JSON responses, which are loaded and handled using
+architecture. For instance, loopback stubs require the `tokio` runtime, while
+some unit-test helpers obtain hyper types through `third-wheel` re-exports. The
+stubs serve predefined JSON responses, which are loaded and handled using
 `serde_json`. This interconnectedness highlights how the chosen stack forms a
 self-contained ecosystem for testing.
 
@@ -171,8 +171,8 @@ The table below outlines the purpose of each dependency within the test suite.
 | ----------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | assert_cmd  | ~2.0                | The core test orchestrator for executing the vk binary and asserting on its behaviour.[^8]                                                              |
 | insta       | ~1.34               | For snapshot testing of the styled terminal output, handling the complexity of termimad.[^17] The redactions feature is enabled to handle dynamic data. |
-| third-wheel | ~0.6                | An embedded MITM proxy to intercept and mock GitHub API calls, ensuring deterministic tests.[^18]                                                       |
-| tokio       | ~1.0                | An async runtime required to run the third-wheel mock server concurrently with the test logic. The full feature flag is recommended for simplicity.     |
+| third-wheel | ~0.6                | Re-exports hyper types used by unit-test helpers; it does not proxy requests or provide network isolation.[^18]                                         |
+| tokio       | ~1.0                | An async runtime for loopback stub servers and test logic. The full feature flag is recommended for simplicity.                                         |
 | serde_json  | ~1.0                | A utility for loading and manipulating the JSON fixture files used as mock API responses.                                                               |
 | tempfile    | ~3.8                | For creating temporary configuration files and directories to test vk's configuration logic in an isolated manner.[^19]                                 |
 
