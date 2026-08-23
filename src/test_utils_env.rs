@@ -102,6 +102,7 @@ pub fn strip_ansi_codes(input: &str) -> String {
     out
 }
 
+/// Consume a control-sequence introducer and report whether it terminates.
 fn skip_ansi_sequence(chars: &mut impl Iterator<Item = char>) -> bool {
     if !matches!(chars.next(), Some('[')) {
         return false;

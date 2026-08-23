@@ -21,8 +21,11 @@ mod rest_metrics;
 /// Comment location within a pull request review thread.
 #[derive(Copy, Clone, Debug)]
 pub struct CommentRef<'a> {
+    /// Repository containing the comment.
     pub repo: &'a RepoInfo,
+    /// Pull-request number containing the comment.
     pub pull_number: u64,
+    /// Database identifier of the comment.
     pub comment_id: u64,
 }
 

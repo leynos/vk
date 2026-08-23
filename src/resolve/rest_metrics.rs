@@ -9,15 +9,20 @@ use http::StatusCode;
 use metrics::{Unit, counter, histogram};
 use std::time::Instant;
 
+/// Metric counting REST reply attempts.
 const REQUEST_COUNT: &str = "vk.resolve.rest_reply.requests.total";
+/// Metric recording REST reply duration in seconds.
 const REQUEST_DURATION: &str = "vk.resolve.rest_reply.duration.seconds";
+/// Metric counting REST reply attempts that exceed the total deadline.
 const TIMEOUT_COUNT: &str = "vk.resolve.rest_reply.timeouts.total";
 
 /// Result of one request attempt, expressed with bounded labels.
 pub(super) enum ReplyAttemptOutcome {
     /// The REST server returned a response.
     Response {
+        /// HTTP status returned by the REST server.
         status: StatusCode,
+        /// Classification applied to the HTTP status.
         result: ReplyStatus,
     },
     /// The total request deadline expired.
@@ -27,6 +32,7 @@ pub(super) enum ReplyAttemptOutcome {
 }
 
 impl ReplyAttemptOutcome {
+    /// Return the bounded metric labels for this outcome.
     fn labels(self) -> (&'static str, &'static str, &'static str) {
         match self {
             Self::Response {

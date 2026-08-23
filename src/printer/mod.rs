@@ -11,6 +11,7 @@ use crate::reviews::PullRequestReview;
 use crate::{ReviewComment, ReviewThread};
 use vk::icons::{ICON_COMMENT, ICON_FILE, ICON_PERMALINK, ICON_REVIEW};
 
+/// Write an author banner with its icon and suffix.
 fn write_author_line<W: std::io::Write>(
     out: &mut W,
     icon: &str,
@@ -106,6 +107,7 @@ fn collapse_excessive_newlines(input: String) -> String {
     buf
 }
 
+/// Render a [`Formattable`] item, including its author banner and body.
 fn write_formattable<W: std::io::Write, T: Formattable>(
     mut out: W,
     skin: &MadSkin,

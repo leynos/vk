@@ -87,6 +87,7 @@ pub fn print_summary(summary: &[(String, usize)]) {
     }
 }
 
+/// Write one banner line to the provided writer.
 fn write_banner<W: Write>(mut out: W, text: &str) -> std::io::Result<()> {
     writeln!(out, "{text}")
 }

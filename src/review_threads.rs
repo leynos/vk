@@ -18,64 +18,90 @@ use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, VkError};
 
 #[derive(Debug, Deserialize, Default)]
+/// Top-level response for the review-thread query.
 struct ThreadData {
+    /// Repository response data.
     repository: Repository,
 }
 
 #[derive(Debug, Deserialize, Default)]
+/// Repository response data for a pull request.
 struct Repository {
     #[serde(rename = "pullRequest")]
+    /// Pull-request response data.
     pull_request: PullRequest,
 }
 
 #[derive(Debug, Deserialize, Default)]
+/// Pull-request response data for review threads.
 struct PullRequest {
     #[serde(rename = "reviewThreads")]
+    /// Review-thread connection returned by GitHub.
     review_threads: ReviewThreadConnection,
 }
 
 #[derive(Debug, Deserialize, Default)]
+/// Wrapper for a nullable GraphQL node.
 struct NodeWrapper<T> {
+    /// Node value, when the requested node exists.
     node: Option<T>,
 }
 
 #[derive(Debug, Deserialize, Default)]
+/// Comment node containing its comment connection.
 struct CommentNode {
+    /// Comments attached to the node.
     comments: CommentConnection,
 }
 
 #[derive(Debug, Deserialize, Default)]
+/// A paginated GraphQL connection.
 pub struct Connection<T> {
+    /// Items returned in this page.
     pub nodes: Vec<T>,
     #[serde(rename = "pageInfo")]
+    /// Pagination metadata for this page.
     pub page_info: PageInfo,
 }
 
+/// Connection containing review threads.
 type ReviewThreadConnection = Connection<ReviewThread>;
+/// Connection containing review comments.
 pub type CommentConnection = Connection<ReviewComment>;
 
 /// Details of a single review thread.
 #[derive(Debug, Deserialize, Default)]
 pub struct ReviewThread {
+    /// Global identifier of the review thread.
     pub id: String,
     #[serde(rename = "isResolved")]
+    /// Whether the thread has been resolved.
     pub is_resolved: bool,
     #[serde(default, rename = "isOutdated")]
+    /// Whether the thread refers to an outdated diff.
     pub is_outdated: bool,
+    /// Comments belonging to the thread.
     pub comments: CommentConnection,
 }
 
 /// A single review comment.
 #[derive(Debug, Deserialize, Default)]
 pub struct ReviewComment {
+    /// Comment body in Markdown.
     pub body: String,
     #[serde(rename = "diffHunk")]
+    /// Diff hunk surrounding the comment.
     pub diff_hunk: String,
     #[serde(rename = "originalPosition")]
+    /// Original line position before later diffs moved the comment.
     pub original_position: Option<i32>,
+    /// Current line position, when GitHub provides one.
     pub position: Option<i32>,
+    /// Repository-relative path containing the comment.
     pub path: String,
+    /// Web URL for the comment.
     pub url: String,
+    /// Author of the comment, when available.
     pub author: Option<User>,
 }
 
@@ -83,8 +109,10 @@ pub struct ReviewComment {
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct PageInfo {
     #[serde(rename = "hasNextPage")]
+    /// Whether another page is available.
     pub has_next_page: bool,
     #[serde(rename = "endCursor")]
+    /// Cursor to use when requesting the next page.
     pub end_cursor: Option<String>,
 }
 
@@ -132,6 +160,7 @@ impl PageInfo {
 /// Minimal user representation for authorship information.
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct User {
+    /// GitHub login for the user.
     pub login: String,
 }
 

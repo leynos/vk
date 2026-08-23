@@ -12,36 +12,49 @@ use crate::graphql_queries::PR_FOR_BRANCH_QUERY;
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, VkError};
 
+/// GraphQL data returned when looking up pull requests for a branch.
 #[derive(Debug, Deserialize)]
 pub(crate) struct PrForBranchData {
+    /// Repository containing the matching pull requests.
     repository: PrForBranchRepository,
 }
 
+/// Repository portion of a branch pull-request lookup response.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PrForBranchRepository {
+    /// Pull requests matching the branch query.
     pull_requests: PrConnection,
 }
 
+/// Connection containing pull requests returned by GitHub.
 #[derive(Debug, Deserialize)]
 struct PrConnection {
+    /// Pull-request nodes in the connection.
     nodes: Vec<PrNode>,
 }
 
+/// Pull-request identity and head-repository data.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct PrNode {
+    /// Pull-request number.
     pub(crate) number: u64,
+    /// Repository from which the pull request originates, when available.
     pub(crate) head_repository: Option<HeadRepository>,
 }
 
+/// Head-repository data for a pull request.
 #[derive(Debug, Deserialize)]
 pub(crate) struct HeadRepository {
+    /// Owner of the head repository.
     pub(crate) owner: Owner,
 }
 
+/// GitHub repository-owner information.
 #[derive(Debug, Deserialize)]
 pub(crate) struct Owner {
+    /// GitHub login for the owner.
     pub(crate) login: String,
 }
 

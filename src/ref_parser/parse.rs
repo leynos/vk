@@ -11,9 +11,11 @@ use url::Url;
 use super::{DefaultRepo, RepoInfo, parse_repo_str};
 use crate::VkError;
 
+/// Match the owner and repository components of a GitHub URL or remote.
 pub(super) static GITHUB_RE: LazyLock<Result<Regex, regex::Error>> =
     LazyLock::new(|| Regex::new(r"github\.com[/:](?P<owner>[^/]+)/(?P<repo>[^/]+)"));
 
+/// Remove the optional `.git` suffix from a repository name.
 pub(super) fn strip_git_suffix(name: &str) -> &str {
     name.strip_suffix(".git").unwrap_or(name)
 }
@@ -23,13 +25,17 @@ fn format_repo(repo: &RepoInfo) -> String {
     format!("{}/{}", repo.owner, repo.name)
 }
 
+/// GitHub resource kind accepted by a reference parser.
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum ResourceType {
+    /// An issue reference.
     Issues,
+    /// A pull-request reference.
     PullRequest,
 }
 
 impl ResourceType {
+    /// Return URL path segments valid for this resource kind.
     pub(super) fn allowed_segments(self) -> &'static [&'static str] {
         match self {
             Self::Issues => &["issues", "issue"],
@@ -38,6 +44,7 @@ impl ResourceType {
     }
 }
 
+/// Parse a full GitHub URL for the requested resource kind.
 pub(super) fn parse_github_url(
     input: &str,
     resource: ResourceType,
@@ -68,6 +75,7 @@ pub(super) fn parse_github_url(
     }
 }
 
+/// Parse a full URL or bare number into a repository and resource number.
 pub(super) fn parse_reference(
     input: &str,
     default_repo: DefaultRepo,

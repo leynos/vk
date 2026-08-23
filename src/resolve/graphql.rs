@@ -5,12 +5,14 @@ use crate::{VkError, api::GraphQLClient};
 use serde::Deserialize;
 use serde_json::json;
 
+/// GraphQL mutation used to mark a review thread as resolved.
 const RESOLVE_THREAD_MUTATION: &str = r"
     mutation($id: ID!) {
       resolveReviewThread(input: {threadId: $id}) { clientMutationId }
     }
 ";
 
+/// GraphQL query used to fetch one page of review comments.
 const REVIEW_COMMENTS_PAGE: &str = r"
     query($owner: String!, $name: String!, $number: Int!, $after: String) {
       repository(owner: $owner, name: $name) {
@@ -28,20 +30,27 @@ const REVIEW_COMMENTS_PAGE: &str = r"
 use mockall::automock;
 
 #[derive(Debug)]
+/// Variables for a paginated review-comment query.
 pub(crate) struct ReviewCommentsQuery<'a> {
+    /// Repository owner login.
     pub owner: &'a str,
+    /// Repository name.
     pub name: &'a str,
+    /// Pull-request number.
     pub number: u64,
+    /// Cursor returned by the preceding page, if any.
     pub after: Option<String>,
 }
 
 #[cfg_attr(test, automock)]
 #[allow(clippy::ref_option, reason = "automock generates &Option")]
+/// Fetches pages of review comments for a pull request.
 pub(crate) trait ReviewCommentsFetcher {
     #[allow(
         clippy::elidable_lifetime_names,
         reason = "automock requires explicit lifetime for query struct"
     )]
+    /// Fetch one page of review comments.
     async fn fetch_review_comments<'a>(
         &self,
         query: ReviewCommentsQuery<'a>,
@@ -71,60 +80,82 @@ impl ReviewCommentsFetcher for GraphQLClient {
 }
 
 #[derive(Clone, Deserialize)]
+/// GraphQL response containing one page of review comments.
 pub(crate) struct ReviewCommentsPage {
+    /// Repository data, when the repository exists.
     repository: Option<Repository>,
 }
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Repository portion of a review-comment response.
 pub(crate) struct Repository {
+    /// Pull request data, when the pull request exists.
     pull_request: Option<PullRequest>,
 }
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Pull-request portion of a review-comment response.
 pub(crate) struct PullRequest {
+    /// Review comments connection, when available.
     review_comments: Option<ReviewComments>,
 }
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Review-comment connection and pagination information.
 pub(crate) struct ReviewComments {
+    /// Pagination metadata.
     page_info: PageInfo,
+    /// Comments in this page.
     nodes: Vec<CommentNode>,
 }
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Cursor metadata for a review-comment page.
 pub(crate) struct PageInfo {
+    /// Cursor for the next page, when present.
     end_cursor: Option<String>,
+    /// Whether another page is available.
     has_next_page: bool,
 }
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// Review-comment node carrying its database and thread identifiers.
 pub(crate) struct CommentNode {
+    /// GitHub database identifier for the comment.
     database_id: u64,
+    /// Thread associated with the comment.
     pull_request_review_thread: ReviewThread,
 }
 
 #[derive(Clone, Deserialize)]
+/// GraphQL representation of a review thread.
 pub(crate) struct ReviewThread {
+    /// Global GraphQL identifier for the thread.
     id: String,
 }
 
 #[derive(Clone, Deserialize)]
+/// Response returned by the resolve-thread mutation.
 pub(crate) struct ResolveThreadResponse {
     #[serde(rename = "resolveReviewThread")]
+    /// Mutation payload, when GitHub returns one.
     _resolve_review_thread: Option<ResolveThreadInner>,
 }
 
 #[derive(Clone, Deserialize)]
+/// Payload returned by the resolve-thread mutation.
 pub(crate) struct ResolveThreadInner {
     #[serde(rename = "clientMutationId")]
+    /// Client mutation identifier returned by GitHub.
     _client_mutation_id: Option<String>,
 }
 
+/// Find the GraphQL thread identifier for a review comment.
 pub(crate) async fn get_thread_id(
     gql: &impl ReviewCommentsFetcher,
     reference: CommentRef<'_>,
@@ -172,6 +203,7 @@ pub(crate) async fn get_thread_id(
     })
 }
 
+/// Mark a GraphQL review thread as resolved.
 pub(crate) async fn resolve_thread(gql: &GraphQLClient, thread_id: &str) -> Result<(), VkError> {
     let _: ResolveThreadResponse = gql
         .run_query(RESOLVE_THREAD_MUTATION, json!({ "id": thread_id }))

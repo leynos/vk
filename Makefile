@@ -1,9 +1,10 @@
-.PHONY: help all clean test build release lint fmt check-fmt markdownlint nixie
+.PHONY: help all clean test typecheck build release lint fmt check-fmt markdownlint nixie
 
 APP ?= vk
 CARGO ?= cargo
 BUILD_JOBS ?=
 CLIPPY_FLAGS ?= --all-targets --all-features -- -D warnings
+RUSTDOC_FLAGS ?= --cfg docsrs -D warnings
 MDLINT ?= markdownlint-cli2
 NIXIE ?= nixie
 
@@ -18,11 +19,15 @@ clean: ## Remove build artifacts
 test: ## Run tests with warnings treated as errors
 	RUSTFLAGS="-D warnings" $(CARGO) test --all-targets --all-features $(BUILD_JOBS)
 
+typecheck: ## Check all targets and features
+	$(CARGO) check --all-targets --all-features $(BUILD_JOBS)
+
 target/%/$(APP): Cargo.toml ## Build binary in debug or release mode
 	$(CARGO) build $(BUILD_JOBS) $(if $(findstring release,$(@)),--release) --bin $(APP)
 
-lint: ## Run Clippy with warnings denied
+lint: ## Run Clippy and rustdoc with warnings denied
 	$(CARGO) clippy $(CLIPPY_FLAGS)
+	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings" $(CARGO) doc --no-deps
 
 fmt: ## Format Rust and Markdown sources
 	$(CARGO) fmt --all

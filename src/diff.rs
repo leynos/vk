@@ -9,6 +9,7 @@ use crate::ReviewComment;
 /// Width of the line number gutter in diff output
 pub const GUTTER_WIDTH: usize = 5;
 
+/// Recognize the line-range header at the start of a unified diff hunk.
 static HUNK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"@@ -(?P<old>\d+)(?:,(?P<old_count>\d+))? \+(?P<new>\d+)(?:,(?P<new_count>\d+))? @@",
@@ -16,6 +17,7 @@ static HUNK_RE: LazyLock<Regex> = LazyLock::new(|| {
     .expect("valid regex")
 });
 
+/// Parse diff lines while tracking their old and new line numbers.
 fn parse_diff_lines<'a, I>(
     lines: I,
     mut old_line: Option<i32>,
@@ -50,6 +52,7 @@ where
     parsed
 }
 
+/// Format a line number for the fixed-width diff gutter.
 fn num_disp(num: i32) -> String {
     let mut s = num.to_string();
     if s.len() > GUTTER_WIDTH {

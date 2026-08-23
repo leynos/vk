@@ -26,7 +26,9 @@ use vk::environment;
 /// Wraps an [`Octocrab`] instance built from the resolved base URI and the
 /// caller's authentication token.
 pub(crate) struct RestClient {
+    /// Configured Octocrab transport.
     client: Octocrab,
+    /// Total deadline applied to each reply request.
     timeout: Duration,
     #[cfg(test)]
     request_count: AtomicUsize,

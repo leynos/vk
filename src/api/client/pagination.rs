@@ -7,6 +7,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 
+/// Maximum number of pages fetched by one pagination operation.
 const MAX_PAGES: usize = 1000;
 
 impl GraphQLClient {

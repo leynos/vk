@@ -79,6 +79,7 @@ pkg-fmt = "tgz"
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 trivially_copy_pass_by_ref = "warn"
+missing_docs_in_private_items = "deny"
 
 # 1. hygiene
 # Unfortunately, due to an 'unused-braces' false postive with
@@ -116,3 +117,15 @@ string_lit_as_bytes    = "deny"
 
 # 6. numerical foot-guns
 float_arithmetic = "deny"
+
+[lints.rust]
+missing_docs = "deny"
+
+[lints.rustdoc]
+missing_crate_level_docs = "deny"
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+bare_urls = "deny"
+invalid_html_tags = "deny"
+invalid_codeblock_attributes = "deny"
+unescaped_backticks = "deny"

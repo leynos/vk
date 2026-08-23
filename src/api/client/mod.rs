@@ -36,10 +36,15 @@ mod tests;
 /// The client handles authentication headers and optional request
 /// transcription for debugging.
 pub struct GraphQLClient {
+    /// HTTP client used to send GraphQL requests.
     client: reqwest::Client,
+    /// Headers applied to every GraphQL request.
     headers: HeaderMap,
+    /// GraphQL endpoint targeted by this client.
     endpoint: Endpoint,
+    /// Optional writer for request and response transcripts.
     transcript: Option<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>,
+    /// Retry and timeout settings for requests.
     retry: RetryConfig,
 }
 
