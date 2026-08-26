@@ -260,7 +260,7 @@ async fn run_query_retains_status_when_response_body_times_out() {
                 async move {
                     requests.fetch_add(1, Ordering::SeqCst);
                     let body = Body::wrap_stream(futures::stream::once(async {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        tokio::time::sleep(Duration::from_millis(500)).await;
                         Ok::<_, Infallible>(Bytes::from_static(b"{}"))
                     }));
                     Ok::<_, Infallible>(
@@ -281,7 +281,7 @@ async fn run_query_retains_status_when_response_body_times_out() {
     let retry = RetryConfig {
         attempts: 1,
         base_delay: Duration::from_millis(1),
-        request_timeout: Duration::from_millis(20),
+        request_timeout: Duration::from_millis(100),
         jitter: false,
     };
     let client =

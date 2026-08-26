@@ -77,6 +77,116 @@ struct CapturedRequest {
     payload: Value,
 }
 
+impl CapturedRequest {
+    /// Read a loopback request into the fields asserted by the contract test.
+    async fn from_request(request: Request<Body>) -> Self {
+        let (parts, body) = request.into_parts();
+        let payload = serde_json::from_slice(&to_bytes(body).await.expect("read request body"))
+            .expect("parse request JSON");
+        Self {
+            method: parts.method,
+            path: parts.uri.path().to_string(),
+            content_type: parts
+                .headers
+                .get("content-type")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string),
+            user_agent: parts
+                .headers
+                .get("user-agent")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string),
+            accept: parts
+                .headers
+                .get("accept")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string),
+            authorization: parts
+                .headers
+                .get("authorization")
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string),
+            payload,
+        }
+    }
+}
+
+/// Assert the bounded request shape sent to a loopback endpoint override.
+fn assert_graphql_request_contract(captured: &CapturedRequest) {
+    assert_eq!(captured.method, Method::POST);
+    assert_eq!(captured.path, "/graphql-test");
+    assert_eq!(captured.content_type.as_deref(), Some("application/json"));
+    assert_eq!(captured.user_agent.as_deref(), Some("vk"));
+    assert_eq!(
+        captured.accept.as_deref(),
+        Some("application/vnd.github+json")
+    );
+    assert_eq!(captured.authorization.as_deref(), Some("Bearer test-token"));
+    assert_eq!(
+        captured.payload,
+        json!({
+            "query": "query RequestContract($id: ID!) { viewer { login } }",
+            "variables": {"id": "42"},
+            "operationName": "RequestContract",
+        })
+    );
+}
+
+/// Assert that a low-level transport result keeps the supplied diagnostics.
+fn assert_request_context(error: &VkError, expected_fragments: &[&str]) {
+    match error {
+        VkError::RequestContext { .. } => {}
+        other => panic!("unexpected error: {other:?}"),
+    }
+    let diagnostic = error.to_string();
+    for fragment in expected_fragments {
+        assert!(diagnostic.contains(fragment), "{diagnostic}");
+    }
+}
+
+/// Execute one named request through the client shared by concurrent callers.
+async fn run_concurrent_query(
+    client: Arc<GraphQLClient>,
+    operation: &'static str,
+) -> (&'static str, Value) {
+    let query = format!("query {operation} {{ viewer {{ login }} }}");
+    let response = client
+        .run_query(query.as_str(), json!({}))
+        .await
+        .expect("execute concurrent query");
+    (operation, response)
+}
+
+/// Assert each operation contributes one complete request/response transcript pair.
+fn assert_transcript_pairs(transcript: &str, operations: &[&str]) {
+    let entries: Vec<Value> = transcript
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("parse transcript line"))
+        .collect();
+    assert_eq!(entries.len(), operations.len());
+    for operation in operations {
+        let matching_entries = entries
+            .iter()
+            .filter(|entry| {
+                entry.get("operation").and_then(Value::as_str) == Some(*operation)
+                    && entry
+                        .get("request")
+                        .and_then(|request| request.get("operationName"))
+                        .and_then(Value::as_str)
+                        == Some(*operation)
+                    && entry
+                        .get("response")
+                        .and_then(Value::as_str)
+                        .is_some_and(|body| body.contains(operation))
+            })
+            .count();
+        assert_eq!(
+            matching_entries, 1,
+            "missing transcript pair for {operation}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn transport_posts_graphql_contract_to_the_endpoint_override() {
     let (capture_sender, capture_receiver) = oneshot::channel();
@@ -84,34 +194,7 @@ async fn transport_posts_graphql_contract_to_the_endpoint_override() {
     let (address, server_task) = start_loopback_server(move |request| {
         let capture_sender = Arc::clone(&capture_sender);
         async move {
-            let (parts, body) = request.into_parts();
-            let payload = serde_json::from_slice(&to_bytes(body).await.expect("read request body"))
-                .expect("parse request JSON");
-            let captured = CapturedRequest {
-                method: parts.method,
-                path: parts.uri.path().to_string(),
-                content_type: parts
-                    .headers
-                    .get("content-type")
-                    .and_then(|value| value.to_str().ok())
-                    .map(str::to_string),
-                user_agent: parts
-                    .headers
-                    .get("user-agent")
-                    .and_then(|value| value.to_str().ok())
-                    .map(str::to_string),
-                accept: parts
-                    .headers
-                    .get("accept")
-                    .and_then(|value| value.to_str().ok())
-                    .map(str::to_string),
-                authorization: parts
-                    .headers
-                    .get("authorization")
-                    .and_then(|value| value.to_str().ok())
-                    .map(str::to_string),
-                payload,
-            };
+            let captured = CapturedRequest::from_request(request).await;
             capture_sender
                 .lock()
                 .expect("lock capture sender")
@@ -144,23 +227,7 @@ async fn transport_posts_graphql_contract_to_the_endpoint_override() {
     stop_loopback_server(server_task).await;
 
     assert_eq!(result, json!({"viewer": {"login": "octocat"}}));
-    assert_eq!(captured.method, Method::POST);
-    assert_eq!(captured.path, "/graphql-test");
-    assert_eq!(captured.content_type.as_deref(), Some("application/json"));
-    assert_eq!(captured.user_agent.as_deref(), Some("vk"));
-    assert_eq!(
-        captured.accept.as_deref(),
-        Some("application/vnd.github+json")
-    );
-    assert_eq!(captured.authorization.as_deref(), Some("Bearer test-token"));
-    assert_eq!(
-        captured.payload,
-        json!({
-            "query": "query RequestContract($id: ID!) { viewer { login } }",
-            "variables": {"id": "42"},
-            "operationName": "RequestContract",
-        })
-    );
+    assert_graphql_request_contract(&captured);
 }
 
 #[tokio::test]
@@ -184,10 +251,7 @@ async fn transport_maps_refused_loopback_connections_to_request_context() {
         .await
         .expect_err("refused connection fails");
 
-    match error {
-        VkError::RequestContext { .. } => {}
-        other => panic!("unexpected error: {other:?}"),
-    }
+    assert_request_context(&error, &[]);
 }
 
 #[tokio::test]
@@ -214,16 +278,7 @@ async fn transport_preserves_non_success_status_and_body_snippet() {
         .expect_err("non-success response fails");
     stop_loopback_server(server_task).await;
 
-    match &error {
-        VkError::RequestContext { .. } => {}
-        other => panic!("unexpected error: {other:?}"),
-    }
-    let diagnostic = error.to_string();
-    assert!(diagnostic.contains("status 502"), "{diagnostic}");
-    assert!(
-        diagnostic.contains("upstream is unavailable"),
-        "{diagnostic}"
-    );
+    assert_request_context(&error, &["status 502", "upstream is unavailable"]);
 }
 
 #[tokio::test]
@@ -246,16 +301,7 @@ async fn transport_times_out_before_receiving_response_headers() {
         .expect_err("header wait times out");
     stop_loopback_server(server_task).await;
 
-    match &error {
-        VkError::RequestContext { .. } => {}
-        other => panic!("unexpected error: {other:?}"),
-    }
-    let diagnostic = error.to_string();
-    assert!(diagnostic.contains("HeaderTimeout"), "{diagnostic}");
-    assert!(
-        diagnostic.contains("request timed out after"),
-        "{diagnostic}"
-    );
+    assert_request_context(&error, &["HeaderTimeout", "request timed out after"]);
 }
 
 #[tokio::test]
@@ -286,13 +332,7 @@ async fn transport_rejects_response_bodies_over_the_limit() {
         .expect_err("oversized response fails");
     stop_loopback_server(server_task).await;
 
-    match &error {
-        VkError::RequestContext { .. } => {}
-        other => panic!("unexpected error: {other:?}"),
-    }
-    let diagnostic = error.to_string();
-    assert!(diagnostic.contains("OversizedBody"), "{diagnostic}");
-    assert!(diagnostic.contains("status 503"), "{diagnostic}");
+    assert_request_context(&error, &["OversizedBody", "status 503"]);
 }
 
 #[tokio::test]
@@ -330,17 +370,11 @@ async fn pooled_transport_keeps_concurrent_responses_and_transcripts_isolated() 
         "ConcurrentGamma",
         "ConcurrentDelta",
     ];
-    let results = join_all(operations.into_iter().map(|operation| {
-        let client = Arc::clone(&client);
-        let query = format!("query {operation} {{ viewer {{ login }} }}");
-        async move {
-            let response: Value = client
-                .run_query(query.as_str(), json!({}))
-                .await
-                .expect("execute concurrent query");
-            (operation, response)
-        }
-    }))
+    let results = join_all(
+        operations
+            .into_iter()
+            .map(|operation| run_concurrent_query(Arc::clone(&client), operation)),
+    )
     .await;
     let transcript = std::fs::read_to_string(&transcript_path).expect("read transcript");
     stop_loopback_server(server_task).await;
@@ -348,32 +382,7 @@ async fn pooled_transport_keeps_concurrent_responses_and_transcripts_isolated() 
     for (operation, response) in results {
         assert_eq!(response, json!({"operation": operation}));
     }
-    let entries: Vec<Value> = transcript
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("parse transcript line"))
-        .collect();
-    assert_eq!(entries.len(), operations.len());
-    for operation in operations {
-        let matching_entries = entries
-            .iter()
-            .filter(|entry| {
-                entry.get("operation").and_then(Value::as_str) == Some(operation)
-                    && entry
-                        .get("request")
-                        .and_then(|request| request.get("operationName"))
-                        .and_then(Value::as_str)
-                        == Some(operation)
-                    && entry
-                        .get("response")
-                        .and_then(Value::as_str)
-                        .is_some_and(|body| body.contains(operation))
-            })
-            .count();
-        assert_eq!(
-            matching_entries, 1,
-            "missing transcript pair for {operation}"
-        );
-    }
+    assert_transcript_pairs(&transcript, &operations);
 }
 
 proptest! {

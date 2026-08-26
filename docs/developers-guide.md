@@ -131,6 +131,10 @@ future. Response collection is capped at one MiB before bytes are accumulated,
 so chunked and content-length responses cannot make the client retain an
 unbounded body.
 
+The transport's private context and collection helpers are only composed by one
+transport attempt. Do not call them from `GraphQLClient`: it retains ownership
+of retry, transcript, and HTTP-status policy.
+
 The private GraphQL metrics module records one counter and duration histogram
 per attempt. Its fixed labels are `outcome` (`success` or `failure`),
 `status_class` (`1xx`, `2xx`, `3xx`, `4xx`, `5xx`, `other`, or `none`), and
