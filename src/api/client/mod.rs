@@ -2,6 +2,7 @@
 
 mod helpers;
 mod http;
+mod metrics;
 mod pagination;
 mod transcript;
 mod transport;
@@ -32,6 +33,8 @@ use super::retry::{RetryConfig, build_retry_builder, should_retry};
 
 pub use self::types::{Endpoint, Query, Token};
 
+#[cfg(test)]
+mod client_response_tests;
 #[cfg(test)]
 mod tests;
 

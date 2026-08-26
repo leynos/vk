@@ -9,8 +9,8 @@ Status: IN PROGRESS
 ## Purpose / big picture
 
 `vk` is a command-line tool that shows unresolved GitHub pull request review
-comments in the terminal. Its bespoke GraphQL client (`src/api/client/`) still
-uses `reqwest` and is used by every subcommand. When the
+comments in the terminal. Its bespoke GraphQL client (`src/api/client/`) uses a
+pooled direct Hyper/rustls transport and is used by every subcommand. When the
 `unstable-rest-resolve` feature is enabled, the REST reply path in
 `src/resolve/rest.rs` uses Octocrab's raw `_post` route. Octocrab supplies the
 authentication and base-URI plumbing; the builder adds
@@ -208,6 +208,11 @@ escalation, not workarounds.
   and e2e testing guide corrected; all gates green; CodeRabbit review completed
   with zero findings; draft pull request opened as leynos/vk#195 (stacked on PR
   1).
+- [x] (2026-08-27) GraphQL transport hardening added loopback request-contract,
+  connection, status, header-timeout, body-timeout, response-limit, and
+  concurrent-transcript coverage; bounded metrics and property tests cover
+  outcome labels, every `u16` status classification, and the response-size
+  boundary.
 - [ ] PR 3: vendored schema, `.graphql` documents, generated types behind a
   conversion layer, typed pagination; raw query constants deleted; full suite
   green.
@@ -335,10 +340,11 @@ preserves the route, headers, total deadline, authentication, and
 gates; the 2026-07-28 follow-up added total-deadline coverage and strengthened
 the route, body, authentication, header, and status assertions.
 
-PR 2 remains future work: replace `reqwest` in the bespoke GraphQL client with
-the planned hyper transport and verify its removal from the dependency graph.
-PR 3 remains future work: add typed GraphQL code generation and migrate the
-query call sites without changing the public domain types.
+PR 2 is complete: the bespoke GraphQL client uses a pooled Hyper/rustls
+transport, retains its total deadline and contextual errors, and `reqwest` is
+absent from the dependency graph. PR 3 remains future work: add typed GraphQL
+code generation and migrate the query call sites without changing the public
+domain types.
 
 ## Context and orientation
 
@@ -352,10 +358,10 @@ The API layer, all under `src/api/`:
 - `src/api/mod.rs` re-exports `GraphQLClient`, `Endpoint`, `Query`, `Token`
   (from `client/`), `paginate` (from `pagination.rs`), and `RetryConfig` (from
   `retry.rs`).
-- `src/api/client/mod.rs` defines `GraphQLClient` (fields: a
-  `reqwest::Client`, headers, endpoint, optional transcript, and retry config)
-  with constructors `new` (endpoint from the `GITHUB_GRAPHQL_URL` env var,
-  default `https://api.github.com/graphql`), `with_endpoint`, and
+- `src/api/client/mod.rs` defines `GraphQLClient` (fields: a private pooled
+  `Transport`, headers, endpoint, optional transcript, and retry config) with
+  constructors `new` (endpoint from the `GITHUB_GRAPHQL_URL` env var, default
+  `https://api.github.com/graphql`), `with_endpoint`, and
   `with_endpoint_retry`; methods `run_query` (POST, backon retry loop),
   `fetch_page` (cursor merge), and private `execute_single_request` /
   `process_graphql_response` (status handling, transcript logging, GraphQL
@@ -650,10 +656,11 @@ outside it are `tee` logs under `/tmp`.
 PR 1 artifact and evidence: Octocrab is configured with the recorded feature
 set, `tests/resolve.rs` verifies the raw reply route, headers, body,
 authentication, status handling, URI normalization, and total deadline, and the
-recorded PR 1 gate run is green. The remaining artifacts are the PR 2
-`cargo tree -d` duplicate report and clean-build comparison, followed by the PR
-3 sample transcript line, schema/code-generation evidence, and closing test
-counts.
+recorded PR 1 gate run is green. PR 2 artifacts include the Hyper transport,
+`reqwest`-absence report, and loopback validation for deadlines, response-size
+limits, observability, property boundaries, and concurrent transcript writes.
+The remaining artifacts are the PR 3 sample transcript line,
+schema/code-generation evidence, and closing test counts.
 
 ## Interfaces and dependencies
 
@@ -744,5 +751,5 @@ reqwest to a direct hyper transport; `graphql_client` codegen adds compile-time
 query checking. Delivery is three pull requests. The planned ADR was renamed
 from `adr-001-adopt-octocrab.md` to
 `adr-001-github-api-client-modernisation.md`. Constraints, tolerances, risks,
-decisions, and interfaces were rewritten to match. PR 1 is complete; PRs 2 and
-3 remain as authorized future work.
+decisions, and interfaces were rewritten to match. PRs 1 and 2 are complete;
+only PR 3 remains as authorized future work.

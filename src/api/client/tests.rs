@@ -3,6 +3,7 @@
 use super::*;
 use crate::VkError;
 use crate::api::RetryConfig;
+use bytes::Bytes;
 use rstest::{fixture, rstest};
 use serde_json::{Map, Value, json};
 use std::{
@@ -20,9 +21,9 @@ use third_wheel::hyper::{
 };
 use tokio::{task::JoinHandle, time::Duration};
 
-struct TestClient {
-    client: GraphQLClient,
-    join: JoinHandle<()>,
+pub(super) struct TestClient {
+    pub(super) client: GraphQLClient,
+    pub(super) join: JoinHandle<()>,
 }
 fn create_test_server<F, Fut>(
     response_handler: F,
@@ -88,7 +89,7 @@ where
 fn start_server(responses: Vec<String>) -> TestClient {
     start_server_with_status(responses, StatusCode::OK)
 }
-fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestClient {
+pub(super) fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestClient {
     let responses = Arc::new(responses);
     start_server_generic(move |idx| {
         let body = responses
@@ -249,19 +250,19 @@ async fn run_query_retries_html_5xx_then_succeeds() {
 
 #[tokio::test]
 async fn run_query_retains_status_when_response_body_times_out() {
-    let (mut sender, body) = Body::channel();
-    let response_body = Arc::new(Mutex::new(Some(body)));
+    let requests = Arc::new(AtomicUsize::new(0));
+    let server_requests = Arc::clone(&requests);
     let service = make_service_fn(move |_connection| {
-        let response_body = Arc::clone(&response_body);
+        let requests = Arc::clone(&server_requests);
         async move {
             Ok::<_, Infallible>(service_fn(move |_request| {
-                let response_body = Arc::clone(&response_body);
+                let requests = Arc::clone(&requests);
                 async move {
-                    let body = response_body
-                        .lock()
-                        .expect("lock response body")
-                        .take()
-                        .expect("serve one response");
+                    requests.fetch_add(1, Ordering::SeqCst);
+                    let body = Body::wrap_stream(futures::stream::once(async {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        Ok::<_, Infallible>(Bytes::from_static(b"{}"))
+                    }));
                     Ok::<_, Infallible>(
                         Response::builder()
                             .status(StatusCode::SERVICE_UNAVAILABLE)
@@ -277,13 +278,9 @@ async fn run_query_retains_status_when_response_body_times_out() {
     let server_task = tokio::spawn(async move {
         let _ = server.await;
     });
-    let sender_task = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let _ = sender.send_data("{}".into()).await;
-    });
     let retry = RetryConfig {
-        attempts: 0,
-        base_delay: Duration::ZERO,
+        attempts: 1,
+        base_delay: Duration::from_millis(1),
         request_timeout: Duration::from_millis(20),
         jitter: false,
     };
@@ -296,105 +293,17 @@ async fn run_query_retains_status_when_response_body_times_out() {
         .await
         .expect_err("body collection times out");
 
-    assert!(error.to_string().contains("status 503"), "{error}");
-    sender_task.abort();
+    match &error {
+        VkError::RequestContext { .. } => {}
+        other => panic!("unexpected error: {other:?}"),
+    }
+    let diagnostic = error.to_string();
+    for expected in ["SlowBody", "status 503", "request timed out after"] {
+        assert!(diagnostic.contains(expected), "{diagnostic}");
+    }
+    assert_eq!(requests.load(Ordering::SeqCst), 2);
     server_task.abort();
-}
-#[derive(Debug)]
-struct TestCase {
-    responses: Vec<String>,
-    status: StatusCode,
-    op: &'static str,
-    expect: Expected,
-}
-#[derive(Debug)]
-enum Expected {
-    EmptyResponse { fragments: [&'static str; 3] },
-    ApiErrors { fragment: &'static str },
-    RequestCtx { fragments: [&'static str; 2] },
-}
-#[rstest]
-#[case(TestCase {
-    responses: vec![],
-    status: StatusCode::OK,
-    op: "query EmptyOp { }",
-    expect: Expected::EmptyResponse {
-        fragments: ["status 200", "EmptyOp", "{}"],
-    },
-})]
-#[case(TestCase {
-    responses: vec![],
-    status: StatusCode::INTERNAL_SERVER_ERROR,
-    op: "query FailOp { }",
-    expect: Expected::RequestCtx {
-        fragments: ["status 500", "body snippet: {}"],
-    },
-})]
-#[case({
-    let error_response = serde_json::json!({
-        "errors": [
-            { "message": "Something went wrong", "locations": [{ "line": 1, "column": 2 }] }
-        ]
-    })
-    .to_string();
-    TestCase {
-        responses: vec![error_response],
-        status: StatusCode::OK,
-        op: "query ErrOp { }",
-        expect: Expected::ApiErrors {
-            fragment: "Something went wrong",
-        },
-    }
-})]
-#[case(TestCase {
-    responses: vec![],
-    status: StatusCode::TOO_MANY_REQUESTS,
-    op: "query RateLimited { }",
-    expect: Expected::RequestCtx {
-        fragments: ["status 429", "body snippet: {}"],
-    },
-})]
-#[tokio::test]
-async fn run_query_reports_details(#[case] case: TestCase) {
-    let TestCase {
-        responses,
-        status,
-        op,
-        expect,
-    } = case;
-    let TestClient { client, join } = start_server_with_status(responses, status);
-    let err = client
-        .run_query::<_, Value>(op, serde_json::json!({}))
-        .await
-        .expect_err("error");
-    match expect {
-        Expected::EmptyResponse { fragments } => match &err {
-            VkError::EmptyResponse { .. } => {
-                let s = err.to_string();
-                for frag in fragments {
-                    assert!(s.contains(frag), "{s}");
-                }
-            }
-            other => panic!("unexpected error: {other:?}"),
-        },
-        Expected::ApiErrors { fragment } => match err {
-            VkError::ApiErrors(msg) => {
-                assert!(msg.contains(fragment), "{msg}");
-            }
-            other => panic!("unexpected error: {other:?}"),
-        },
-        Expected::RequestCtx { fragments } => match err {
-            VkError::RequestContext { .. } => {
-                let s = err.to_string();
-                for frag in fragments {
-                    assert!(s.contains(frag), "{s}");
-                }
-            }
-            other => panic!("unexpected error: {other:?}"),
-        },
-    }
-    join.abort();
-    let _ = join.await;
+    let _ = server_task.await;
 }
 #[tokio::test]
 async fn fetch_page_rejects_non_object_variables() {

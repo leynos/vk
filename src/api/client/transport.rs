@@ -19,21 +19,26 @@
 
 use std::time::{Duration, Instant};
 
-use http::header::CONTENT_TYPE;
+use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use http::{HeaderMap, HeaderValue, Method, Request, Uri};
-use http_body_util::{BodyExt, Full};
+use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
 use hyper::body::Bytes;
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::rt::TokioExecutor;
 use serde_json::Value;
+use tracing::instrument;
 
 use super::helpers::{operation_name, payload_snippet, snippet};
 use super::http::HttpResponse;
+use super::metrics::{GraphQLAttemptOutcome, record_transport_attempt};
 use super::types::Endpoint;
 use crate::VkError;
 use crate::boxed::BoxedStr;
+
+/// Maximum response-body size collected for one GraphQL response (one MiB).
+const MAX_RESPONSE_BODY_BYTES: usize = 1024 * 1024;
 
 /// Owns the pooled hyper client used for GraphQL requests.
 pub(super) struct Transport {
@@ -97,7 +102,16 @@ impl Transport {
     ///
     /// Returns a [`VkError::RequestContext`] if the endpoint URL is invalid, the
     /// request cannot be built or sent, the request times out, or the response
-    /// body cannot be collected.
+    /// body cannot be collected within its size limit.
+    #[instrument(
+        name = "vk.graphql_transport_attempt",
+        skip_all,
+        fields(
+            outcome = tracing::field::Empty,
+            status_class = tracing::field::Empty,
+            failure_category = tracing::field::Empty,
+        )
+    )]
     pub(super) async fn post_json(
         &self,
         request: PostJsonRequest<'_>,
@@ -124,33 +138,79 @@ impl Transport {
             })
         };
 
+        let started_at = Instant::now();
         let request = build_request(endpoint, headers, payload).map_err(|source| {
+            record_transport_attempt(started_at, GraphQLAttemptOutcome::TransportFailure);
             VkError::RequestContext {
                 context: make_ctx(None),
                 source,
             }
         })?;
 
-        let started_at = Instant::now();
         let response = tokio::time::timeout(timeout, self.client.request(request))
             .await
-            .map_err(|_| request_timeout_error(make_ctx(None), timeout))?
-            .map_err(|e| VkError::RequestContext {
-                context: make_ctx(None),
-                source: Box::new(e),
+            .map_err(|_| {
+                record_transport_attempt(
+                    started_at,
+                    GraphQLAttemptOutcome::Timeout { status: None },
+                );
+                request_timeout_error(make_ctx(None), timeout)
+            })?
+            .map_err(|source| {
+                record_transport_attempt(started_at, GraphQLAttemptOutcome::TransportFailure);
+                VkError::RequestContext {
+                    context: make_ctx(None),
+                    source: Box::new(source),
+                }
             })?;
         let status = response.status().as_u16();
-        let remaining = timeout.saturating_sub(started_at.elapsed());
-        let collected = tokio::time::timeout(remaining, response.into_body().collect())
-            .await
-            .map_err(|_| request_timeout_error(make_ctx(Some(status)), timeout))?
-            .map_err(|e| VkError::RequestContext {
+        if response
+            .headers()
+            .get(CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<usize>().ok())
+            .is_some_and(response_body_exceeds_limit)
+        {
+            record_transport_attempt(
+                started_at,
+                GraphQLAttemptOutcome::BodyLimitFailure { status },
+            );
+            return Err(VkError::RequestContext {
                 context: make_ctx(Some(status)),
-                source: Box::new(e),
+                source: Box::new(std::io::Error::other(format!(
+                    "response body exceeds {MAX_RESPONSE_BODY_BYTES} bytes"
+                ))),
+            });
+        }
+        let remaining = timeout.saturating_sub(started_at.elapsed());
+        let body = Limited::new(response.into_body(), MAX_RESPONSE_BODY_BYTES);
+        let collected = tokio::time::timeout(remaining, body.collect())
+            .await
+            .map_err(|_| {
+                record_transport_attempt(
+                    started_at,
+                    GraphQLAttemptOutcome::Timeout {
+                        status: Some(status),
+                    },
+                );
+                request_timeout_error(make_ctx(Some(status)), timeout)
+            })?
+            .map_err(|source| {
+                let outcome = if source.is::<LengthLimitError>() {
+                    GraphQLAttemptOutcome::BodyLimitFailure { status }
+                } else {
+                    GraphQLAttemptOutcome::BodyReadFailure { status }
+                };
+                record_transport_attempt(started_at, outcome);
+                VkError::RequestContext {
+                    context: make_ctx(Some(status)),
+                    source,
+                }
             })?;
         // Lossily decode, matching reqwest's UTF-8 text handling; decoding
         // never fails, so only a collection error can surface above.
         let body = String::from_utf8_lossy(&collected.to_bytes()).into_owned();
+        record_transport_attempt(started_at, GraphQLAttemptOutcome::Response { status });
         Ok(HttpResponse { status, body })
     }
 }
@@ -164,6 +224,11 @@ fn request_timeout_error(context: Box<str>, timeout: Duration) -> VkError {
             format!("request timed out after {timeout:?}"),
         )),
     }
+}
+
+/// Returns whether an advertised or observed response size exceeds the limit.
+fn response_body_exceeds_limit(body_size: usize) -> bool {
+    body_size > MAX_RESPONSE_BODY_BYTES
 }
 
 /// Boxed error alias for the low-level request-construction failures.
@@ -189,3 +254,7 @@ fn build_request(
     map.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     Ok(request)
 }
+
+#[cfg(test)]
+#[path = "transport_tests.rs"]
+mod tests;
