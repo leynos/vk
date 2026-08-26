@@ -22,7 +22,10 @@ use std::time::{Duration, Instant};
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE};
 use http::{HeaderMap, HeaderValue, Method, Request, Uri};
 use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
-use hyper::body::Bytes;
+use hyper::{
+    Response,
+    body::{Bytes, Incoming},
+};
 use hyper_rustls::HttpsConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -59,6 +62,37 @@ pub(super) struct PostJsonRequest<'a> {
     pub(super) payload: &'a Value,
     /// Deadline covering request submission and body collection.
     pub(super) timeout: Duration,
+}
+
+/// Builds the established GraphQL request-error context for one attempt.
+///
+/// This remains private to the transport: [`super::GraphQLClient`] owns
+/// response classification and transcripts, while each transport attempt owns
+/// only low-level context for request construction, transport, and body errors.
+struct RequestErrorContext {
+    /// Redacted operation and payload details shared by all attempt errors.
+    base: String,
+}
+
+impl RequestErrorContext {
+    /// Derive the stable, redacted error details from a GraphQL request payload.
+    fn from_payload(payload: &Value) -> Self {
+        let snip = payload_snippet(payload);
+        let query = payload.get("query").and_then(Value::as_str).unwrap_or("");
+        let operation = operation_name(query).map_or_else(|| snippet(query, 64), str::to_string);
+        Self {
+            base: format!("operation {operation}; {snip}"),
+        }
+    }
+
+    /// Add a known HTTP status to the stable error context.
+    fn with_status(&self, status: Option<u16>) -> Box<str> {
+        // Disambiguate from `BodyExt::boxed`, which is also in scope.
+        BoxedStr::boxed(status.map_or_else(
+            || self.base.clone(),
+            |status| format!("{}; status {status}", self.base),
+        ))
+    }
 }
 
 impl Transport {
@@ -122,27 +156,12 @@ impl Transport {
             payload,
             timeout,
         } = request;
-        // Reconstruct the same request-context strings the reqwest client
-        // produced: the operation name (or a query snippet fallback) and a
-        // redacted payload snippet. Derived from the payload so this transport
-        // stays self-contained behind its fixed signature.
-        let snip = payload_snippet(payload);
-        let query = payload.get("query").and_then(Value::as_str).unwrap_or("");
-        let operation = operation_name(query).map_or_else(|| snippet(query, 64), str::to_string);
-        let make_ctx = |status: Option<u16>| {
-            let base = format!("operation {operation}; {snip}");
-            // Disambiguate from `BodyExt::boxed`, which is also in scope.
-            BoxedStr::boxed(match status {
-                Some(s) => format!("{base}; status {s}"),
-                None => base,
-            })
-        };
-
+        let context = RequestErrorContext::from_payload(payload);
         let started_at = Instant::now();
         let request = build_request(endpoint, headers, payload).map_err(|source| {
             record_transport_attempt(started_at, GraphQLAttemptOutcome::TransportFailure);
             VkError::RequestContext {
-                context: make_ctx(None),
+                context: context.with_status(None),
                 source,
             }
         })?;
@@ -154,65 +173,87 @@ impl Transport {
                     started_at,
                     GraphQLAttemptOutcome::Timeout { status: None },
                 );
-                request_timeout_error(make_ctx(None), timeout)
+                request_timeout_error(context.with_status(None), timeout)
             })?
             .map_err(|source| {
                 record_transport_attempt(started_at, GraphQLAttemptOutcome::TransportFailure);
                 VkError::RequestContext {
-                    context: make_ctx(None),
+                    context: context.with_status(None),
                     source: Box::new(source),
                 }
             })?;
-        let status = response.status().as_u16();
-        if response
-            .headers()
-            .get(CONTENT_LENGTH)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.parse::<usize>().ok())
-            .is_some_and(response_body_exceeds_limit)
-        {
+        collect_response_body(response, &context, timeout, started_at).await
+    }
+}
+
+/// Collect a limited response body while retaining its known status in errors.
+async fn collect_response_body(
+    response: Response<Incoming>,
+    context: &RequestErrorContext,
+    timeout: Duration,
+    started_at: Instant,
+) -> Result<HttpResponse, VkError> {
+    let status = response.status().as_u16();
+    if let Some(error) = advertised_body_limit_error(&response, context, started_at) {
+        return Err(error);
+    }
+    let remaining = timeout.saturating_sub(started_at.elapsed());
+    let body = Limited::new(response.into_body(), MAX_RESPONSE_BODY_BYTES);
+    let collected = tokio::time::timeout(remaining, body.collect())
+        .await
+        .map_err(|_| {
+            record_transport_attempt(
+                started_at,
+                GraphQLAttemptOutcome::Timeout {
+                    status: Some(status),
+                },
+            );
+            request_timeout_error(context.with_status(Some(status)), timeout)
+        })?
+        .map_err(|source| {
+            let outcome = if source.is::<LengthLimitError>() {
+                GraphQLAttemptOutcome::BodyLimitFailure { status }
+            } else {
+                GraphQLAttemptOutcome::BodyReadFailure { status }
+            };
+            record_transport_attempt(started_at, outcome);
+            VkError::RequestContext {
+                context: context.with_status(Some(status)),
+                source,
+            }
+        })?;
+    // Lossily decode, matching reqwest's UTF-8 text handling; decoding never
+    // fails, so only a collection error can surface above.
+    let body = String::from_utf8_lossy(&collected.to_bytes()).into_owned();
+    record_transport_attempt(started_at, GraphQLAttemptOutcome::Response { status });
+    Ok(HttpResponse { status, body })
+}
+
+/// Reject an oversized advertised body before requesting its stream chunks.
+fn advertised_body_limit_error(
+    response: &Response<Incoming>,
+    context: &RequestErrorContext,
+    started_at: Instant,
+) -> Option<VkError> {
+    let status = response.status().as_u16();
+    response
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|size| response_body_exceeds_limit(*size))
+        .map(|_| {
             record_transport_attempt(
                 started_at,
                 GraphQLAttemptOutcome::BodyLimitFailure { status },
             );
-            return Err(VkError::RequestContext {
-                context: make_ctx(Some(status)),
+            VkError::RequestContext {
+                context: context.with_status(Some(status)),
                 source: Box::new(std::io::Error::other(format!(
                     "response body exceeds {MAX_RESPONSE_BODY_BYTES} bytes"
                 ))),
-            });
-        }
-        let remaining = timeout.saturating_sub(started_at.elapsed());
-        let body = Limited::new(response.into_body(), MAX_RESPONSE_BODY_BYTES);
-        let collected = tokio::time::timeout(remaining, body.collect())
-            .await
-            .map_err(|_| {
-                record_transport_attempt(
-                    started_at,
-                    GraphQLAttemptOutcome::Timeout {
-                        status: Some(status),
-                    },
-                );
-                request_timeout_error(make_ctx(Some(status)), timeout)
-            })?
-            .map_err(|source| {
-                let outcome = if source.is::<LengthLimitError>() {
-                    GraphQLAttemptOutcome::BodyLimitFailure { status }
-                } else {
-                    GraphQLAttemptOutcome::BodyReadFailure { status }
-                };
-                record_transport_attempt(started_at, outcome);
-                VkError::RequestContext {
-                    context: make_ctx(Some(status)),
-                    source,
-                }
-            })?;
-        // Lossily decode, matching reqwest's UTF-8 text handling; decoding
-        // never fails, so only a collection error can surface above.
-        let body = String::from_utf8_lossy(&collected.to_bytes()).into_owned();
-        record_transport_attempt(started_at, GraphQLAttemptOutcome::Response { status });
-        Ok(HttpResponse { status, body })
-    }
+            }
+        })
 }
 
 /// Convert an elapsed request deadline into the established error shape.

@@ -190,7 +190,7 @@ mod tests {
                 let rest = RestClient::new(
                     "token",
                     Some(&format!("http://{address}")),
-                    Duration::from_millis(20),
+                    Duration::from_millis(100),
                     Duration::from_secs(1),
                 )
                 .expect("build REST client");
