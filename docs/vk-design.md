@@ -60,10 +60,13 @@ even when multiple comments reference the same code.
   structures (see `src/resolve/graphql.rs`), matching the requested
   `databaseId` and extracting the owning thread identifier. Pagination detects
   repeated or non-advancing cursors and aborts with an error rather than
-  looping indefinitely. This subcommand requires `GITHUB_TOKEN` with sufficient
-  scopes (resolving threads and posting replies require `repo`); if absent, it
-  aborts rather than performing anonymous calls. Resolution steps emit debug
-  spans via `tracing` to aid diagnostics; the binary initializes
+  looping indefinitely. This subcommand requires `GITHUB_TOKEN` authorization.
+  A REST reply needs only `Pull requests` repository permission set to write on
+  a fine-grained token. Separately, resolving the GraphQL thread requires an
+  actor GitHub permits to resolve that thread (`viewerCanResolve`); a classic
+  token needs the appropriate repository scope. If no token is supplied, the
+  command aborts rather than performing anonymous calls. Resolution steps emit
+  debug spans via `tracing` to aid diagnostics; the binary initialises
   `tracing_subscriber::fmt()` with an environment filter, so running with
   `RUST_LOG=vk=debug` (or a more specific filter) surfaces the spans on stderr.
 
@@ -153,6 +156,14 @@ exponential backoff, attempting each query up to five times. `fetch_page`
 merges an optional cursor into a variables map and rejects non-object input
 upfront. The `paginate_all` helper loops until `PageInfo` indicates completion,
 discarding any items fetched before an error occurs.
+
+Requests are sent by a private hyper-based transport
+([src/api/client/transport.rs](../src/api/client/transport.rs)) that uses
+rustls with Mozilla's webpki roots; this replaces the former `reqwest` client.
+The total-request timeout spans both sending the request and collecting the
+response body. Unlike the previous client, this transport supports neither
+system proxies (`HTTP(S)_PROXY`) nor HTTP redirects, neither of which the
+GraphQL path uses. These transport choices are governed by ADR 001.
 
 ## Utility
 

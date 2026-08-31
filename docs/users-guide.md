@@ -118,6 +118,14 @@ with GraphQL resolution. Any other non-2xx response or a timeout aborts before
 GraphQL resolution, retaining the reply route and status or deadline details in
 the diagnostic.
 
+### GraphQL networking limitations
+
+The GraphQL client sends requests directly through Hyper and rustls. It does
+not honour the `HTTP_PROXY` or `HTTPS_PROXY` environment variables, and it does
+not follow redirects. Use a directly reachable GraphQL endpoint; this
+deliberate transport boundary is recorded in
+[ADR 001](adr-001-github-api-client-modernisation.md).
+
 ## Troubleshoot terminal output
 
 `vk` renders comments with terminal Markdown and uses emoji to make output
