@@ -1,6 +1,6 @@
 //! Guard VK's repository-owned Linux runner assignments.
 
-const NAMESPACE_RUNNER: &str = "runs-on: namespace-profile-default";
+const NAMESPACE_RUNNER: &str = "namespace-profile-default";
 
 #[test]
 fn repository_owned_linux_workflows_use_the_shared_namespace_profile() {
@@ -26,9 +26,21 @@ fn repository_owned_linux_workflows_use_the_shared_namespace_profile() {
             2,
         ),
     ] {
+        let runner_assignments: Vec<_> = workflow
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("runs-on:"))
+            .map(str::trim)
+            .collect();
+
         assert_eq!(
-            workflow.matches(NAMESPACE_RUNNER).count(),
+            runner_assignments.len(),
             expected_assignments,
+            "{workflow_name} must assign every direct Linux job to {NAMESPACE_RUNNER}"
+        );
+        assert!(
+            runner_assignments
+                .iter()
+                .all(|runner| *runner == NAMESPACE_RUNNER),
             "{workflow_name} must assign every direct Linux job to {NAMESPACE_RUNNER}"
         );
     }
