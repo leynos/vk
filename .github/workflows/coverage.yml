@@ -6,7 +6,7 @@ on:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-default
     env:
       CARGO_TERM_COLOR: always
       CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
@@ -47,7 +47,7 @@ jobs:
   # Exercise the experimental REST-based resolve path, ensuring lints and tests
   # pass when the `unstable-rest-resolve` feature is enabled.
   unstable-rest-resolve:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-default
     steps:
       - uses: actions/checkout@v7
       - name: Setup Rust
