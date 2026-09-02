@@ -21,10 +21,11 @@ on:
 
 jobs:
   coverage-upload:
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-default
+    permissions:
+      contents: read
     env:
       CARGO_TERM_COLOR: always
-      CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
       CODESCENE_CLI_SHA256: ${{ vars.CODESCENE_CLI_SHA256 }}
     steps:
       - uses: actions/checkout@v7
@@ -38,6 +39,8 @@ jobs:
           use-cargo-nextest: 'false'
           with-ratchet: 'true'
       - name: Upload coverage data to CodeScene
+        env:
+          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         if: ${{ env.CS_ACCESS_TOKEN != '' }}
         uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@00fdcd5ff52c3f9eda64bb8a51869f7dff1b3ecf
         with:

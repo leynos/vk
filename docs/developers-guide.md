@@ -40,6 +40,14 @@ make test
 Run commands sequentially. The repository relies on shared Cargo caching, and
 sequential execution keeps cache use predictable.
 
+### Namespace GitHub Actions runners
+
+VK's repository-owned Linux CI, coverage, release, and delayed-comment jobs
+run on `namespace-profile-default`: the shared Ubuntu 22.04 Linux/amd64
+profile with 4 vCPU and 16 GB memory. Its Namespace cache volume is disabled
+for this baseline rollout. Existing workflow cache actions remain unchanged;
+they are not backed by a Namespace cache volume.
+
 Use `make fmt` after documentation changes. It formats Rust and Markdown
 sources. Review Markdown formatter diffs before committing so footnotes, links,
 tables, and code fences still carry the intended meaning.
