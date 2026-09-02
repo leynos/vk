@@ -125,76 +125,161 @@ fn actionlint_allows_the_selected_namespace_runner_only() {
 
 /// Extract job-level permissions from a workflow's small, stable YAML shape.
 fn extract_job_permissions(workflow: &str) -> BTreeMap<String, BTreeMap<String, String>> {
-    let mut jobs = BTreeMap::new();
-    let mut current_job = None;
-    let mut job_permissions = BTreeMap::new();
-    let mut reading_permissions = false;
-    let mut in_jobs = false;
-
-    for line in workflow.lines() {
-        let indentation = line.len() - line.trim_start().len();
-        let content = line.trim();
-
-        if indentation == 0 && !content.is_empty() {
-            in_jobs = content == "jobs:";
-        } else if in_jobs && indentation == 2 && content.ends_with(':') {
-            if let Some(job) = current_job.take() {
-                jobs.insert(job, job_permissions);
-            }
-            current_job = Some(content.trim_end_matches(':').to_owned());
-            job_permissions = BTreeMap::new();
-            reading_permissions = false;
-            continue;
-        }
-
-        if indentation == 4 && content == "permissions:" {
-            reading_permissions = true;
-            continue;
-        }
-
-        if reading_permissions && indentation == 6 {
-            if let Some((name, value)) = content.split_once(':') {
-                let value = value.split('#').next().map(str::trim).unwrap_or_default();
-                job_permissions.insert(name.to_owned(), value.to_owned());
-            }
-        } else if reading_permissions && indentation <= 4 {
-            reading_permissions = false;
-        }
-    }
-
-    if let Some(job) = current_job {
-        jobs.insert(job, job_permissions);
-    }
-
-    jobs
+    let mut parser = JobPermissionsParser::default();
+    workflow.lines().for_each(|line| parser.consume(line));
+    parser.finish()
 }
 
 /// Extract each `CodeScene` token's owning job and step from workflow YAML.
 fn extract_token_exposures(workflow: &str) -> Vec<(String, String)> {
-    let mut exposures = Vec::new();
-    let mut current_job = None;
-    let mut current_step = None;
+    let mut parser = TokenExposureParser::default();
+    workflow.lines().for_each(|line| parser.consume(line));
+    parser.finish()
+}
 
-    for line in workflow.lines() {
+#[derive(Default)]
+struct JobPermissionsParser {
+    jobs: BTreeMap<String, BTreeMap<String, String>>,
+    current_job: Option<String>,
+    job_permissions: BTreeMap<String, String>,
+    reading_permissions: bool,
+    in_jobs: bool,
+}
+
+impl JobPermissionsParser {
+    /// Consume one workflow line while retaining only job-level permissions.
+    fn consume(&mut self, line: &str) {
         let indentation = line.len() - line.trim_start().len();
         let content = line.trim();
 
-        if indentation == 2 && content.ends_with(':') {
-            current_job = Some(content.trim_end_matches(':').to_owned());
-            current_step = None;
-        } else if indentation == 6 {
-            if let Some(step_name) = content.strip_prefix("- name:") {
-                current_step = Some(step_name.trim().to_owned());
-            }
-        } else if content.starts_with("CS_ACCESS_TOKEN:")
-            && let Some(job) = current_job.clone()
-        {
-            let step = current_step
-                .clone()
-                .unwrap_or_else(|| "<job-level>".to_owned());
-            exposures.push((job, step));
+        if self.update_jobs_section(indentation, content) {
+            return;
+        }
+        if self.start_permissions(indentation, content) {
+            return;
+        }
+        self.read_permission(indentation, content);
+    }
+
+    /// Track entry into and between top-level workflow job definitions.
+    fn update_jobs_section(&mut self, indentation: usize, content: &str) -> bool {
+        if indentation == 0 && !content.is_empty() {
+            self.in_jobs = content == "jobs:";
+            return true;
+        }
+        if self.in_jobs && indentation == 2 && content.ends_with(':') {
+            self.store_current_job();
+            self.current_job = Some(content.trim_end_matches(':').to_owned());
+            self.job_permissions = BTreeMap::new();
+            self.reading_permissions = false;
+            return true;
+        }
+        false
+    }
+
+    /// Start collecting a job's permission entries when its block begins.
+    fn start_permissions(&mut self, indentation: usize, content: &str) -> bool {
+        if indentation == 4 && content == "permissions:" {
+            self.reading_permissions = true;
+            return true;
+        }
+        false
+    }
+
+    /// Record a permission entry or stop collecting at the next job key.
+    fn read_permission(&mut self, indentation: usize, content: &str) {
+        if !self.reading_permissions {
+            return;
+        }
+        if indentation == 6 {
+            self.record_permission(content);
+        } else if indentation <= 4 {
+            self.reading_permissions = false;
         }
     }
 
-    exposures
+    /// Store one permission entry after removing an inline comment.
+    fn record_permission(&mut self, content: &str) {
+        if let Some((name, value)) = content.split_once(':') {
+            let value = value.split('#').next().map(str::trim).unwrap_or_default();
+            self.job_permissions
+                .insert(name.to_owned(), value.to_owned());
+        }
+    }
+
+    /// Store the current job before moving to another job or finishing.
+    fn store_current_job(&mut self) {
+        if let Some(job) = self.current_job.take() {
+            self.jobs
+                .insert(job, std::mem::take(&mut self.job_permissions));
+        }
+    }
+
+    /// Finish parsing and return all discovered job permission maps.
+    fn finish(mut self) -> BTreeMap<String, BTreeMap<String, String>> {
+        self.store_current_job();
+        self.jobs
+    }
+}
+
+#[derive(Default)]
+struct TokenExposureParser {
+    exposures: Vec<(String, String)>,
+    current_job: Option<String>,
+    current_step: Option<String>,
+}
+
+impl TokenExposureParser {
+    /// Consume one workflow line while recording `CodeScene` token locations.
+    fn consume(&mut self, line: &str) {
+        let indentation = line.len() - line.trim_start().len();
+        let content = line.trim();
+
+        if self.update_job(indentation, content) {
+            return;
+        }
+        if self.update_step(indentation, content) {
+            return;
+        }
+        if content.starts_with("CS_ACCESS_TOKEN:") {
+            self.record_token();
+        }
+    }
+
+    /// Track the job that owns the current workflow line.
+    fn update_job(&mut self, indentation: usize, content: &str) -> bool {
+        if indentation == 2 && content.ends_with(':') {
+            self.current_job = Some(content.trim_end_matches(':').to_owned());
+            self.current_step = None;
+            return true;
+        }
+        false
+    }
+
+    /// Track named steps so token exposure can be checked at step scope.
+    fn update_step(&mut self, indentation: usize, content: &str) -> bool {
+        if indentation == 6 {
+            if let Some(step_name) = content.strip_prefix("- name:") {
+                self.current_step = Some(step_name.trim().to_owned());
+            }
+            return true;
+        }
+        false
+    }
+
+    /// Record the current token location, including job-level exposure.
+    fn record_token(&mut self) {
+        if let Some(job) = self.current_job.clone() {
+            let step = self
+                .current_step
+                .clone()
+                .unwrap_or_else(|| "<job-level>".to_owned());
+            self.exposures.push((job, step));
+        }
+    }
+
+    /// Finish parsing and return all discovered token locations.
+    fn finish(self) -> Vec<(String, String)> {
+        self.exposures
+    }
 }
