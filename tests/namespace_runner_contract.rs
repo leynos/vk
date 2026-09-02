@@ -126,15 +126,30 @@ fn actionlint_allows_the_selected_namespace_runner_only() {
 /// Extract job-level permissions from a workflow's small, stable YAML shape.
 fn extract_job_permissions(workflow: &str) -> BTreeMap<String, BTreeMap<String, String>> {
     let mut parser = JobPermissionsParser::default();
-    workflow.lines().for_each(|line| parser.consume(line));
+    workflow_lines(workflow)
+        .for_each(|(indentation, content)| parser.consume(indentation, content));
     parser.finish()
 }
 
 /// Extract each `CodeScene` token's owning job and step from workflow YAML.
 fn extract_token_exposures(workflow: &str) -> Vec<(String, String)> {
     let mut parser = TokenExposureParser::default();
-    workflow.lines().for_each(|line| parser.consume(line));
+    workflow_lines(workflow)
+        .for_each(|(indentation, content)| parser.consume(indentation, content));
     parser.finish()
+}
+
+/// Split workflow text into indentation and trimmed content for the parsers.
+fn workflow_lines(workflow: &str) -> impl Iterator<Item = (usize, &str)> {
+    workflow.lines().map(|line| {
+        let indentation = line.len() - line.trim_start().len();
+        (indentation, line.trim())
+    })
+}
+
+/// Identify a non-empty top-level workflow key.
+fn is_workflow_jobs_header(indentation: usize, content: &str) -> bool {
+    indentation == 0 && !content.is_empty()
 }
 
 #[derive(Default)]
@@ -148,10 +163,7 @@ struct JobPermissionsParser {
 
 impl JobPermissionsParser {
     /// Consume one workflow line while retaining only job-level permissions.
-    fn consume(&mut self, line: &str) {
-        let indentation = line.len() - line.trim_start().len();
-        let content = line.trim();
-
+    fn consume(&mut self, indentation: usize, content: &str) {
         if self.update_jobs_section(indentation, content) {
             return;
         }
@@ -163,11 +175,11 @@ impl JobPermissionsParser {
 
     /// Track entry into and between top-level workflow job definitions.
     fn update_jobs_section(&mut self, indentation: usize, content: &str) -> bool {
-        if indentation == 0 && !content.is_empty() {
+        if is_workflow_jobs_header(indentation, content) {
             self.in_jobs = content == "jobs:";
             return true;
         }
-        if self.in_jobs && indentation == 2 && content.ends_with(':') {
+        if self.is_job_header(indentation, content) {
             self.store_current_job();
             self.current_job = Some(content.trim_end_matches(':').to_owned());
             self.job_permissions = BTreeMap::new();
@@ -175,6 +187,11 @@ impl JobPermissionsParser {
             return true;
         }
         false
+    }
+
+    /// Identify a job header while the parser is inside the jobs section.
+    fn is_job_header(&self, indentation: usize, content: &str) -> bool {
+        self.in_jobs && indentation == 2 && content.ends_with(':')
     }
 
     /// Start collecting a job's permission entries when its block begins.
@@ -231,10 +248,7 @@ struct TokenExposureParser {
 
 impl TokenExposureParser {
     /// Consume one workflow line while recording `CodeScene` token locations.
-    fn consume(&mut self, line: &str) {
-        let indentation = line.len() - line.trim_start().len();
-        let content = line.trim();
-
+    fn consume(&mut self, indentation: usize, content: &str) {
         if self.update_job(indentation, content) {
             return;
         }
