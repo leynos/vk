@@ -9,7 +9,7 @@ use graphql_client::GraphQLQuery;
 use serde::Deserialize;
 
 use crate::ref_parser::RepoInfo;
-use crate::{GraphQLClient, VkError};
+use crate::{GraphQLClient, PageInfo, VkError};
 
 /// GraphQL data returned when looking up pull requests for a branch.
 #[derive(Debug, Deserialize)]
@@ -31,6 +31,9 @@ struct PrForBranchRepository {
 struct PrConnection {
     /// Pull-request nodes in the connection.
     nodes: Vec<PrNode>,
+    /// Pagination metadata for this page.
+    #[serde(rename = "pageInfo")]
+    page_info: PageInfo,
 }
 
 /// Pull-request identity and head-repository data.
@@ -112,36 +115,39 @@ pub async fn fetch_pr_for_branch(
     branch: &str,
     head_owner: Option<&str>,
 ) -> Result<u64, VkError> {
-    let variables = pr_for_branch_query::Variables {
-        owner: repo.owner.clone(),
-        name: repo.name.clone(),
-        head_ref: branch.to_string(),
-    };
-
-    let data: PrForBranchData = client
-        .run_operation_as::<PrForBranchQuery, PrForBranchData>(variables)
-        .await?;
-
-    let prs = &data.repository.pull_requests.nodes;
-
-    // If head_owner is specified, filter PRs by head repository owner.
-    // When no head owner is provided, fall back to the first PR (backward compatible).
-    let matching_pr = head_owner.map_or_else(
-        || prs.first(),
-        |owner| prs.iter().find(|pr| head_owner_matches(pr, owner)),
-    );
-
-    matching_pr
-        .map(|pr| pr.number)
-        .ok_or_else(|| VkError::NoPrForBranch {
-            branch: branch.into(),
-        })
+    let mut after = None;
+    loop {
+        let variables = pr_for_branch_query::Variables {
+            owner: repo.owner.clone(),
+            name: repo.name.clone(),
+            head_ref: branch.to_string(),
+            after: after.take(),
+        };
+        let data: PrForBranchData = client
+            .run_operation_as::<PrForBranchQuery, PrForBranchData>(variables)
+            .await?;
+        let PrConnection { nodes, page_info } = data.repository.pull_requests;
+        let matching_pr = head_owner.map_or_else(
+            || nodes.first(),
+            |owner| nodes.iter().find(|pr| head_owner_matches(pr, owner)),
+        );
+        if let Some(pr) = matching_pr {
+            return Ok(pr.number);
+        }
+        let Some(cursor) = page_info.next_cursor()? else {
+            break;
+        };
+        after = Some(cursor.to_owned());
+    }
+    Err(VkError::NoPrForBranch {
+        branch: branch.into(),
+    })
 }
 
 #[cfg(test)]
 mod tests;
 
-/// Typed `PrForBranchQuery` operation: the (non-paginated) PR-by-branch lookup.
+/// Typed `PrForBranchQuery` operation: the paginated PR-by-branch lookup.
 ///
 /// The response is decoded into the hand-written [`PrForBranchData`] via
 /// [`GraphQLClient::run_operation_as`] rather than the generated `ResponseData`

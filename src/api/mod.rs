@@ -5,6 +5,7 @@
 //! [`CursorVariables`] trait.
 
 mod client;
+pub(crate) mod deserialize;
 mod pagination;
 mod retry;
 pub(crate) mod scalars;

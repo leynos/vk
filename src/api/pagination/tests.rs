@@ -6,6 +6,7 @@
 //! cursor invariants those traversals rely on.
 
 use crate::{PageInfo, VkError};
+use proptest::prelude::*;
 use rstest::rstest;
 
 #[rstest]
@@ -33,4 +34,28 @@ fn next_cursor_errors_without_cursor() {
     };
     let err = info.next_cursor().expect_err("missing cursor");
     assert!(matches!(err, VkError::BadResponse(_)));
+}
+
+proptest! {
+    #[test]
+    fn page_info_terminates_or_replaces_the_cursor(
+        has_next_page in any::<bool>(),
+        end_cursor in proptest::option::of("[a-z0-9]{1,16}"),
+    ) {
+        let page = PageInfo {
+            has_next_page,
+            end_cursor: end_cursor.clone(),
+        };
+        let cursor = page.next_cursor();
+
+        if has_next_page {
+            if let Some(expected) = end_cursor {
+                prop_assert_eq!(cursor.expect("cursor"), Some(expected.as_str()));
+            } else {
+                prop_assert!(matches!(cursor, Err(VkError::BadResponse(_))));
+            }
+        } else {
+            prop_assert_eq!(cursor.expect("terminal page"), None);
+        }
+    }
 }

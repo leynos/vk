@@ -265,7 +265,12 @@ mod tests {
             }}}}
         })
         .to_string();
-        let TestClient { client, join, .. } = start_server(vec![body]);
+        let TestClient {
+            client,
+            join,
+            requests,
+            ..
+        } = start_server(vec![body]);
         let reviews = fetch_reviews(
             &client,
             &RepoInfo {
@@ -277,6 +282,30 @@ mod tests {
         .await
         .expect("should accept i32::MAX");
         assert!(reviews.is_empty());
+        {
+            let requests = requests.lock().expect("lock requests");
+            let request = requests.first().expect("one request");
+            assert_eq!(
+                request.get("operationName"),
+                Some(&serde_json::json!("ReviewsQuery"))
+            );
+            assert_eq!(
+                request.pointer("/variables/owner"),
+                Some(&serde_json::json!("o"))
+            );
+            assert_eq!(
+                request.pointer("/variables/name"),
+                Some(&serde_json::json!("n"))
+            );
+            assert_eq!(
+                request.pointer("/variables/number"),
+                Some(&serde_json::json!(i32::MAX))
+            );
+            assert_eq!(
+                request.pointer("/variables/cursor"),
+                Some(&serde_json::Value::Null)
+            );
+        }
         join.abort();
         let _ = join.await;
     }

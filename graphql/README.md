@@ -18,9 +18,11 @@ that `graphql_client` codegen validates against it at compile time (see
 Download the current published schema and re-run the test suite; any query the
 new schema no longer satisfies fails the build:
 
-    curl -L https://docs.github.com/public/fpt/schema.docs.graphql \
-      -o graphql/schema.docs.graphql
-    make lint test
+```bash
+curl -L https://docs.github.com/public/fpt/schema.docs.graphql \
+  -o graphql/schema.docs.graphql
+make lint test
+```
 
 Record the refresh (date and reason) in the commit message. GitHub evolves the
 schema additively, so refreshes are expected to be safe; a build failure after

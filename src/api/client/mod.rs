@@ -13,6 +13,7 @@ use backon::Retryable;
 // submodule, which would otherwise shadow it.
 use ::http::header::HeaderMap;
 use serde::de::DeserializeOwned;
+use std::sync::Arc;
 use tokio::time::sleep;
 use tracing::warn;
 
@@ -24,6 +25,7 @@ use self::helpers::{
     BODY_SNIPPET_LEN, VALUE_SNIPPET_LEN, build_headers, handle_graphql_errors, snippet,
 };
 use self::http::HttpResponse;
+use self::metrics::record_retry;
 use self::transport::{PostJsonRequest, Transport};
 use self::types::GraphQLResponse;
 use super::retry::{RetryConfig, build_retry_builder, should_retry};
@@ -45,7 +47,7 @@ pub struct GraphQLClient {
     /// GraphQL endpoint targeted by this client.
     endpoint: Endpoint,
     /// Optional writer for request and response transcripts.
-    transcript: Option<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>,
+    transcript: Option<Arc<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>>,
     /// Retry and timeout settings for requests.
     retry: RetryConfig,
     /// Pooled direct HTTP transport for GraphQL requests.
@@ -107,7 +109,7 @@ impl GraphQLClient {
         let transcript = transcript
             .map(|p| {
                 std::fs::File::create(p)
-                    .map(|file| std::sync::Mutex::new(std::io::BufWriter::new(file)))
+                    .map(|file| Arc::new(std::sync::Mutex::new(std::io::BufWriter::new(file))))
             })
             .transpose()
             .map_err(|e| VkError::Io(Box::new(e)))?;
@@ -138,10 +140,11 @@ impl GraphQLClient {
                 endpoint: &self.endpoint,
                 headers: &self.headers,
                 payload,
+                operation,
                 timeout: self.retry.request_timeout,
             })
             .await?;
-        self.log_transcript(payload, operation, &resp);
+        self.log_transcript(payload, operation, &resp).await?;
         if !(200..300).contains(&resp.status) {
             // The transport surfaces every completed HTTP response, so a
             // non-2xx status is classified here. reqwest gave this a
@@ -201,8 +204,8 @@ impl GraphQLClient {
                 let snippet = match serde_json::to_string_pretty(&value) {
                     Ok(json) => snippet(&json, VALUE_SNIPPET_LEN),
                     Err(e) => {
-                        warn!("Failed to serialise error snippet: {e}");
-                        "<failed to serialise error snippet>".to_string()
+                        warn!("Failed to serialize error snippet: {e}");
+                        "<failed to serialize error snippet>".to_string()
                     }
                 };
                 let path = e.path().to_string();
@@ -238,6 +241,7 @@ impl GraphQLClient {
         T: DeserializeOwned,
     {
         let builder = build_retry_builder(self.retry);
+        let operation_name = operation.to_owned();
         (|| async {
             let resp = self.execute_single_request(payload, operation).await?;
             Self::process_graphql_response::<T>(&resp, operation)
@@ -245,7 +249,15 @@ impl GraphQLClient {
         .retry(builder)
         .sleep(sleep)
         .when(should_retry)
-        .notify(|err: &VkError, dur| warn!("retrying GraphQL query after {dur:?}: {err}"))
+        .notify(move |err: &VkError, dur| {
+            record_retry();
+            warn!(
+                operation = %operation_name,
+                delay_ms = dur.as_millis(),
+                error = %err,
+                "retrying GraphQL query"
+            );
+        })
         .await
     }
 

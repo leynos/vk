@@ -144,6 +144,47 @@ repository names, identifiers, response bodies, or raw errors as labels. The
 transport's tracing span uses the same bounded classifications and no sensitive
 fields.
 
+### Typed GraphQL operations
+
+Each GraphQL operation is a named document under [`graphql/`](../graphql/). The
+consumer module derives `graphql_client::GraphQLQuery` with the vendored
+`graphql/schema.docs.graphql` schema and its operation document. Code
+generation checks the selection and variables against that schema at compile
+time and produces the operation's variables and response types.
+
+The generated types remain private to the consumer modules. `GraphQLClient`
+exposes `run_operation` for operations whose generated response type matches
+the required data. Consumers that need the established hand-written domain
+shape use the internal `run_operation_as` boundary: codegen still builds and
+checks the query, while `serde_path_to_error` deserializes the response into
+the chosen target. This preserves documented leniency, such as missing
+`isOutdated` fields being treated as current and review states retaining their
+wire value.
+
+Paginated operations implement the internal `CursorVariables` trait for their
+generated variables and use `paginate_operation_as`. The helper clones the base
+variables, replaces the cursor for each request, stops at the first page
+without a next cursor, and discards accumulated items if a request or mapping
+fails. It caps a traversal at 1,000 pages.
+
+Hand-written wire envelopes that model GraphQL connection `nodes` use the
+internal `api::deserialize::nullable_nodes` deserializer. It is limited to
+connection nodes: an absent or null list becomes empty and null entries are
+discarded, matching the established domain representation. Do not apply it to
+fields where null has a distinct business meaning.
+
+GitHub custom scalars are mapped in
+[`src/api/scalars.rs`](../src/api/scalars.rs) with aliases named after the
+schema scalars. The current operations use `DateTime`, `URI`, and `BigInt`; add
+a shared alias there when a new operation needs another scalar so the derive
+fails clearly until its mapping exists.
+
+The schema is vendored so builds do not depend on a live GitHub schema. Refresh
+it with the commands in [`graphql/README.md`](../graphql/README.md), then run
+the relevant formatting, lint, and test gates. Do not edit the generated schema
+by hand; record the refresh date and reason in the commit message and repair
+any query that no longer validates before committing.
+
 ## Documentation maintenance
 
 Update documentation in the same branch as the behaviour it describes:

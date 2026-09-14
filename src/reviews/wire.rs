@@ -48,6 +48,7 @@ impl CursorVariables for reviews_query::Variables {
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestReview {
+    /// Review body in Markdown.
     pub body: String,
     /// Timestamp when the review was formally submitted.
     ///
@@ -56,31 +57,42 @@ pub struct PullRequestReview {
     /// Review state as returned by GitHub, preserved verbatim because the
     /// generated enum is bypassed during decoding.
     pub state: String,
+    /// Review author, when GitHub provides one.
     pub author: Option<User>,
 }
 
+/// Envelope for one reviews query response.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ReviewData {
+    /// Repository that owns the requested pull request.
     pub(super) repository: RepositoryReviews,
 }
 
+/// Repository envelope in a reviews response.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct RepositoryReviews {
+    /// Pull request whose reviews were requested.
     #[serde(rename = "pullRequest")]
     pub(super) pull_request: PullRequestReviews,
 }
 
+/// Pull-request envelope in a reviews response.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct PullRequestReviews {
+    /// Paginated reviews from the pull request.
     pub(super) reviews: ReviewConnection,
 }
 
+/// Paginated reviews decoded into public domain values.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct ReviewConnection {
+    /// Non-null reviews from this connection page.
+    #[serde(default, deserialize_with = "crate::api::deserialize::nullable_nodes")]
     pub(super) nodes: Vec<PullRequestReview>,
+    /// Pagination metadata for this reviews page.
     pub(super) page_info: PageInfo,
 }

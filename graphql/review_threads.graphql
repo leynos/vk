@@ -1,3 +1,22 @@
+fragment ThreadCommentFields on PullRequestReviewCommentConnection {
+  nodes {
+    body
+    diffHunk
+    originalPosition
+    position
+    path
+    url
+    author {
+      __typename
+      login
+    }
+  }
+  pageInfo {
+    hasNextPage
+    endCursor
+  }
+}
+
 query ThreadsQuery($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
@@ -7,22 +26,7 @@ query ThreadsQuery($owner: String!, $name: String!, $number: Int!, $cursor: Stri
           isResolved
           isOutdated
           comments(first: 100) {
-            nodes {
-              body
-              diffHunk
-              originalPosition
-              position
-              path
-              url
-              author {
-                __typename
-                login
-              }
-            }
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
+            ...ThreadCommentFields
           }
         }
         pageInfo {
@@ -39,22 +43,7 @@ query CommentQuery($id: ID!, $cursor: String) {
     __typename
     ... on PullRequestReviewThread {
       comments(first: 100, after: $cursor) {
-        nodes {
-          body
-          diffHunk
-          originalPosition
-          position
-          path
-          url
-          author {
-            __typename
-            login
-          }
-        }
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
+        ...ThreadCommentFields
       }
     }
   }

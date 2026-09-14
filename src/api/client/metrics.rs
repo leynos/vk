@@ -13,6 +13,28 @@ use tracing::Span;
 const REQUEST_COUNT: &str = "vk.api.graphql_transport.requests.total";
 /// Metric recording GraphQL transport attempt duration in seconds.
 const REQUEST_DURATION: &str = "vk.api.graphql_transport.duration.seconds";
+/// Metric counting retry decisions after failed GraphQL requests.
+const RETRY_COUNT: &str = "vk.api.graphql.retries.total";
+/// Metric counting pagination traversals stopped by the hard page limit.
+const PAGE_LIMIT_COUNT: &str = "vk.api.graphql.pagination.page_limit.total";
+
+/// Record one retry decision without attaching request-specific labels.
+pub(super) fn record_retry() {
+    counter!(
+        description: "Count retry decisions for GraphQL requests.",
+        RETRY_COUNT
+    )
+    .increment(1);
+}
+
+/// Record a traversal stopped by the GraphQL pagination page limit.
+pub(super) fn record_page_limit() {
+    counter!(
+        description: "Count GraphQL paginations stopped by the configured page limit.",
+        PAGE_LIMIT_COUNT
+    )
+    .increment(1);
+}
 
 /// Outcome of one GraphQL transport attempt expressed with bounded labels.
 #[derive(Clone, Copy, Debug)]

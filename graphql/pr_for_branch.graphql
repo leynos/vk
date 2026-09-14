@@ -1,6 +1,17 @@
-query PrForBranchQuery($owner: String!, $name: String!, $headRef: String!) {
+query PrForBranchQuery(
+  $owner: String!
+  $name: String!
+  $headRef: String!
+  $after: String
+) {
   repository(owner: $owner, name: $name) {
-    pullRequests(headRefName: $headRef, first: 10, states: [OPEN, MERGED]) {
+    pullRequests(
+      headRefName: $headRef
+      first: 10
+      after: $after
+      states: [OPEN, MERGED]
+      orderBy: {field: UPDATED_AT, direction: DESC}
+    ) {
       nodes {
         number
         headRepository {
@@ -9,6 +20,10 @@ query PrForBranchQuery($owner: String!, $name: String!, $headRef: String!) {
             login
           }
         }
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
       }
     }
   }

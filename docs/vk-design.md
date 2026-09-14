@@ -71,10 +71,10 @@ even when multiple comments reference the same code.
   GraphQL thread requires an actor GitHub permits to resolve that thread
   (`viewerCanResolve`); a classic token needs the appropriate repository scope.
   If no token is supplied, the command aborts rather than performing anonymous
-  calls. Resolution steps emit debug spans via `tracing` to aid diagnostics; the
-  binary initialises
-  `tracing_subscriber::fmt()` with an environment filter, so running with
-  `RUST_LOG=vk=debug` (or a more specific filter) surfaces the spans on stderr.
+  calls. Resolution steps emit debug spans via `tracing` to aid diagnostics;
+  the binary initialises `tracing_subscriber::fmt()` with an environment
+  filter, so running with `RUST_LOG=vk=debug` (or a more specific filter)
+  surfaces the spans on stderr.
 
 - **Configurable timeouts**: `--http-timeout` and `--connect-timeout`
   override the default 10 s request and 5 s connection limits for REST replies.
@@ -146,22 +146,17 @@ When the reference includes a `#discussion_r<ID>` fragment, the command fetches
 all threads, including resolved ones, and selects the one containing the
 specified comment, trimming the thread so printing begins with that entry.
 
-Networking logic resides in [src/api/mod.rs](../src/api/mod.rs). It exposes the
-`GraphQLClient` alongside `run_query`, `fetch_page`, and `paginate_all` helpers
-used throughout the application. The client employs lightweight `Token`,
-`Endpoint`, and `Query` types to avoid parameter mix-ups and accepts borrowed
-cursors via `Cow<'_, str>` to prevent needless allocation. For example:
-
-```rust
-fetch_page("query", Some(Cow::Borrowed("c1")), vars).await?;
-fetch_page("query", Some(Cow::Owned(String::from("c2"))), vars).await?;
-```
-
-`run_query` retries transient request failures with `backon`'s jittered
-exponential backoff, attempting each query up to five times. `fetch_page`
-merges an optional cursor into a variables map and rejects non-object input
-upfront. The `paginate_all` helper loops until `PageInfo` indicates completion,
-discarding any items fetched before an error occurs.
+Networking logic resides in [src/api/mod.rs](../src/api/mod.rs). It exports
+`GraphQLClient`, `Endpoint`, `Token`, and `RetryConfig`. `GraphQLClient::new`,
+`with_endpoint`, and `with_endpoint_retry` construct clients with the standard
+or an explicit endpoint and retry settings. Its public `run_operation` method
+accepts a `graphql_client::GraphQLQuery` operation and its generated variables;
+named operation documents under `graphql/` are checked against the vendored
+schema at compile time. Internal consumers use the `run_operation_as` and
+`paginate_operation_as` boundaries when a hand-written response target or
+cursor pagination is needed. Paginated operations implement `CursorVariables`,
+and traversal stops at 1,000 pages or on the first error, discarding
+accumulated items when an error occurs.
 
 Requests are sent by a private hyper-based transport
 ([src/api/client/transport.rs](../src/api/client/transport.rs)) that uses
@@ -250,14 +245,14 @@ classDiagram
 GraphQL requests are retried when a network error occurs or the response lacks
 data. Retry behaviour is configurable through `RetryConfig`, covering the
 number of attempts, the base delay for the exponential backoff, and whether to
-apply jitter. By default, the client tries a query up to five times, waiting
-`200ms * 2^attempt` with full jitter supplied by `backon` so concurrent callers
-spread out as delays grow. Empty responses include the HTTP status, the
+apply jitter. By default, the client tries an operation up to five times,
+waiting `200ms * 2^attempt` with full jitter supplied by `backon` so concurrent
+callers spread out as delays grow. Empty responses include the HTTP status, the
 operation name, and a short response-body snippet to aid triage. Error contexts
 also carry a redacted snippet of the request payload, replacing sensitive
-fields such as `token` with `<redacted>`. Because `run_query` only returns
-after a full page has been fetched, `paginate_all` never appends partial
-results, preserving order and avoiding duplicates.
+fields such as `token` with `<redacted>`. Paginated operations discard partial
+results when a later request or mapping fails, preserving all-or-nothing
+semantics.
 
 The diagram below illustrates how deserialization errors surface the JSON path
 and a response snippet, helping developers quickly locate schema mismatches.
