@@ -52,7 +52,7 @@ unstable-rest-resolve = []
 [dev-dependencies]
 tempfile = "3.22.0"
 serial_test = "3.2.0"
-rstest = "0.26.1"
+rstest = "0.27.0"
 assert_cmd = "2.0"
 third-wheel = "0.6"
 tokio = { version = "1.36.0", features = ["full"] }
