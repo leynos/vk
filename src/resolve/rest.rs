@@ -47,9 +47,9 @@ impl RestClient {
     ///
     /// `personal_token` is only set when `token` is non-empty, preserving
     /// anonymous access. The `connect_timeout` maps directly onto octocrab's
-    /// connect timeout. The read and write timeouts are configured on octocrab,
-    /// and the original total-request deadline is retained for the complete
-    /// reply operation.
+    /// connect timeout. [`post_reply`] owns the complete reply-operation
+    /// deadline, so no competing per-read or per-write timeout can replace its
+    /// established error context.
     ///
     /// Returns [`VkError::RequestContext`] when the base URI cannot be parsed or
     /// the client cannot be built.
@@ -85,8 +85,6 @@ impl RestClient {
             )
             .add_header(ACCEPT, "application/vnd.github+json".to_owned())
             .set_connect_timeout(Some(connect_timeout))
-            .set_read_timeout(Some(timeout))
-            .set_write_timeout(Some(timeout))
             .build()
             .map_err(|e| VkError::RequestContext {
                 context: "build client".boxed(),
