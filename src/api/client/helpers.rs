@@ -1,6 +1,6 @@
 //! Helper utilities for GraphQL request handling.
 
-use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
+use http::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::Value;
 use tracing::warn;
 
@@ -150,7 +150,7 @@ mod tests {
         GraphQLError, Token, build_headers, handle_graphql_errors, operation_name, payload_snippet,
         snippet,
     };
-    use reqwest::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
+    use http::header::{ACCEPT, AUTHORIZATION, USER_AGENT};
     use rstest::rstest;
     use serde_json::json;
 

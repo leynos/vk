@@ -36,6 +36,9 @@
 
 ## Migration guides
 
+- [GraphQL transport migration guide](graphql-transport-migration-guide.md):
+  Use this when adapting `vk` deployments to the direct Hyper and rustls
+  transport's proxy and redirect boundaries.
 - [Ortho Config v0.6.0 migration guide](ortho-config-v0-6-0-migration-guide.md):
   Use this when migrating configuration behaviour from older `ortho_config`
   releases.

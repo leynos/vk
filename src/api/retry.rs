@@ -7,7 +7,7 @@ use tokio::time::Duration;
 /// Configuration for retrying failed GraphQL requests.
 #[derive(Clone, Copy, Debug)]
 pub struct RetryConfig {
-    /// Total number of attempts including the initial request.
+    /// Number of retries permitted after the initial request.
     pub attempts: usize,
     /// Base delay for the exponential backoff.
     pub base_delay: Duration,
@@ -58,8 +58,9 @@ pub fn build_retry_builder(config: RetryConfig) -> ExponentialBuilder {
 }
 
 /// Determines whether a `VkError` is transient and should be retried.
-/// Returns `true` for network errors (`VkError::RequestContext`,
-/// `VkError::Request`), empty responses (`VkError::EmptyResponse`), and for
+/// Returns `true` for network errors (`VkError::RequestContext`, which the
+/// hyper transport uses for connection failures, timeouts, and body-read
+/// errors), empty responses (`VkError::EmptyResponse`), and for
 /// `VkError::BadResponseSerde` errors only when
 /// `is_transient_serde_error(status, snippet)` returns true (indicating
 /// server-side or rate-limit failures). All other `VkError` variants return
@@ -78,9 +79,7 @@ pub fn build_retry_builder(config: RetryConfig) -> ExponentialBuilder {
 /// ```
 pub fn should_retry(err: &VkError) -> bool {
     match err {
-        VkError::RequestContext { .. } | VkError::Request(_) | VkError::EmptyResponse { .. } => {
-            true
-        }
+        VkError::RequestContext { .. } | VkError::EmptyResponse { .. } => true,
         VkError::BadResponseSerde {
             status, snippet, ..
         } => is_transient_serde_error(*status, snippet),
