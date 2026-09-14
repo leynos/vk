@@ -297,5 +297,27 @@ fn build_request(
 }
 
 #[cfg(test)]
+mod property_tests {
+    //! Property tests for deterministic transport boundary helpers.
+
+    use super::{MAX_RESPONSE_BODY_BYTES, response_body_exceeds_limit};
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn response_size_boundary_matches_the_configured_limit(size in any::<usize>()) {
+            prop_assert_eq!(
+                response_body_exceeds_limit(size),
+                size > MAX_RESPONSE_BODY_BYTES,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 #[path = "transport_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "transport_contract_tests.rs"]
+mod contract_tests;

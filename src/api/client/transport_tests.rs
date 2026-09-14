@@ -1,12 +1,12 @@
 //! Loopback behavioural tests for the GraphQL HTTP transport.
 
-use super::{MAX_RESPONSE_BODY_BYTES, response_body_exceeds_limit};
+use super::MAX_RESPONSE_BODY_BYTES;
 use crate::{
     VkError,
     api::{GraphQLClient, RetryConfig},
 };
+use bytes::Bytes;
 use futures::future::join_all;
-use proptest::prelude::*;
 use serde_json::{Value, json};
 use std::{
     convert::Infallible,
@@ -15,7 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use third_wheel::hyper::{
-    Body, Method, Request, Response, Server, StatusCode,
+    Body, Request, Response, Server, StatusCode,
     body::to_bytes,
     service::{make_service_fn, service_fn},
 };
@@ -24,9 +24,8 @@ use tokio::{
     task::JoinHandle,
     time::{Duration, sleep},
 };
-
 /// Start a loopback GraphQL stub and return its address and task handle.
-fn start_loopback_server<F, Fut>(handler: F) -> (SocketAddr, JoinHandle<()>)
+pub(super) fn start_loopback_server<F, Fut>(handler: F) -> (SocketAddr, JoinHandle<()>)
 where
     F: Fn(Request<Body>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<Response<Body>, Infallible>> + Send + 'static,
@@ -49,15 +48,13 @@ where
     });
     (address, task)
 }
-
 /// Stop a loopback stub after the client has completed its assertion path.
-async fn stop_loopback_server(task: JoinHandle<()>) {
+pub(super) async fn stop_loopback_server(task: JoinHandle<()>) {
     task.abort();
     let _ = task.await;
 }
-
 /// Build deterministic retry settings for one loopback scenario.
-fn loopback_retry(timeout: Duration) -> RetryConfig {
+pub(super) fn loopback_retry(timeout: Duration) -> RetryConfig {
     RetryConfig {
         attempts: 0,
         base_delay: Duration::from_millis(1),
@@ -65,73 +62,6 @@ fn loopback_retry(timeout: Duration) -> RetryConfig {
         jitter: false,
     }
 }
-
-#[derive(Debug)]
-struct CapturedRequest {
-    method: Method,
-    path: String,
-    content_type: Option<String>,
-    user_agent: Option<String>,
-    accept: Option<String>,
-    authorization: Option<String>,
-    payload: Value,
-}
-
-impl CapturedRequest {
-    /// Read a loopback request into the fields asserted by the contract test.
-    async fn from_request(request: Request<Body>) -> Self {
-        let (parts, body) = request.into_parts();
-        let payload = serde_json::from_slice(&to_bytes(body).await.expect("read request body"))
-            .expect("parse request JSON");
-        Self {
-            method: parts.method,
-            path: parts.uri.path().to_string(),
-            content_type: parts
-                .headers
-                .get("content-type")
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string),
-            user_agent: parts
-                .headers
-                .get("user-agent")
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string),
-            accept: parts
-                .headers
-                .get("accept")
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string),
-            authorization: parts
-                .headers
-                .get("authorization")
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_string),
-            payload,
-        }
-    }
-}
-
-/// Assert the bounded request shape sent to a loopback endpoint override.
-fn assert_graphql_request_contract(captured: &CapturedRequest) {
-    assert_eq!(captured.method, Method::POST);
-    assert_eq!(captured.path, "/graphql-test");
-    assert_eq!(captured.content_type.as_deref(), Some("application/json"));
-    assert_eq!(captured.user_agent.as_deref(), Some("vk"));
-    assert_eq!(
-        captured.accept.as_deref(),
-        Some("application/vnd.github+json")
-    );
-    assert_eq!(captured.authorization.as_deref(), Some("Bearer test-token"));
-    assert_eq!(
-        captured.payload,
-        json!({
-            "query": "query RequestContract($id: ID!) { viewer { login } }",
-            "variables": {"id": "42"},
-            "operationName": "RequestContract",
-        })
-    );
-}
-
 /// Assert that a low-level transport result keeps the supplied diagnostics.
 fn assert_request_context(error: &VkError, expected_fragments: &[&str]) {
     match error {
@@ -143,7 +73,6 @@ fn assert_request_context(error: &VkError, expected_fragments: &[&str]) {
         assert!(diagnostic.contains(fragment), "{diagnostic}");
     }
 }
-
 /// Execute one named request through the client shared by concurrent callers.
 async fn run_concurrent_query(
     client: Arc<GraphQLClient>,
@@ -156,7 +85,6 @@ async fn run_concurrent_query(
         .expect("execute concurrent query");
     (operation, response)
 }
-
 /// Assert each operation contributes one complete request/response transcript pair.
 fn assert_transcript_pairs(transcript: &str, operations: &[&str]) {
     let entries: Vec<Value> = transcript
@@ -186,50 +114,6 @@ fn assert_transcript_pairs(transcript: &str, operations: &[&str]) {
         );
     }
 }
-
-#[tokio::test]
-async fn transport_posts_graphql_contract_to_the_endpoint_override() {
-    let (capture_sender, capture_receiver) = oneshot::channel();
-    let capture_sender = Arc::new(Mutex::new(Some(capture_sender)));
-    let (address, server_task) = start_loopback_server(move |request| {
-        let capture_sender = Arc::clone(&capture_sender);
-        async move {
-            let captured = CapturedRequest::from_request(request).await;
-            capture_sender
-                .lock()
-                .expect("lock capture sender")
-                .take()
-                .expect("capture one request")
-                .send(captured)
-                .expect("receive captured request");
-            Ok::<_, Infallible>(Response::new(Body::from(
-                json!({"data": {"viewer": {"login": "octocat"}}}).to_string(),
-            )))
-        }
-    });
-    let endpoint = format!("http://{address}/graphql-test");
-    let client = GraphQLClient::with_endpoint_retry(
-        "test-token",
-        endpoint,
-        None,
-        loopback_retry(Duration::from_secs(1)),
-    )
-    .expect("build GraphQL client");
-
-    let result: Value = client
-        .run_query(
-            "query RequestContract($id: ID!) { viewer { login } }",
-            json!({"id": "42"}),
-        )
-        .await
-        .expect("execute GraphQL query");
-    let captured = capture_receiver.await.expect("receive capture");
-    stop_loopback_server(server_task).await;
-
-    assert_eq!(result, json!({"viewer": {"login": "octocat"}}));
-    assert_graphql_request_contract(&captured);
-}
-
 #[tokio::test]
 async fn transport_maps_refused_loopback_connections_to_request_context() {
     let address = {
@@ -245,15 +129,12 @@ async fn transport_maps_refused_loopback_connections_to_request_context() {
         loopback_retry(Duration::from_millis(100)),
     )
     .expect("build GraphQL client");
-
     let error = client
         .run_query::<_, Value>("query RefusedConnection { viewer { login } }", json!({}))
         .await
         .expect_err("refused connection fails");
-
     assert_request_context(&error, &[]);
 }
-
 #[tokio::test]
 async fn transport_preserves_non_success_status_and_body_snippet() {
     let (address, server_task) = start_loopback_server(|_request| async {
@@ -280,7 +161,6 @@ async fn transport_preserves_non_success_status_and_body_snippet() {
 
     assert_request_context(&error, &["status 502", "upstream is unavailable"]);
 }
-
 #[tokio::test]
 async fn transport_times_out_before_receiving_response_headers() {
     let (address, server_task) = start_loopback_server(|_request| async {
@@ -303,7 +183,6 @@ async fn transport_times_out_before_receiving_response_headers() {
 
     assert_request_context(&error, &["HeaderTimeout", "request timed out after"]);
 }
-
 #[tokio::test]
 async fn transport_rejects_response_bodies_over_the_limit() {
     let oversized_body = vec![b'x'; MAX_RESPONSE_BODY_BYTES + 1];
@@ -334,7 +213,75 @@ async fn transport_rejects_response_bodies_over_the_limit() {
 
     assert_request_context(&error, &["OversizedBody", "status 503"]);
 }
+#[tokio::test]
+async fn transport_reports_non_timeout_response_body_read_failures() {
+    let (body_sender, body) = Body::channel();
+    let body_sender = Arc::new(Mutex::new(Some(body_sender)));
+    let body = Arc::new(Mutex::new(Some(body)));
+    let (sender_task_sender, sender_task_receiver) = oneshot::channel();
+    let sender_task_sender = Arc::new(Mutex::new(Some(sender_task_sender)));
+    let (address, server_task) = start_loopback_server(move |_request| {
+        let body_sender = Arc::clone(&body_sender);
+        let body = Arc::clone(&body);
+        let sender_task_sender = Arc::clone(&sender_task_sender);
+        async move {
+            let mut body_sender = body_sender
+                .lock()
+                .expect("lock body sender")
+                .take()
+                .expect("send one response body");
+            let sender_task = tokio::spawn(async move {
+                body_sender
+                    .send_data(Bytes::from_static(b"{\"data\":"))
+                    .await
+                    .expect("send initial response body data");
+                body_sender.abort();
+            });
+            sender_task_sender
+                .lock()
+                .expect("lock sender-task channel")
+                .take()
+                .expect("send one sender task")
+                .send(sender_task)
+                .expect("receive sender task");
+            Ok::<_, Infallible>(
+                Response::builder()
+                    .status(StatusCode::SERVICE_UNAVAILABLE)
+                    .body(
+                        body.lock()
+                            .expect("lock response body")
+                            .take()
+                            .expect("send one body"),
+                    )
+                    .expect("build fallible response"),
+            )
+        }
+    });
+    let client = GraphQLClient::with_endpoint_retry(
+        "token",
+        format!("http://{address}"),
+        None,
+        loopback_retry(Duration::from_secs(1)),
+    )
+    .expect("build GraphQL client");
 
+    let error = client
+        .run_query::<_, Value>("query BrokenBody { viewer { login } }", json!({}))
+        .await
+        .expect_err("body read failure fails the request");
+    sender_task_receiver
+        .await
+        .expect("receive sender task")
+        .await
+        .expect("complete sender task");
+    stop_loopback_server(server_task).await;
+
+    assert_request_context(&error, &["BrokenBody", "status 503"]);
+    assert!(
+        !error.to_string().contains("request timed out after"),
+        "{error}"
+    );
+}
 #[tokio::test]
 async fn pooled_transport_keeps_concurrent_responses_and_transcripts_isolated() {
     let (address, server_task) = start_loopback_server(|request| async move {
@@ -383,14 +330,4 @@ async fn pooled_transport_keeps_concurrent_responses_and_transcripts_isolated() 
         assert_eq!(response, json!({"operation": operation}));
     }
     assert_transcript_pairs(&transcript, &operations);
-}
-
-proptest! {
-    #[test]
-    fn response_size_boundary_matches_the_configured_limit(size in any::<usize>()) {
-        prop_assert_eq!(
-            response_body_exceeds_limit(size),
-            size > MAX_RESPONSE_BODY_BYTES,
-        );
-    }
 }
