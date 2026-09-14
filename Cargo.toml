@@ -25,7 +25,7 @@ anyhow = "1.0"
 backon = "1.5.2"
 html5ever = "0.35.0"
 http = "1"
-markup5ever_rcdom = "0.35.0"
+markup5ever_rcdom = "0.39.0"
 metrics = "0.24.6"
 # Patch updates within octocrab 0.54 are accepted; widening to 0.55 requires
 # review. The `retry` feature is deliberately excluded so the REST reply path
