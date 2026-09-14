@@ -8,6 +8,7 @@ fn deserialize_pr_for_branch_response() {
     let json = json!({
         "repository": {
             "pullRequests": {
+                "pageInfo": { "hasNextPage": false, "endCursor": null },
                 "nodes": [{
                     "number": 42,
                     "headRepository": {
@@ -40,6 +41,7 @@ fn deserialize_pr_for_branch_empty() {
     let json = json!({
         "repository": {
             "pullRequests": {
+                "pageInfo": { "hasNextPage": false, "endCursor": null },
                 "nodes": []
             }
         }
@@ -54,6 +56,7 @@ fn deserialize_pr_for_branch_null_head_repository() {
     let json = json!({
         "repository": {
             "pullRequests": {
+                "pageInfo": { "hasNextPage": false, "endCursor": null },
                 "nodes": [{
                     "number": 99,
                     "headRepository": null
@@ -121,10 +124,10 @@ mod fetch_pr_for_branch_tests {
     use tokio::task::JoinHandle;
     use tokio::time::Duration;
 
-    /// Captured GraphQL request variables for verification.
+    /// Captured GraphQL request for verification.
     #[derive(Debug, Default)]
     struct CapturedRequest {
-        variables: Option<Value>,
+        request: Option<Value>,
     }
 
     /// RAII guard for mock server cleanup with request inspection.
@@ -139,9 +142,26 @@ mod fetch_pr_for_branch_tests {
             &self.client
         }
 
-        /// Get the captured GraphQL variables from the last request.
+        /// Get the captured GraphQL variables from the request.
         fn captured_variables(&self) -> Option<Value> {
-            self.captured.lock().expect("lock").variables.clone()
+            self.captured
+                .lock()
+                .expect("lock")
+                .request
+                .as_ref()
+                .and_then(|request| request.get("variables"))
+                .cloned()
+        }
+
+        /// Get the captured GraphQL operation name.
+        fn operation_name(&self) -> Option<Value> {
+            self.captured
+                .lock()
+                .expect("lock")
+                .request
+                .as_ref()
+                .and_then(|request| request.get("operationName"))
+                .cloned()
         }
     }
 
@@ -149,13 +169,6 @@ mod fetch_pr_for_branch_tests {
         fn drop(&mut self) {
             self.join.abort();
         }
-    }
-
-    /// Extract GraphQL variables from a request body.
-    fn extract_graphql_variables(bytes: Option<third_wheel::hyper::body::Bytes>) -> Option<Value> {
-        let bytes = bytes?;
-        let json: Value = serde_json::from_slice(&bytes).ok()?;
-        json.get("variables").cloned()
     }
 
     /// Start a mock HTTP server that returns the given JSON body and captures requests.
@@ -175,8 +188,10 @@ mod fetch_pr_for_branch_tests {
                         // Capture the request body to extract variables
                         let (_parts, req_body) = req.into_parts();
                         let bytes = third_wheel::hyper::body::to_bytes(req_body).await.ok();
-                        if let Some(vars) = extract_graphql_variables(bytes) {
-                            captured.lock().expect("lock").variables = Some(vars);
+                        if let Some(bytes) = bytes
+                            && let Ok(request) = serde_json::from_slice(&bytes)
+                        {
+                            captured.lock().expect("lock").request = Some(request);
                         }
 
                         Ok::<_, Infallible>(
@@ -246,7 +261,11 @@ mod fetch_pr_for_branch_tests {
                 json!({"number": pr.number, "headRepository": head_repository})
             })
             .collect();
-        json!({"data": {"repository": {"pullRequests": {"nodes": nodes_json}}}}).to_string()
+        json!({"data": {"repository": {"pullRequests": {
+            "nodes": nodes_json,
+            "pageInfo": {"hasNextPage": false, "endCursor": null}
+        }}}})
+        .to_string()
     }
 
     #[rstest]
@@ -256,6 +275,7 @@ mod fetch_pr_for_branch_tests {
             "data": {
                 "repository": {
                     "pullRequests": {
+                        "pageInfo": { "hasNextPage": false, "endCursor": null },
                         "nodes": [{
                             "number": 42,
                             "headRepository": {
@@ -278,6 +298,8 @@ mod fetch_pr_for_branch_tests {
         assert_eq!(vars.get("owner"), Some(&json!("owner")));
         assert_eq!(vars.get("name"), Some(&json!("repo")));
         assert_eq!(vars.get("headRef"), Some(&json!("feature")));
+        assert_eq!(vars.get("after"), Some(&Value::Null));
+        assert_eq!(server.operation_name(), Some(json!("PrForBranchQuery")));
     }
 
     #[rstest]
@@ -287,6 +309,7 @@ mod fetch_pr_for_branch_tests {
             "data": {
                 "repository": {
                     "pullRequests": {
+                        "pageInfo": { "hasNextPage": false, "endCursor": null },
                         "nodes": []
                     }
                 }
@@ -357,6 +380,7 @@ mod fetch_pr_for_branch_tests {
             "data": {
                 "repository": {
                     "pullRequests": {
+                        "pageInfo": { "hasNextPage": false, "endCursor": null },
                         "nodes": [{
                             "number": 100,
                             "headRepository": {

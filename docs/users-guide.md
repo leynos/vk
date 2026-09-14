@@ -110,6 +110,11 @@ vk resolve https://github.com/leynos/vk/pull/191#discussion_r123456789 \
   --message "Addressed in the latest commit."
 ```
 
+To find the thread, the resolver queries the pull request's `reviewThreads`
+connection and scans the first 100 comments in each thread for the requested
+`fullDatabaseId`. A comment beyond the first 100 comments of a thread is not
+found.
+
 `--http-timeout SECS` sets the total deadline for the REST reply request,
 including connection, request, and response handling; its default is 10 seconds.
 `--connect-timeout SECS` sets the connection deadline; its default is 5

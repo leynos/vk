@@ -64,37 +64,49 @@ impl CursorVariables for comment_query::Variables {
     }
 }
 
+/// Envelope for one review-thread query response.
 #[derive(Debug, Deserialize, Default)]
 pub(super) struct ThreadData {
+    /// Repository that owns the requested pull request.
     pub(super) repository: Repository,
 }
 
+/// Repository envelope in a review-thread response.
 #[derive(Debug, Deserialize, Default)]
 pub(super) struct Repository {
+    /// Pull request containing the review threads.
     #[serde(rename = "pullRequest")]
     pub(super) pull_request: PullRequest,
 }
 
+/// Pull-request envelope in a review-thread response.
 #[derive(Debug, Deserialize, Default)]
 pub(super) struct PullRequest {
+    /// Paginated review threads from the pull request.
     #[serde(rename = "reviewThreads")]
     pub(super) review_threads: ReviewThreadConnection,
 }
 
+/// Node-query envelope for a review thread.
 #[derive(Debug, Deserialize, Default)]
 pub(super) struct NodeWrapper<T> {
+    /// Requested node when it exists and has the expected type.
     pub(super) node: Option<T>,
 }
 
+/// Review-thread node carrying its comment connection.
 #[derive(Debug, Deserialize, Default)]
 pub(super) struct CommentNode {
+    /// Paginated comments belonging to the review thread.
     pub(super) comments: CommentConnection,
 }
 
 /// A paginated GraphQL connection containing nodes and page metadata.
 #[derive(Debug, Deserialize, Default)]
+#[serde(bound(deserialize = "T: Deserialize<'de>"))]
 pub struct Connection<T> {
     /// Items returned for this page of the connection.
+    #[serde(default, deserialize_with = "crate::api::deserialize::nullable_nodes")]
     pub nodes: Vec<T>,
     /// Pagination metadata for this connection.
     #[serde(rename = "pageInfo")]

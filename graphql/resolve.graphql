@@ -12,6 +12,10 @@ query ThreadForCommentQuery($owner: String!, $name: String!, $number: Int!, $aft
             nodes {
               fullDatabaseId
             }
+            pageInfo {
+              endCursor
+              hasNextPage
+            }
           }
         }
       }

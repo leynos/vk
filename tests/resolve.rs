@@ -47,21 +47,13 @@ impl Page {
         // One review-thread page holding a single thread whose sole comment
         // carries the scripted database id (`fullDatabaseId` is a BigInt
         // scalar, transported as a string).
-        self.end_cursor.map_or_else(
-            || {
-                format!(
-                    r#"{{"data":{{"repository":{{"pullRequest":{{"reviewThreads":{{"pageInfo":{{"endCursor":null,"hasNextPage":false}},"nodes":[{{"id":"{}","comments":{{"nodes":[{{"fullDatabaseId":"{}"}}]}}}}]}}}}}}}}}}"#,
-                    self.thread_id,
-                    self.comment_id,
-                )
-            },
-            |cursor| {
-                format!(
-                    r#"{{"data":{{"repository":{{"pullRequest":{{"reviewThreads":{{"pageInfo":{{"endCursor":"{cursor}","hasNextPage":true}},"nodes":[{{"id":"{}","comments":{{"nodes":[{{"fullDatabaseId":"{}"}}]}}}}]}}}}}}}}}}"#,
-                    self.thread_id,
-                    self.comment_id,
-                )
-            },
+        let page_info = self.end_cursor.map_or_else(
+            || r#"{"endCursor":null,"hasNextPage":false}"#.to_owned(),
+            |cursor| format!(r#"{{"endCursor":"{cursor}","hasNextPage":true}}"#),
+        );
+        format!(
+            r#"{{"data":{{"repository":{{"pullRequest":{{"reviewThreads":{{"pageInfo":{page_info},"nodes":[{{"id":"{}","comments":{{"nodes":[{{"fullDatabaseId":"{}"}}],"pageInfo":{{"endCursor":null,"hasNextPage":false}}}}}}]}}}}}}}}}}"#,
+            self.thread_id, self.comment_id,
         )
     }
 }
@@ -71,6 +63,12 @@ async fn run_resolve_flow(pages: Vec<Page>, expected_posts: usize) {
     let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let pages = Arc::new(Mutex::new(VecDeque::from(pages)));
+    let expected_thread_id = pages
+        .lock()
+        .expect("lock scripted pages")
+        .back()
+        .expect("at least one thread page")
+        .thread_id;
     let expected_after = Arc::new(Mutex::new(None::<String>));
     let calls_clone = Arc::clone(&calls);
     let pages_clone = Arc::clone(&pages);
@@ -99,8 +97,32 @@ async fn run_resolve_flow(pages: Vec<Page>, expected_posts: usize) {
             }
             let mut pages = pages_clone.lock().expect("lock pages");
             if pages.is_empty() {
+                assert_eq!(
+                    v.pointer("/operationName"),
+                    Some(&Value::String("ResolveReviewThreadMutation".into()))
+                );
+                assert_eq!(
+                    v.pointer("/variables/id"),
+                    Some(&Value::String(expected_thread_id.into()))
+                );
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#.to_owned()
             } else {
+                assert_eq!(
+                    v.pointer("/operationName"),
+                    Some(&Value::String("ThreadForCommentQuery".into()))
+                );
+                assert_eq!(
+                    v.pointer("/variables/owner"),
+                    Some(&Value::String("o".into()))
+                );
+                assert_eq!(
+                    v.pointer("/variables/name"),
+                    Some(&Value::String("r".into()))
+                );
+                assert_eq!(
+                    v.pointer("/variables/number"),
+                    Some(&Value::Number(83.into()))
+                );
                 let page = pages.pop_front().expect("non-empty script");
                 *after = page.end_cursor.map(std::string::ToString::to_string);
                 page.body()
@@ -182,7 +204,7 @@ async fn run_reply_flow(
         };
         let body = if req.uri().path() == "/graphql" {
             if gql_calls == 0 {
-                r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"id":"t","comments":{"nodes":[{"fullDatabaseId":"1"}]}}]}}}}}"#
+                r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"id":"t","comments":{"nodes":[{"fullDatabaseId":"1"}],"pageInfo":{"endCursor":null,"hasNextPage":false}}}]}}}}}"#
             } else {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
             }
@@ -369,7 +391,7 @@ async fn resolve_skips_empty_reply() {
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             if gql_calls == 0 {
-                r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"id":"t","comments":{"nodes":[{"fullDatabaseId":"1"}]}}]}}}}}"#
+                r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"id":"t","comments":{"nodes":[{"fullDatabaseId":"1"}],"pageInfo":{"endCursor":null,"hasNextPage":false}}}]}}}}}"#
             } else {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
             }

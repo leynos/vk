@@ -97,6 +97,7 @@ futures = "0.3"
 insta = { version = "1.43", features = ["redactions"] }
 metrics-util = { version = "0.20.4", features = ["debugging"] }
 proptest = "1.11.0"
+trybuild = "1.0.116"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

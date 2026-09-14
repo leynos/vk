@@ -1,6 +1,7 @@
 //! Pagination helpers for the GraphQL client.
 
 use super::GraphQLClient;
+use super::metrics::record_page_limit;
 use crate::VkError;
 use crate::api::CursorVariables;
 use crate::boxed::BoxedStr;
@@ -10,52 +11,6 @@ use serde::de::DeserializeOwned;
 const MAX_PAGES: usize = 1000;
 
 impl GraphQLClient {
-    /// Fetch and concatenate all pages of a `graphql_client` codegen'd
-    /// operation.
-    ///
-    /// `variables` supplies the base request, the [`CursorVariables`] impl
-    /// advances the cursor between pages, and the `map` closure extracts the
-    /// items and [`crate::PageInfo`] from each page's `ResponseData`.
-    ///
-    /// Pagination stops after 1000 pages to avoid infinite loops when cursors
-    /// repeat or the API misbehaves. Any items fetched before an error are
-    /// discarded: an error from the request or the `map` closure aborts the
-    /// whole traversal and yields only that error.
-    ///
-    /// # Errors
-    ///
-    /// Propagates any [`VkError`] returned by the underlying request or the
-    /// `map` closure, and returns [`VkError::BadResponse`] if the page cap is
-    /// exceeded.
-    ///
-    /// Currently exercised only from tests: the migrated paginated operations
-    /// all decode into hand-written domain structs via
-    /// [`paginate_operation_as`](Self::paginate_operation_as). This wrapper is
-    /// the plan-specified typed interface for future operations whose
-    /// generated `ResponseData` is fixture-compatible; the `expect` is removed
-    /// when its first production caller arrives.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the codegen'd paginated ops decode via paginate_operation_as"
-        )
-    )]
-    pub(crate) async fn paginate_operation<Q, Item, Mapper>(
-        &self,
-        variables: Q::Variables,
-        start_cursor: Option<String>,
-        map: Mapper,
-    ) -> Result<Vec<Item>, VkError>
-    where
-        Q: graphql_client::GraphQLQuery,
-        Q::Variables: CursorVariables + Clone,
-        Mapper: FnMut(Q::ResponseData) -> Result<(Vec<Item>, crate::PageInfo), VkError>,
-    {
-        self.paginate_operation_as::<Q, Q::ResponseData, Item, Mapper>(variables, start_cursor, map)
-            .await
-    }
-
     /// Fetch and concatenate all pages of a codegen'd operation, decoding each
     /// page into `T` rather than the generated `ResponseData`.
     ///
@@ -71,8 +26,7 @@ impl GraphQLClient {
     ///
     /// Pagination stops after 1000 pages to avoid infinite loops when cursors
     /// repeat or the API misbehaves. As with
-    /// [`paginate_operation`](Self::paginate_operation), any items fetched
-    /// before an error are discarded.
+    /// this method, any items fetched before an error are discarded.
     ///
     /// # Errors
     ///
@@ -97,6 +51,7 @@ impl GraphQLClient {
         loop {
             pages_seen += 1;
             if pages_seen > MAX_PAGES {
+                record_page_limit();
                 return Err(VkError::BadResponse(
                     format!("pagination exceeded max pages {MAX_PAGES}").boxed(),
                 ));
@@ -124,7 +79,7 @@ mod tests {
     use graphql_client::GraphQLQuery;
 
     /// Minimal paginated operation used to exercise [`CursorVariables`] and
-    /// [`GraphQLClient::paginate_operation`] against the scripted stub server.
+    /// [`GraphQLClient::paginate_operation_as`] against the scripted stub server.
     #[derive(GraphQLQuery)]
     #[graphql(
         schema_path = "graphql/schema.docs.graphql",
@@ -201,7 +156,7 @@ mod tests {
         ]);
         let items = server
             .client
-            .paginate_operation::<PageTestQuery, String, _>(
+            .paginate_operation_as::<PageTestQuery, page_test_query::ResponseData, String, _>(
                 page_test_query::Variables { cursor: None },
                 None,
                 map_page,
@@ -214,7 +169,7 @@ mod tests {
         let _ = server.join.await;
     }
 
-    /// Port of the retired `fetch_page` cursor characterization: the cursor
+    /// The cursor characterization: the cursor
     /// supplied to the paginator must land in the request's
     /// `variables.cursor`, overwriting any stale value already present in the
     /// base variables.
@@ -256,7 +211,7 @@ mod tests {
         let server = start_server(vec![page_body("a", true, Some("c1")), error_body]);
         let result = server
             .client
-            .paginate_operation::<PageTestQuery, String, _>(
+            .paginate_operation_as::<PageTestQuery, page_test_query::ResponseData, String, _>(
                 page_test_query::Variables { cursor: None },
                 None,
                 map_page,
@@ -265,6 +220,33 @@ mod tests {
         assert!(
             matches!(result, Err(VkError::ApiErrors(_))),
             "expected the second page's GraphQL error to abort the traversal, got {result:?}"
+        );
+        server.join.abort();
+        let _ = server.join.await;
+    }
+
+    #[tokio::test]
+    async fn paginate_operation_stops_at_the_page_limit() {
+        let pages = std::iter::repeat_with(|| page_body("item", true, Some("next")))
+            .take(MAX_PAGES)
+            .collect();
+        let server = start_server(pages);
+
+        let result = server
+            .client
+            .paginate_operation_as::<PageTestQuery, page_test_query::ResponseData, String, _>(
+                page_test_query::Variables { cursor: None },
+                None,
+                map_page,
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(VkError::BadResponse(message)) if message.contains("max pages"))
+        );
+        assert_eq!(
+            server.hits.load(std::sync::atomic::Ordering::SeqCst),
+            MAX_PAGES
         );
         server.join.abort();
         let _ = server.join.await;

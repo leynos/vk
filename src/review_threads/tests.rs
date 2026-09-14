@@ -113,26 +113,15 @@ async fn path_variant_client(
 
 #[rstest]
 #[tokio::test]
-async fn missing_nodes_reports_path(repo: RepoInfo, #[future] missing_nodes_client: TestClient) {
+async fn missing_nodes_are_treated_as_empty(
+    repo: RepoInfo,
+    #[future] missing_nodes_client: TestClient,
+) {
     let TestClient { client, join, .. } = missing_nodes_client.await;
     let result =
         fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
             .await;
-    let err = result.expect_err("expected error");
-    let VkError::BadResponseSerde {
-        status,
-        message,
-        snippet,
-    } = err
-    else {
-        panic!("unexpected error: {err:?}");
-    };
-    assert_eq!(status, 200);
-    assert!(
-        message.contains("repository.pullRequest.reviewThreads"),
-        "{message}"
-    );
-    assert!(!snippet.is_empty(), "JSON snippet should be captured");
+    assert!(result.expect("missing nodes are empty").is_empty());
     join.abort();
     let _ = join.await;
 }
@@ -454,7 +443,9 @@ async fn retry_client() -> TestClient {
 #[rstest]
 #[tokio::test]
 async fn retries_bad_page_and_preserves_order(repo: RepoInfo, #[future] retry_client: TestClient) {
-    let TestClient { client, join, hits } = retry_client.await;
+    let TestClient {
+        client, join, hits, ..
+    } = retry_client.await;
     let threads =
         fetch_review_threads_with_options(&client, &repo, 1, FetchOptions::unresolved_current())
             .await
@@ -505,7 +496,9 @@ async fn accepts_max_i32_number(repo: RepoInfo) {
         }}}}
     })
     .to_string();
-    let TestClient { client, join, hits } = start_server(vec![body]);
+    let TestClient {
+        client, join, hits, ..
+    } = start_server(vec![body]);
     let threads = fetch_review_threads_with_options(
         &client,
         &repo,
@@ -629,7 +622,9 @@ async fn fetch_review_threads_with_options_filters_outdated(
     } else {
         vec![threads_body, comment_body_c2]
     };
-    let TestClient { client, join, hits } = start_server(bodies);
+    let TestClient {
+        client, join, hits, ..
+    } = start_server(bodies);
     let threads = fetch_review_threads_with_options(
         &client,
         &repo,

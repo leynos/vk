@@ -20,9 +20,9 @@ use third_wheel::hyper::{
 };
 use tokio::{task::JoinHandle, time::Duration};
 
-struct TestClient {
-    client: GraphQLClient,
-    join: JoinHandle<()>,
+pub(super) struct TestClient {
+    pub(super) client: GraphQLClient,
+    pub(super) join: JoinHandle<()>,
 }
 fn create_test_server<F, Fut>(
     response_handler: F,
@@ -88,7 +88,7 @@ where
 fn start_server(responses: Vec<String>) -> TestClient {
     start_server_with_status(responses, StatusCode::OK)
 }
-fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestClient {
+pub(super) fn start_server_with_status(responses: Vec<String>, status: StatusCode) -> TestClient {
     let responses = Arc::new(responses);
     start_server_generic(move |idx| {
         let body = responses
@@ -358,9 +358,10 @@ async fn run_payload_reports_details(#[case] case: TestCase) {
 // NOTE: the string-based `fetch_page` and its non-object-variables guard were
 // removed with the `run_query` surface; typed `Variables` structs are objects
 // by construction, so that failure mode no longer exists. Cursor handling is
-// characterized by `paginate_operation_overwrites_stale_cursor_in_request` in
-// the pagination test module, which asserts the cursor on the wire exactly as
-// the retired `fetch_page` tests did.
+// characterized by `paginate_operation_sends_cursor_in_request_variables` in
+// the pagination test module, including its `overwrites_stale_cursor` case,
+// which asserts the cursor on the wire exactly as the retired `fetch_page`
+// tests did.
 
 #[tokio::test]
 async fn run_payload_retains_status_when_response_body_times_out() {

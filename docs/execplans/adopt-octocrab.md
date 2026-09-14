@@ -346,11 +346,10 @@ escalation, not workarounds.
   (`HTTP(S)_PROXY`) and redirect support are deliberately not supported by the
   new transport — reqwest honoured both by default, but neither system proxy
   support nor redirect support is used or tested on the GraphQL path; both are
-  documented in the transport module. The
-  binary-internal `VkError::Request` variant (constructed only from reqwest
-  errors) was removed along with its retry-classifier arm; `VkError` is not
-  exported from `src/lib.rs`, so this is not a public API change. Date/Author:
-  2026-07-09, PR 2 implementation.
+  documented in the transport module. The binary-internal `VkError::Request`
+  variant (constructed only from reqwest errors) was removed along with its
+  retry-classifier arm; `VkError` is not exported from `src/lib.rs`, so this is
+  not a public API change. Date/Author: 2026-07-09, PR 2 implementation.
 - Decision: in PR 3, a missing repository or issue in the Issue
   operation's response now surfaces as `VkError::BadResponse` ("issue #N not
   found") instead of the previous accidental `BadResponseSerde` (the old
@@ -773,9 +772,9 @@ Recorded evidence:
 
 - `cargo tree -d` reports the following duplicate dependency families in the
   final graph: `base64` 0.22.1/0.23.1, `bytes` 0.5.6/1.12.1, `http`
-  0.2.12/1.5.0, `hyper` 0.14.32/1.11.1, `tokio-util` 0.6.10/0.7.19,
-  `toml` 0.8.23/1.1.6, and `thiserror` 1.0.69/2.0.20. These are transitive
-  duplicates retained by the REST, GraphQL, and test stacks.
+  0.2.12/1.5.0, `hyper` 0.14.32/1.11.1, `tokio-util` 0.6.10/0.7.19, `toml`
+  0.8.23/1.1.6, and `thiserror` 1.0.69/2.0.20. These are transitive duplicates
+  retained by the REST, GraphQL, and test stacks.
 - A generated transcript line retains the established JSON-lines shape:
 
   ```json
@@ -783,8 +782,8 @@ Recorded evidence:
   ```
 
 - Closing validation: `make test` passed with 215 library tests, all
-  integration suites, and 11 doctests; 0 tests failed. The ignored
-  `e2e_pr_42` transcript replay also passed.
+  integration suites, and 11 doctests; 0 tests failed. The ignored `e2e_pr_42`
+  transcript replay also passed.
 
 ## Interfaces and dependencies
 
