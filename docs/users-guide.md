@@ -81,6 +81,25 @@ Outdated review threads are hidden by default. Include them with
 vk pr 191 --show-outdated
 ```
 
+## Inspect an issue
+
+Show an issue from the configured repository by number:
+
+```bash
+vk issue 42
+```
+
+You can also provide a full GitHub issue URL:
+
+```bash
+vk issue https://github.com/leynos/vk/issues/42
+```
+
+If the repository or issue does not exist, `vk issue` reports
+`issue #N not found`, where `N` is the requested number. Issue numbers must fit
+GraphQL's signed 32-bit `Int` range; an out-of-range number is rejected before
+the request is sent.
+
 ## Focus on one discussion
 
 Pass a GitHub discussion fragment to show one review thread:

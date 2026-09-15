@@ -17,6 +17,43 @@ const REQUEST_DURATION: &str = "vk.api.graphql_transport.duration.seconds";
 const RETRY_COUNT: &str = "vk.api.graphql.retries.total";
 /// Metric counting pagination traversals stopped by the hard page limit.
 const PAGE_LIMIT_COUNT: &str = "vk.api.graphql.pagination.page_limit.total";
+/// Metric counting best-effort transcript recording failures by fixed stage.
+const TRANSCRIPT_FAILURE_COUNT: &str = "vk.api.graphql.transcript.failures.total";
+
+/// Fixed failure stages for best-effort GraphQL transcript recording.
+#[derive(Clone, Copy, Debug)]
+pub(super) enum TranscriptFailure {
+    /// Serializing the transcript JSON entry failed.
+    Serialization,
+    /// Acquiring the transcript writer lock failed.
+    Lock,
+    /// Writing the transcript entry failed.
+    Write,
+    /// Flushing the transcript writer failed.
+    Flush,
+}
+
+impl TranscriptFailure {
+    /// Return the bounded metric label for this failure stage.
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::Serialization => "serialization",
+            Self::Lock => "lock",
+            Self::Write => "write",
+            Self::Flush => "flush",
+        }
+    }
+}
+
+/// Record a best-effort GraphQL transcript failure.
+pub(super) fn record_transcript_failure(failure: TranscriptFailure) {
+    counter!(
+        description: "Count GraphQL transcript recording failures by fixed stage.",
+        TRANSCRIPT_FAILURE_COUNT,
+        "stage" => failure.label(),
+    )
+    .increment(1);
+}
 
 /// Record one retry decision without attaching request-specific labels.
 pub(super) fn record_retry() {

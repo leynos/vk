@@ -57,11 +57,17 @@ impl GraphQLClient {
                 ));
             }
             let mut vars = variables.clone();
-            vars.set_cursor(cursor.take());
+            let request_cursor = cursor.take();
+            vars.set_cursor(request_cursor.clone());
             let data = self.run_operation_as::<Q, T>(vars).await?;
             let (mut page, info) = map(data)?;
             items.append(&mut page);
             if let Some(next) = info.next_cursor()? {
+                if request_cursor.as_deref() == Some(next) {
+                    return Err(VkError::BadResponse(
+                        "non-progressing pagination (repeated endCursor)".boxed(),
+                    ));
+                }
                 cursor = Some(next.to_string());
             } else {
                 break;
@@ -227,8 +233,8 @@ mod tests {
 
     #[tokio::test]
     async fn paginate_operation_stops_at_the_page_limit() {
-        let pages = std::iter::repeat_with(|| page_body("item", true, Some("next")))
-            .take(MAX_PAGES)
+        let pages = (0..MAX_PAGES)
+            .map(|page| page_body("item", true, Some(&format!("next-{page}"))))
             .collect();
         let server = start_server(pages);
 
@@ -248,6 +254,30 @@ mod tests {
             server.hits.load(std::sync::atomic::Ordering::SeqCst),
             MAX_PAGES
         );
+        server.join.abort();
+        let _ = server.join.await;
+    }
+
+    #[tokio::test]
+    async fn paginate_operation_stops_on_the_first_repeated_cursor() {
+        let server = start_server(vec![
+            page_body("first", true, Some("cursor")),
+            page_body("second", true, Some("cursor")),
+        ]);
+
+        let result = server
+            .client
+            .paginate_operation_as::<PageTestQuery, page_test_query::ResponseData, String, _>(
+                page_test_query::Variables { cursor: None },
+                None,
+                map_page,
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(VkError::BadResponse(message)) if message.as_ref() == "non-progressing pagination (repeated endCursor)")
+        );
+        assert_eq!(server.hits.load(std::sync::atomic::Ordering::SeqCst), 2);
         server.join.abort();
         let _ = server.join.await;
     }

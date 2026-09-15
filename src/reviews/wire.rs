@@ -44,7 +44,10 @@ impl CursorVariables for reviews_query::Variables {
     }
 }
 
-/// A pull-request review decoded from GitHub's GraphQL response.
+/// Public domain representation of a pull-request review returned by GitHub.
+///
+/// Its [`state`](Self::state) preserves GitHub's wire value verbatim because
+/// decoding bypasses the generated `PullRequestReviewState` enum.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestReview {
