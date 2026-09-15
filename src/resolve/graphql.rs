@@ -50,6 +50,12 @@ pub(crate) struct ResolveReviewThreadMutation;
 
 /// One page of thread-for-comment data as returned by the API.
 pub(crate) type ThreadPage = thread_for_comment_query::ResponseData;
+/// Generated review-thread connection used during thread lookup.
+type ReviewThreads =
+    thread_for_comment_query::ThreadForCommentQueryRepositoryPullRequestReviewThreads;
+/// Generated pagination metadata for a review-thread connection.
+type ReviewThreadsPageInfo =
+    thread_for_comment_query::ThreadForCommentQueryRepositoryPullRequestReviewThreadsPageInfo;
 
 #[cfg(test)]
 use mockall::automock;
@@ -72,7 +78,7 @@ pub(crate) struct ReviewCommentsQuery<'a> {
 #[allow(clippy::ref_option, reason = "automock generates &Option")]
 pub(crate) trait ReviewCommentsFetcher {
     /// Fetch one page of review threads and their initial comments.
-    #[allow(
+    #[expect(
         clippy::elidable_lifetime_names,
         reason = "automock requires explicit lifetime for query struct"
     )]
@@ -83,7 +89,7 @@ pub(crate) trait ReviewCommentsFetcher {
 }
 
 impl ReviewCommentsFetcher for GraphQLClient {
-    #[allow(
+    #[expect(
         clippy::elidable_lifetime_names,
         reason = "automock requires explicit lifetime for query struct"
     )]
@@ -131,6 +137,51 @@ fn find_thread_in_page(
     (None, comments_truncated)
 }
 
+/// Extract review threads from a GraphQL response page.
+fn review_threads_from_page(data: ThreadPage) -> Result<ReviewThreads, VkError> {
+    data.repository
+        .and_then(|repository| repository.pull_request)
+        .map(|pull_request| pull_request.review_threads)
+        .ok_or_else(|| VkError::BadResponse("missing review threads".into()))
+}
+
+/// Return the cursor for the next review-thread page, if one exists.
+#[expect(
+    clippy::ref_option,
+    reason = "the extraction contract retains the caller's cursor representation"
+)]
+fn next_thread_cursor(
+    page_info: &ReviewThreadsPageInfo,
+    previous: &Option<String>,
+) -> Result<Option<String>, VkError> {
+    if !page_info.has_next_page {
+        return Ok(None);
+    }
+    let next = page_info
+        .end_cursor
+        .clone()
+        .ok_or_else(|| VkError::BadResponse("missing endCursor with hasNextPage".into()))?;
+    if previous.as_deref() == Some(next.as_str()) {
+        return Err(VkError::BadResponse(
+            "non-progressing pagination (repeated endCursor)".into(),
+        ));
+    }
+    Ok(Some(next))
+}
+
+/// Return the terminal error after the review-thread traversal finishes.
+fn thread_lookup_error(comment_id: u64, comments_truncated: bool) -> VkError {
+    if comments_truncated {
+        return VkError::BadResponse(
+            format!(
+                "comment {comment_id} was not found in the fetched first 100 comments of a review thread"
+            )
+            .into(),
+        );
+    }
+    VkError::CommentNotFound { comment_id }
+}
+
 /// Find the review thread that owns the referenced discussion comment.
 pub(crate) async fn get_thread_id(
     gql: &impl ReviewCommentsFetcher,
@@ -151,11 +202,7 @@ pub(crate) async fn get_thread_id(
                 after: cursor.clone(),
             })
             .await?;
-        let threads = data
-            .repository
-            .and_then(|r| r.pull_request)
-            .map(|p| p.review_threads)
-            .ok_or_else(|| VkError::BadResponse("missing review threads".into()))?;
+        let threads = review_threads_from_page(data)?;
         if let Some(nodes) = threads.nodes {
             let (id, page_truncated) = find_thread_in_page(nodes, &target);
             if let Some(id) = id {
@@ -163,34 +210,15 @@ pub(crate) async fn get_thread_id(
             }
             comments_truncated |= page_truncated;
         }
-        if !threads.page_info.has_next_page {
+        let Some(next) = next_thread_cursor(&threads.page_info, &cursor)? else {
             break;
-        }
-        let next = threads.page_info.end_cursor;
-        if next.is_none() {
-            return Err(VkError::BadResponse(
-                "missing endCursor with hasNextPage".into(),
-            ));
-        }
-        if next == cursor {
-            return Err(VkError::BadResponse(
-                "non-progressing pagination (repeated endCursor)".into(),
-            ));
-        }
-        cursor = next;
+        };
+        cursor = Some(next);
     }
-    if comments_truncated {
-        return Err(VkError::BadResponse(
-            format!(
-                "comment {} was not found in the fetched first 100 comments of a review thread",
-                reference.comment_id
-            )
-            .into(),
-        ));
-    }
-    Err(VkError::CommentNotFound {
-        comment_id: reference.comment_id,
-    })
+    Err(thread_lookup_error(
+        reference.comment_id,
+        comments_truncated,
+    ))
 }
 
 /// Mark a review thread as resolved through the typed mutation.
@@ -270,6 +298,64 @@ mod tests {
                 }),
             }),
         }
+    }
+
+    #[test]
+    fn next_thread_cursor_finishes_without_a_next_page() {
+        let page_info = ThreadForCommentQueryRepositoryPullRequestReviewThreadsPageInfo {
+            end_cursor: Some("unused".to_string()),
+            has_next_page: false,
+        };
+
+        assert!(matches!(
+            next_thread_cursor(&page_info, &Some("previous".to_string())),
+            Ok(None)
+        ));
+    }
+
+    #[rstest]
+    #[case::missing_end_cursor(
+        ThreadForCommentQueryRepositoryPullRequestReviewThreadsPageInfo {
+            end_cursor: None,
+            has_next_page: true,
+        },
+        Some("previous".to_string()),
+        "missing endCursor with hasNextPage"
+    )]
+    #[case::repeated_cursor(
+        ThreadForCommentQueryRepositoryPullRequestReviewThreadsPageInfo {
+            end_cursor: Some("previous".to_string()),
+            has_next_page: true,
+        },
+        Some("previous".to_string()),
+        "non-progressing pagination (repeated endCursor)"
+    )]
+    fn next_thread_cursor_rejects_invalid_progress(
+        #[case] page_info: ThreadForCommentQueryRepositoryPullRequestReviewThreadsPageInfo,
+        #[case] previous: Option<String>,
+        #[case] expected: &str,
+    ) {
+        assert!(
+            matches!(next_thread_cursor(&page_info, &previous), Err(VkError::BadResponse(message)) if message.as_ref() == expected)
+        );
+    }
+
+    #[rstest]
+    #[case::truncated(
+        true,
+        VkError::BadResponse(
+            "comment 42 was not found in the fetched first 100 comments of a review thread".into()
+        )
+    )]
+    #[case::not_found(false, VkError::CommentNotFound { comment_id: 42 })]
+    fn thread_lookup_error_reports_the_terminal_lookup_result(
+        #[case] comments_truncated: bool,
+        #[case] expected: VkError,
+    ) {
+        assert_eq!(
+            format!("{:?}", thread_lookup_error(42, comments_truncated)),
+            format!("{expected:?}")
+        );
     }
 
     #[rstest]

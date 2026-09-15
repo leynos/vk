@@ -121,4 +121,22 @@ mod tests {
         join.abort();
         let _ = join.await;
     }
+
+    #[tokio::test]
+    async fn missing_issue_returns_a_semantic_error() {
+        let TestClient { client, join, .. } =
+            start_server(vec![json!({"data": {"repository": null}}).to_string()]);
+        let repo = RepoInfo {
+            owner: "owner".into(),
+            name: "repository".into(),
+        };
+
+        let result = fetch_issue(&client, &repo, 42).await;
+
+        assert!(
+            matches!(result, Err(VkError::BadResponse(message)) if message.as_ref() == "issue #42 not found")
+        );
+        join.abort();
+        let _ = join.await;
+    }
 }

@@ -1,3 +1,7 @@
+//! `trybuild` compile-fail fixture for an invalid `graphql_client` operation.
+//!
+//! It deliberately selects a nonexistent field to verify schema validation.
+
 use graphql_client::GraphQLQuery;
 
 #[derive(GraphQLQuery)]

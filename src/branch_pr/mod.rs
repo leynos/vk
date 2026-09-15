@@ -117,11 +117,12 @@ pub async fn fetch_pr_for_branch(
 ) -> Result<u64, VkError> {
     let mut after = None;
     loop {
+        let request_cursor = after.take();
         let variables = pr_for_branch_query::Variables {
             owner: repo.owner.clone(),
             name: repo.name.clone(),
             head_ref: branch.to_string(),
-            after: after.take(),
+            after: request_cursor.clone(),
         };
         let data: PrForBranchData = client
             .run_operation_as::<PrForBranchQuery, PrForBranchData>(variables)
@@ -137,6 +138,11 @@ pub async fn fetch_pr_for_branch(
         let Some(cursor) = page_info.next_cursor()? else {
             break;
         };
+        if request_cursor.as_deref() == Some(cursor) {
+            return Err(VkError::BadResponse(
+                "non-progressing pagination (repeated endCursor)".into(),
+            ));
+        }
         after = Some(cursor.to_owned());
     }
     Err(VkError::NoPrForBranch {

@@ -58,6 +58,62 @@ impl Page {
     }
 }
 
+/// Validate one GraphQL request and return its scripted response body.
+fn resolve_graphql_response(
+    req: &Request<Bytes>,
+    expected_after: &mut Option<String>,
+    pages: &mut VecDeque<Page>,
+    expected_thread_id: &str,
+) -> String {
+    let v: Value = serde_json::from_slice(req.body().as_ref()).expect("JSON body for /graphql");
+    let got_after = v
+        .pointer("/variables/after")
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned);
+    match expected_after.as_deref() {
+        Some(cursor) => assert_eq!(
+            got_after.as_deref(),
+            Some(cursor),
+            "query must include variables.after={cursor}; got: {v}"
+        ),
+        None => assert!(
+            got_after.is_none(),
+            "first page query must not include variables.after; got: {v}"
+        ),
+    }
+    if pages.is_empty() {
+        assert_eq!(
+            v.pointer("/operationName"),
+            Some(&Value::String("ResolveReviewThreadMutation".into()))
+        );
+        assert_eq!(
+            v.pointer("/variables/id"),
+            Some(&Value::String(expected_thread_id.into()))
+        );
+        r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#.to_owned()
+    } else {
+        assert_eq!(
+            v.pointer("/operationName"),
+            Some(&Value::String("ThreadForCommentQuery".into()))
+        );
+        assert_eq!(
+            v.pointer("/variables/owner"),
+            Some(&Value::String("o".into()))
+        );
+        assert_eq!(
+            v.pointer("/variables/name"),
+            Some(&Value::String("r".into()))
+        );
+        assert_eq!(
+            v.pointer("/variables/number"),
+            Some(&Value::Number(83.into()))
+        );
+        let page = pages.pop_front().expect("non-empty script");
+        *expected_after = page.end_cursor.map(std::string::ToString::to_string);
+        page.body()
+    }
+}
+
 /// Drive `vk resolve` and assert pagination.
 async fn run_resolve_flow(pages: Vec<Page>, expected_posts: usize) {
     let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
@@ -78,55 +134,8 @@ async fn run_resolve_flow(pages: Vec<Page>, expected_posts: usize) {
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             let mut after = expected_after_clone.lock().expect("lock after");
-            let body_bytes = req.body().as_ref();
-            let v: Value = serde_json::from_slice(body_bytes).expect("JSON body for /graphql");
-            let got_after = v
-                .pointer("/variables/after")
-                .and_then(|x| x.as_str())
-                .map(ToOwned::to_owned);
-            match after.as_deref() {
-                Some(cursor) => assert_eq!(
-                    got_after.as_deref(),
-                    Some(cursor),
-                    "query must include variables.after={cursor}; got: {v}"
-                ),
-                None => assert!(
-                    got_after.is_none(),
-                    "first page query must not include variables.after; got: {v}"
-                ),
-            }
             let mut pages = pages_clone.lock().expect("lock pages");
-            if pages.is_empty() {
-                assert_eq!(
-                    v.pointer("/operationName"),
-                    Some(&Value::String("ResolveReviewThreadMutation".into()))
-                );
-                assert_eq!(
-                    v.pointer("/variables/id"),
-                    Some(&Value::String(expected_thread_id.into()))
-                );
-                r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#.to_owned()
-            } else {
-                assert_eq!(
-                    v.pointer("/operationName"),
-                    Some(&Value::String("ThreadForCommentQuery".into()))
-                );
-                assert_eq!(
-                    v.pointer("/variables/owner"),
-                    Some(&Value::String("o".into()))
-                );
-                assert_eq!(
-                    v.pointer("/variables/name"),
-                    Some(&Value::String("r".into()))
-                );
-                assert_eq!(
-                    v.pointer("/variables/number"),
-                    Some(&Value::Number(83.into()))
-                );
-                let page = pages.pop_front().expect("non-empty script");
-                *after = page.end_cursor.map(std::string::ToString::to_string);
-                page.body()
-            }
+            resolve_graphql_response(req, &mut after, &mut pages, expected_thread_id)
         } else {
             "{}".to_owned()
         };

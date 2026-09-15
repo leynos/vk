@@ -778,7 +778,16 @@ Recorded evidence:
 - A generated transcript line retains the established JSON-lines shape:
 
   ```json
-  {"operation":"RetryOp","status":200,"request":{"query":"query RetryOp { __typename }","variables":{},"operationName":"RetryOp"},"response":"{\"data\":{\"x\":1}}"}
+  {
+    "operation": "RetryOp",
+    "status": 200,
+    "request": {
+      "query": "query RetryOp { __typename }",
+      "variables": {},
+      "operationName": "RetryOp"
+    },
+    "response": "{\"data\":{\"x\":1}}"
+  }
   ```
 
 - Closing validation: `make test` passed with 215 library tests, all

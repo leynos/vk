@@ -144,7 +144,7 @@ impl GraphQLClient {
                 timeout: self.retry.request_timeout,
             })
             .await?;
-        self.log_transcript(payload, operation, &resp).await?;
+        self.log_transcript(payload, operation, &resp).await;
         if !(200..300).contains(&resp.status) {
             // The transport surfaces every completed HTTP response, so a
             // non-2xx status is classified here. reqwest gave this a
@@ -325,7 +325,7 @@ impl GraphQLClient {
         let body = Q::build_query(variables);
         let operation = body.operation_name.to_string();
         let payload = serde_json::to_value(&body).map_err(|e| {
-            VkError::BadResponse(format!("serialising {operation} variables: {e}").boxed())
+            VkError::BadResponse(format!("serializing {operation} variables: {e}").boxed())
         })?;
         self.run_payload::<T>(&payload, &operation).await
     }
