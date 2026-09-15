@@ -1,0 +1,9 @@
+error: Failed to generate GraphQLQuery impl: No field named titleTYPO on Issue
+  --> tests/ui/invalid_issue_field.rs:8:1
+   |
+ 8 | / #[graphql(
+ 9 | |     schema_path = "../../../../graphql/schema.docs.graphql",
+10 | |     query_path = "../../../../tests/ui/invalid_issue_field.graphql"
+11 | | )]
+12 | | struct InvalidIssueField;
+   | |_________________________^

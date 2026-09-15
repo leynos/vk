@@ -1,0 +1,8 @@
+query IssueQuery($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      title
+      body
+    }
+  }
+}

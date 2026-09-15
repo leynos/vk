@@ -44,7 +44,7 @@ async fn e2e_pr_42() {
 }
 
 #[tokio::test]
-async fn e2e_missing_nodes_reports_path() {
+async fn e2e_missing_nodes_are_treated_as_empty() {
     let (addr, handler, shutdown) = start_mitm().await.expect("start server");
     *handler.lock().expect("lock handler") = Box::new(move |_req| {
         let body = serde_json::json!({
@@ -79,9 +79,8 @@ async fn e2e_missing_nodes_reports_path() {
                 .env("GITHUB_TOKEN", "dummy")
                 .args(["pr", "https://github.com/leynos/cmd-mox/pull/25"])
                 .assert()
-                .failure()
-                .stderr(contains("repository.pullRequest.reviewThreads"))
-                .stderr(contains("snippet:"));
+                .success()
+                .stdout(contains("No unresolved comments"));
         }),
     )
     .await
