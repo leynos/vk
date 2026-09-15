@@ -10,6 +10,22 @@ use serde::de::DeserializeOwned;
 /// Maximum number of pages fetched by one pagination operation.
 const MAX_PAGES: usize = 1000;
 
+/// Advance pagination only when the API returned a new cursor.
+fn next_cursor(
+    request_cursor: Option<&String>,
+    page_info: &crate::PageInfo,
+) -> Result<Option<String>, VkError> {
+    let Some(next) = page_info.next_cursor()? else {
+        return Ok(None);
+    };
+    if request_cursor.map(String::as_str) == Some(next) {
+        return Err(VkError::BadResponse(
+            "non-progressing pagination (repeated endCursor)".boxed(),
+        ));
+    }
+    Ok(Some(next.to_string()))
+}
+
 impl GraphQLClient {
     /// Fetch and concatenate all pages of a codegen'd operation, decoding each
     /// page into `T` rather than the generated `ResponseData`.
@@ -62,16 +78,10 @@ impl GraphQLClient {
             let data = self.run_operation_as::<Q, T>(vars).await?;
             let (mut page, info) = map(data)?;
             items.append(&mut page);
-            if let Some(next) = info.next_cursor()? {
-                if request_cursor.as_deref() == Some(next) {
-                    return Err(VkError::BadResponse(
-                        "non-progressing pagination (repeated endCursor)".boxed(),
-                    ));
-                }
-                cursor = Some(next.to_string());
-            } else {
+            let Some(next) = next_cursor(request_cursor.as_ref(), &info)? else {
                 break;
-            }
+            };
+            cursor = Some(next);
         }
         Ok(items)
     }
