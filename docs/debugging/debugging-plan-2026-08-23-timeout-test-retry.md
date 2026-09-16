@@ -1,12 +1,9 @@
 # Debugging Plan: Slow-body timeout regression-test retry
 
-**Generated**: 2026-08-23
-**Issue ID**: PR #195 review regression test
-**Severity**: low
-**Falsification sub-agent**: alchemist
-**Planning agent boundary**: This document was prepared by the planning agent.
-Falsification must be executed by the named sub-agent, not by the planning
-agent.
+**Generated**: 2026-08-23 **Issue ID**: PR #195 review regression test
+**Severity**: low **Falsification sub-agent**: alchemist **Planning agent
+boundary**: This document was prepared by the planning agent. Falsification
+must be executed by the named sub-agent, not by the planning agent.
 
 ## Problem Statement
 
