@@ -1,66 +1,13 @@
 //! Tests for pagination helpers.
+//!
+//! The traversal behaviours (item concatenation, error discarding, cursor
+//! advancement) are covered by the `paginate_operation` tests in
+//! `crate::api::client::pagination`; this module covers the [`PageInfo`]
+//! cursor invariants those traversals rely on.
 
-use super::paginate;
 use crate::{PageInfo, VkError};
+use proptest::prelude::*;
 use rstest::rstest;
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
-
-#[tokio::test]
-async fn paginate_discards_items_on_error() {
-    let seen = Arc::new(AtomicUsize::new(0));
-
-    let result: Result<Vec<i32>, VkError> = paginate({
-        let seen = Arc::clone(&seen);
-        move |cursor| {
-            let seen = Arc::clone(&seen);
-            async move {
-                if cursor.is_none() {
-                    seen.fetch_add(1, Ordering::SeqCst);
-                    Ok((
-                        vec![1],
-                        PageInfo {
-                            has_next_page: true,
-                            end_cursor: Some("next".to_string()),
-                        },
-                    ))
-                } else {
-                    Err(VkError::ApiErrors("boom".into()))
-                }
-            }
-        }
-    })
-    .await;
-
-    assert!(result.is_err());
-    assert_eq!(seen.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn paginate_missing_cursor_errors() {
-    let result: Result<Vec<i32>, VkError> = paginate(|_cursor| async {
-        Ok((
-            vec![1],
-            PageInfo {
-                has_next_page: true,
-                end_cursor: None,
-            },
-        ))
-    })
-    .await;
-    match result {
-        Err(VkError::BadResponse(msg)) => {
-            let s = msg.to_string();
-            assert!(
-                s.contains("hasNextPage=true") && s.contains("endCursor"),
-                "{s}"
-            );
-        }
-        other => panic!("unexpected result: {other:?}"),
-    }
-}
 
 #[rstest]
 #[case(false, None, None)]
@@ -87,4 +34,28 @@ fn next_cursor_errors_without_cursor() {
     };
     let err = info.next_cursor().expect_err("missing cursor");
     assert!(matches!(err, VkError::BadResponse(_)));
+}
+
+proptest! {
+    #[test]
+    fn page_info_terminates_or_replaces_the_cursor(
+        has_next_page in any::<bool>(),
+        end_cursor in proptest::option::of("[a-z0-9]{1,16}"),
+    ) {
+        let page = PageInfo {
+            has_next_page,
+            end_cursor: end_cursor.clone(),
+        };
+        let cursor = page.next_cursor();
+
+        if has_next_page {
+            if let Some(expected) = end_cursor {
+                prop_assert_eq!(cursor.expect("cursor"), Some(expected.as_str()));
+            } else {
+                prop_assert!(matches!(cursor, Err(VkError::BadResponse(_))));
+            }
+        } else {
+            prop_assert_eq!(cursor.expect("terminal page"), None);
+        }
+    }
 }

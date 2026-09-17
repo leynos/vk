@@ -34,6 +34,7 @@ impl Page {
             thread_id,
         }
     }
+
     fn last_with(comment_id: u32, thread_id: &'static str) -> Self {
         Self {
             end_cursor: None,
@@ -41,23 +42,75 @@ impl Page {
             thread_id,
         }
     }
+
     fn body(&self) -> String {
-        self.end_cursor.map_or_else(
-            || {
-                format!(
-                    r#"{{"data":{{"repository":{{"pullRequest":{{"reviewComments":{{"pageInfo":{{"endCursor":null,"hasNextPage":false}},"nodes":[{{"databaseId":{},"pullRequestReviewThread":{{"id":"{}"}}}}]}}}}}}}}}}"#,
-                    self.comment_id,
-                    self.thread_id,
-                )
-            },
-            |cursor| {
-                format!(
-                    r#"{{"data":{{"repository":{{"pullRequest":{{"reviewComments":{{"pageInfo":{{"endCursor":"{cursor}","hasNextPage":true}},"nodes":[{{"databaseId":{},"pullRequestReviewThread":{{"id":"{}"}}}}]}}}}}}}}}}"#,
-                    self.comment_id,
-                    self.thread_id,
-                )
-            },
+        // One review-thread page holding a single thread whose sole comment
+        // carries the scripted database id (`fullDatabaseId` is a BigInt
+        // scalar, transported as a string).
+        let page_info = self.end_cursor.map_or_else(
+            || r#"{"endCursor":null,"hasNextPage":false}"#.to_owned(),
+            |cursor| format!(r#"{{"endCursor":"{cursor}","hasNextPage":true}}"#),
+        );
+        format!(
+            r#"{{"data":{{"repository":{{"pullRequest":{{"reviewThreads":{{"pageInfo":{page_info},"nodes":[{{"id":"{}","comments":{{"nodes":[{{"fullDatabaseId":"{}"}}],"pageInfo":{{"endCursor":null,"hasNextPage":false}}}}}}]}}}}}}}}}}"#,
+            self.thread_id, self.comment_id,
         )
+    }
+}
+
+/// Validate one GraphQL request and return its scripted response body.
+fn resolve_graphql_response(
+    req: &Request<Bytes>,
+    expected_after: &mut Option<String>,
+    pages: &mut VecDeque<Page>,
+    expected_thread_id: &str,
+) -> String {
+    let v: Value = serde_json::from_slice(req.body().as_ref()).expect("JSON body for /graphql");
+    let got_after = v
+        .pointer("/variables/after")
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned);
+    match expected_after.as_deref() {
+        Some(cursor) => assert_eq!(
+            got_after.as_deref(),
+            Some(cursor),
+            "query must include variables.after={cursor}; got: {v}"
+        ),
+        None => assert!(
+            got_after.is_none(),
+            "first page query must not include variables.after; got: {v}"
+        ),
+    }
+    if pages.is_empty() {
+        assert_eq!(
+            v.pointer("/operationName"),
+            Some(&Value::String("ResolveReviewThreadMutation".into()))
+        );
+        assert_eq!(
+            v.pointer("/variables/id"),
+            Some(&Value::String(expected_thread_id.into()))
+        );
+        r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#.to_owned()
+    } else {
+        assert_eq!(
+            v.pointer("/operationName"),
+            Some(&Value::String("ThreadForCommentQuery".into()))
+        );
+        assert_eq!(
+            v.pointer("/variables/owner"),
+            Some(&Value::String("o".into()))
+        );
+        assert_eq!(
+            v.pointer("/variables/name"),
+            Some(&Value::String("r".into()))
+        );
+        assert_eq!(
+            v.pointer("/variables/number"),
+            Some(&Value::Number(83.into()))
+        );
+        let page = pages.pop_front().expect("non-empty script");
+        *expected_after = page.end_cursor.map(std::string::ToString::to_string);
+        page.body()
     }
 }
 
@@ -66,6 +119,12 @@ async fn run_resolve_flow(pages: Vec<Page>, expected_posts: usize) {
     let (addr, handler, shutdown) = start_mitm_capture().await.expect("start server");
     let calls = Arc::new(Mutex::new(Vec::<String>::new()));
     let pages = Arc::new(Mutex::new(VecDeque::from(pages)));
+    let expected_thread_id = pages
+        .lock()
+        .expect("lock scripted pages")
+        .back()
+        .expect("at least one thread page")
+        .thread_id;
     let expected_after = Arc::new(Mutex::new(None::<String>));
     let calls_clone = Arc::clone(&calls);
     let pages_clone = Arc::clone(&pages);
@@ -75,31 +134,8 @@ async fn run_resolve_flow(pages: Vec<Page>, expected_posts: usize) {
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             let mut after = expected_after_clone.lock().expect("lock after");
-            let body_bytes = req.body().as_ref();
-            let v: Value = serde_json::from_slice(body_bytes).expect("JSON body for /graphql");
-            let got_after = v
-                .pointer("/variables/after")
-                .and_then(|x| x.as_str())
-                .map(ToOwned::to_owned);
-            match after.as_deref() {
-                Some(cursor) => assert_eq!(
-                    got_after.as_deref(),
-                    Some(cursor),
-                    "query must include variables.after={cursor}; got: {v}"
-                ),
-                None => assert!(
-                    got_after.is_none(),
-                    "first page query must not include variables.after; got: {v}"
-                ),
-            }
             let mut pages = pages_clone.lock().expect("lock pages");
-            if pages.is_empty() {
-                r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#.to_owned()
-            } else {
-                let page = pages.pop_front().expect("non-empty script");
-                *after = page.end_cursor.map(std::string::ToString::to_string);
-                page.body()
-            }
+            resolve_graphql_response(req, &mut after, &mut pages, expected_thread_id)
         } else {
             "{}".to_owned()
         };
@@ -177,7 +213,7 @@ async fn run_reply_flow(
         };
         let body = if req.uri().path() == "/graphql" {
             if gql_calls == 0 {
-                r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
+                r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"id":"t","comments":{"nodes":[{"fullDatabaseId":"1"}],"pageInfo":{"endCursor":null,"hasNextPage":false}}}]}}}}}"#
             } else {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
             }
@@ -364,7 +400,7 @@ async fn resolve_skips_empty_reply() {
         vec.push(format!("{} {}", req.method(), req.uri().path()));
         let body = if req.uri().path() == "/graphql" {
             if gql_calls == 0 {
-                r#"{"data":{"repository":{"pullRequest":{"reviewComments":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"databaseId":1,"pullRequestReviewThread":{"id":"t"}}]}}}}}"#
+                r#"{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"endCursor":null,"hasNextPage":false},"nodes":[{"id":"t","comments":{"nodes":[{"fullDatabaseId":"1"}],"pageInfo":{"endCursor":null,"hasNextPage":false}}}]}}}}}"#
             } else {
                 r#"{"data":{"resolveReviewThread":{"clientMutationId":null}}}"#
             }

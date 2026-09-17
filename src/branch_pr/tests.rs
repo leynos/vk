@@ -8,6 +8,7 @@ fn deserialize_pr_for_branch_response() {
     let json = json!({
         "repository": {
             "pullRequests": {
+                "pageInfo": { "hasNextPage": false, "endCursor": null },
                 "nodes": [{
                     "number": 42,
                     "headRepository": {
@@ -40,6 +41,7 @@ fn deserialize_pr_for_branch_empty() {
     let json = json!({
         "repository": {
             "pullRequests": {
+                "pageInfo": { "hasNextPage": false, "endCursor": null },
                 "nodes": []
             }
         }
@@ -54,6 +56,7 @@ fn deserialize_pr_for_branch_null_head_repository() {
     let json = json!({
         "repository": {
             "pullRequests": {
+                "pageInfo": { "hasNextPage": false, "endCursor": null },
                 "nodes": [{
                     "number": 99,
                     "headRepository": null
@@ -115,16 +118,17 @@ mod fetch_pr_for_branch_tests {
     use crate::api::RetryConfig;
     use rstest::{fixture, rstest};
     use serde_json::Value;
+    use std::collections::VecDeque;
     use std::convert::Infallible;
     use std::sync::{Arc, Mutex};
     use third_wheel::hyper::{Body, Request, Response, Server, StatusCode, service::service_fn};
     use tokio::task::JoinHandle;
     use tokio::time::Duration;
 
-    /// Captured GraphQL request variables for verification.
+    /// Captured GraphQL request for verification.
     #[derive(Debug, Default)]
     struct CapturedRequest {
-        variables: Option<Value>,
+        requests: Vec<Value>,
     }
 
     /// RAII guard for mock server cleanup with request inspection.
@@ -139,9 +143,31 @@ mod fetch_pr_for_branch_tests {
             &self.client
         }
 
-        /// Get the captured GraphQL variables from the last request.
+        /// Get the captured GraphQL variables from the final request.
         fn captured_variables(&self) -> Option<Value> {
-            self.captured.lock().expect("lock").variables.clone()
+            self.captured
+                .lock()
+                .expect("lock")
+                .requests
+                .last()
+                .and_then(|request| request.get("variables"))
+                .cloned()
+        }
+
+        /// Get the captured GraphQL operation name from the final request.
+        fn operation_name(&self) -> Option<Value> {
+            self.captured
+                .lock()
+                .expect("lock")
+                .requests
+                .last()
+                .and_then(|request| request.get("operationName"))
+                .cloned()
+        }
+
+        /// Get every captured GraphQL request in arrival order.
+        fn requests(&self) -> Vec<Value> {
+            self.captured.lock().expect("lock").requests.clone()
         }
     }
 
@@ -151,39 +177,44 @@ mod fetch_pr_for_branch_tests {
         }
     }
 
-    /// Extract GraphQL variables from a request body.
-    fn extract_graphql_variables(bytes: Option<third_wheel::hyper::body::Bytes>) -> Option<Value> {
-        let bytes = bytes?;
-        let json: Value = serde_json::from_slice(&bytes).ok()?;
-        json.get("variables").cloned()
-    }
-
     /// Start a mock HTTP server that returns the given JSON body and captures requests.
     fn start_mock_server(body: String) -> MockServer {
-        let body = Arc::new(body);
+        start_mock_server_pages(vec![body])
+    }
+
+    /// Start a mock HTTP server that returns scripted JSON responses and captures requests.
+    fn start_mock_server_pages(bodies: Vec<String>) -> MockServer {
+        let bodies = Arc::new(Mutex::new(VecDeque::from(bodies)));
         let captured = Arc::new(Mutex::new(CapturedRequest::default()));
         let captured_clone = Arc::clone(&captured);
 
         let svc = third_wheel::hyper::service::make_service_fn(move |_conn| {
-            let body = Arc::clone(&body);
+            let bodies = Arc::clone(&bodies);
             let captured = Arc::clone(&captured_clone);
             async move {
                 Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-                    let body = Arc::clone(&body);
+                    let bodies = Arc::clone(&bodies);
                     let captured = Arc::clone(&captured);
                     async move {
                         // Capture the request body to extract variables
                         let (_parts, req_body) = req.into_parts();
                         let bytes = third_wheel::hyper::body::to_bytes(req_body).await.ok();
-                        if let Some(vars) = extract_graphql_variables(bytes) {
-                            captured.lock().expect("lock").variables = Some(vars);
+                        if let Some(bytes) = bytes
+                            && let Ok(request) = serde_json::from_slice(&bytes)
+                        {
+                            captured.lock().expect("lock").requests.push(request);
                         }
+                        let body = bodies
+                            .lock()
+                            .expect("lock scripted responses")
+                            .pop_front()
+                            .expect("response for request");
 
                         Ok::<_, Infallible>(
                             Response::builder()
                                 .status(StatusCode::OK)
                                 .header("Content-Type", "application/json")
-                                .body(Body::from(body.as_ref().clone()))
+                                .body(Body::from(body))
                                 .expect("response"),
                         )
                     }
@@ -234,7 +265,11 @@ mod fetch_pr_for_branch_tests {
     }
 
     /// Build a JSON response for the PR-for-branch GraphQL query.
-    fn build_pr_lookup_response(nodes: &[TestPrNode]) -> String {
+    fn build_pr_lookup_response(
+        nodes: &[TestPrNode],
+        has_next_page: bool,
+        end_cursor: Option<&str>,
+    ) -> String {
         use serde_json::Value;
 
         let nodes_json: Vec<Value> = nodes
@@ -246,7 +281,11 @@ mod fetch_pr_for_branch_tests {
                 json!({"number": pr.number, "headRepository": head_repository})
             })
             .collect();
-        json!({"data": {"repository": {"pullRequests": {"nodes": nodes_json}}}}).to_string()
+        json!({"data": {"repository": {"pullRequests": {
+            "nodes": nodes_json,
+            "pageInfo": {"hasNextPage": has_next_page, "endCursor": end_cursor}
+        }}}})
+        .to_string()
     }
 
     #[rstest]
@@ -256,6 +295,7 @@ mod fetch_pr_for_branch_tests {
             "data": {
                 "repository": {
                     "pullRequests": {
+                        "pageInfo": { "hasNextPage": false, "endCursor": null },
                         "nodes": [{
                             "number": 42,
                             "headRepository": {
@@ -278,6 +318,8 @@ mod fetch_pr_for_branch_tests {
         assert_eq!(vars.get("owner"), Some(&json!("owner")));
         assert_eq!(vars.get("name"), Some(&json!("repo")));
         assert_eq!(vars.get("headRef"), Some(&json!("feature")));
+        assert_eq!(vars.get("after"), Some(&Value::Null));
+        assert_eq!(server.operation_name(), Some(json!("PrForBranchQuery")));
     }
 
     #[rstest]
@@ -287,6 +329,7 @@ mod fetch_pr_for_branch_tests {
             "data": {
                 "repository": {
                     "pullRequests": {
+                        "pageInfo": { "hasNextPage": false, "endCursor": null },
                         "nodes": []
                     }
                 }
@@ -341,7 +384,7 @@ mod fetch_pr_for_branch_tests {
                 head_owner: *owner,
             })
             .collect();
-        let body = build_pr_lookup_response(&nodes);
+        let body = build_pr_lookup_response(&nodes, false, None);
         let server = start_mock_server(body);
 
         let result =
@@ -357,6 +400,7 @@ mod fetch_pr_for_branch_tests {
             "data": {
                 "repository": {
                     "pullRequests": {
+                        "pageInfo": { "hasNextPage": false, "endCursor": null },
                         "nodes": [{
                             "number": 100,
                             "headRepository": {
@@ -384,5 +428,69 @@ mod fetch_pr_for_branch_tests {
             }
             other => panic!("expected NoPrForBranch, got {other:?}"),
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn finds_a_matching_pr_on_a_later_page(basic_repo: RepoInfo) {
+        let first_page = build_pr_lookup_response(
+            &[TestPrNode {
+                number: 1,
+                head_owner: Some("other-owner"),
+            }],
+            true,
+            Some("page-2"),
+        );
+        let second_page = build_pr_lookup_response(
+            &[TestPrNode {
+                number: 42,
+                head_owner: Some("target-owner"),
+            }],
+            false,
+            None,
+        );
+        let server = start_mock_server_pages(vec![first_page, second_page]);
+
+        let number = fetch_pr_for_branch(
+            server.client(),
+            &basic_repo,
+            "feature",
+            Some("target-owner"),
+        )
+        .await
+        .expect("find pull request on second page");
+
+        assert_eq!(number, 42);
+        let requests = server.requests();
+        assert_eq!(requests.len(), 2);
+        let first_request = requests.first().expect("first request");
+        let second_request = requests.get(1).expect("second request");
+        assert_eq!(
+            first_request.pointer("/variables/after"),
+            Some(&Value::Null)
+        );
+        assert_eq!(
+            second_request.pointer("/variables/after"),
+            Some(&json!("page-2"))
+        );
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.get("operationName") == Some(&json!("PrForBranchQuery")))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_an_unchanged_end_cursor(basic_repo: RepoInfo) {
+        let page = build_pr_lookup_response(&[], true, Some("same"));
+        let server = start_mock_server_pages(vec![page.clone(), page]);
+
+        let result = fetch_pr_for_branch(server.client(), &basic_repo, "feature", None).await;
+
+        assert!(
+            matches!(result, Err(VkError::BadResponse(message)) if message.as_ref() == "non-progressing pagination (repeated endCursor)")
+        );
+        assert_eq!(server.requests().len(), 2);
     }
 }

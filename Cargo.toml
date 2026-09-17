@@ -20,6 +20,7 @@ url = "2.5.0"
 regex = "1.10.3"
 diffy = "0.5.1"
 chrono = { version = "0.4.42", features = ["serde", "clock"] }
+graphql_client = "0.16"
 anyhow = "1.0"
 backon = "1.5.2"
 html5ever = "0.35.0"
@@ -86,6 +87,7 @@ futures = "0.3"
 insta = { version = "1.43", features = ["redactions"] }
 metrics-util = { version = "0.20.4", features = ["debugging"] }
 proptest = "1.11.0"
+trybuild = "1.0.116"
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

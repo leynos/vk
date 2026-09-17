@@ -183,6 +183,7 @@ pub fn fork_disambiguation_responses(fork_prs: &[(u64, &str)]) -> (String, Strin
 
     let pr_lookup_body = serde_json::json!({
         "data": {"repository": {"pullRequests": {
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
             "nodes": nodes
         }}}
     })
