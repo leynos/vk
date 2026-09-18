@@ -144,6 +144,18 @@ impl Workflow {
         self.events.contains("push")
     }
 
+    /// Return whether this workflow is a trunk or tag lane.
+    ///
+    /// Two conditions, not one. A workflow answering a push is a paid lane
+    /// only if it serves no pull request as well: a workflow declaring both
+    /// triggers owes the fork fallback, and requiring it to name the paid
+    /// label outright would contradict that. This repository has no such
+    /// workflow today, which is exactly why the predicate has to say so now
+    /// rather than when one is added.
+    pub(crate) fn is_trunk_or_tag(&self) -> bool {
+        self.serves_pushes() && !self.serves_pull_requests()
+    }
+
     /// Return whether this workflow answers only manual or automation events.
     ///
     /// `pull_request_target` is here rather than with the pull-request lanes
@@ -161,14 +173,32 @@ impl Workflow {
 /// rather than matching the whole expression against a pattern means a lane
 /// that is correctly placed but merely wrapped differently still passes, while
 /// a lane whose fallback names the wrong label does not.
-fn arms_of(raw: &str) -> Vec<String> {
+pub(crate) fn arms_of(raw: &str) -> Vec<String> {
     // Splitting on the quote leaves the quoted runs at the odd positions,
     // which avoids slicing the string: `indexing_slicing` and `string_slice`
     // are both denied here, and clippy lints tests under `--all-targets`.
-    raw.split('\'')
-        .skip(1)
-        .step_by(2)
-        .map(str::to_owned)
+    //
+    // Only complete runs count. An expression with an odd number of quotes
+    // has a dangling one, and the text after it sits at an odd position like
+    // any closed run, so a reader taking every odd position would report the
+    // remainder as an arm. `'ubuntu-latest' || 'ubicloud-standard-2` would
+    // then present two arms and satisfy the fork-fallback contract while
+    // GitHub evaluated something else entirely. Found by
+    // `a_dangling_quote_contributes_no_arm` rather than by reading this.
+    //
+    // Taking the segments in pairs is what tells the two apart. After the
+    // leading segment, each closed run is followed by the text up to the next
+    // quote, so a run with nothing following it was never closed. Expressed
+    // as pairs rather than as half the quote count because `integer_division`
+    // and `integer_division_remainder_used` are both denied here.
+    let segments: Vec<&str> = raw.split('\'').collect();
+    segments
+        .get(1..)
+        .unwrap_or_default()
+        .chunks(2)
+        .filter(|pair| pair.len() == 2)
+        .filter_map(|pair| pair.first())
+        .map(|arm| (*arm).to_owned())
         .collect()
 }
 
@@ -194,7 +224,7 @@ fn selection_of(job: &Value) -> RunnerSelection {
 /// repository's workflows quotes the key while the others do not. A reader
 /// finding neither would report every workflow as answering nothing, and every
 /// placement assertion below would then pass vacuously.
-fn events_of(document: &Value) -> BTreeSet<String> {
+pub(crate) fn events_of(document: &Value) -> BTreeSet<String> {
     let triggers = document
         .get("on")
         .or_else(|| document.get(Value::Bool(true)));
@@ -224,7 +254,13 @@ pub(crate) fn workflow_paths() -> Vec<PathBuf> {
     let directory = repository_root().join(WORKFLOWS);
     let mut paths: Vec<PathBuf> = fs::read_dir(&directory)
         .unwrap_or_else(|err| panic!("{} must be readable: {err}", directory.display()))
-        .filter_map(Result::ok)
+        // An entry that cannot be read is a fault, not an absence. Discarding
+        // it would shrink the set every contract below iterates over, and a
+        // contract that silently inspects four workflows where there are five
+        // reports success for the one it never saw.
+        .map(|entry| {
+            entry.unwrap_or_else(|err| panic!("{} must list cleanly: {err}", directory.display()))
+        })
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|e| e == "yml" || e == "yaml"))
         .collect();

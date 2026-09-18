@@ -375,6 +375,40 @@ ordinary run rather than a hung one.
 `every_paid_lane_declares_a_bounded_ceiling` holds each lane inside a measured
 band, and refuses a paid lane it has no measurement for at all.
 
+### Trunk and tag lanes
+
+`every_trunk_and_tag_lane_runs_on_the_paid_runner` requires every lane in a
+push or tag workflow to name `ubicloud-standard-2` outright. Without it the
+suite had a hole a reviewer found: reverting `coverage-main.yml` to
+`ubuntu-latest` left all six other contracts passing. The ceiling contract
+inspects only lanes already on the paid runner, so a lane leaving that set
+leaves its scope; and the registry stays balanced because the pull-request
+lanes keep the label in use. A contract suite can be individually sound and
+still leave a change undetected.
+
+The predicate asks two things before a workflow counts: that it answers a push,
+**and** that it serves no pull request. A workflow declaring both owes the fork
+fallback, so requiring it to name the paid label outright would contradict the
+fallback rule. No workflow here declares both today, which is why the predicate
+has to say so now rather than when one is added.
+
+### Properties, and what is not one
+
+Most of these contracts are claims about five checked-in files. Generating
+arbitrary workflows would not make them stronger, because their subject is this
+repository's configuration rather than the space of possible configurations.
+
+Two readings are different, and `parser_properties` states them as properties.
+`arms_of` parses an expression a maintainer writes by hand, so it is driven
+over arbitrary arm counts, orders and surrounding whitespace, and over a
+malformed expression whose final quote is missing: a reader inventing an arm
+from the dangling run would let a mistyped fallback satisfy the fork-fallback
+contract. `events_of` reads a trigger block whose YAML shape varies between
+mapping, sequence and scalar, with the `on` key quoted or bare. A reader
+understanding one shape would report the other workflows as answering nothing,
+and every contract keyed on a trigger would then pass over an empty set while
+appearing to assert something.
+
 ### The actionlint registry
 
 actionlint rejects a `runs-on` label it does not know, so `ubicloud-standard-2`
