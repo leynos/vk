@@ -144,6 +144,64 @@ repository names, identifiers, response bodies, or raw errors as labels. The
 transport's tracing span uses the same bounded classifications and no sensitive
 fields.
 
+## Coverage: what each lane owns
+
+Main owns every persistent coverage output. `coverage-main.yml` answers a push
+to `main`, generates ratcheted coverage and uploads it to CodeScene.
+`coverage.yml` answers a pull request, generates coverage for its own ratchet
+check, and contacts CodeScene not at all. `tests/coverage_shape_contract.rs`
+holds all of it, deriving what it asserts from each workflow's own triggers
+rather than from a list of file names, so adding a workflow asks the question
+again instead of slipping past a contract keyed on names.
+
+### Why a pull request never reaches CodeScene
+
+Two reasons, and neither is a preference. CodeScene accepts
+`cs-coverage upload` only for branches it analyses, so an upload from a
+pull-request head is refused outright. And a pull-request lane that contacts
+CodeScene puts a third-party network call, and the token that authenticates it,
+on the fork-facing side of the repository.
+
+What replaces the changed-line gate is the ratchet.
+`every_pull_request_coverage_lane_ratchets` requires `with-ratchet: 'true'` on
+the pull-request generator, because a lane generating coverage without it
+measures nothing it can fail on. The baseline it compares against is the one
+`coverage-main.yml` writes: caches saved on `main` are readable by every
+pull-request run.
+
+### The publisher is derived, not named
+
+`only_the_publisher_uploads_coverage` asks two things of a workflow before it
+may upload: that it answers a push, **and** that it serves no pull request. The
+second condition is what makes the rule applicable. A repository whose single
+workflow declares both triggers would otherwise be required to upload and
+forbidden from uploading at the same time, and the contract would have no
+consistent reading.
+
+`the_publisher_uploads_rather_than_checks` requires `mode: upload` explicitly
+rather than leaving the action's default in force. The default is `upload`
+today, so this changes no behaviour; it makes which mode is running readable in
+the file, and assertable.
+
+### The token sits on its step
+
+`the_codescene_token_is_declared_on_the_step_that_uses_it` refuses
+`CS_ACCESS_TOKEN` in a job's `env`. A job-level secret is exported into the
+environment of every step the job runs, this repository's own build among them,
+so a compromised build dependency can read it. Declared on the upload step, the
+blast radius is that one step.
+
+### Markdown is linted through the pinned action alone
+
+`markdown_is_linted_only_through_the_pinned_action` checks both directions: the
+action is pinned to the commit `21c1be1b93ad9ed58fa840aacc3f279cde2a72ff`, and
+no step invokes the linter from a shell. The commit matters because the
+previous pin, `4580e161`, is the *annotated tag object* for v24.2.0. A tag
+object's SHA is immutable, so the old pin was not unsafe, but it is not a
+commit, and the estate's rule asks for the commit the tag points at. The shell
+direction matters because a `run:` invocation takes whatever linter version the
+runner image carries, which is not a pin at all.
+
 ## Documentation maintenance
 
 Update documentation in the same branch as the behaviour it describes:
