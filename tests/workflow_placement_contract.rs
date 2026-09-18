@@ -161,6 +161,41 @@ fn ceiling_fault(job: &Job) -> Option<String> {
 }
 
 #[test]
+fn every_trunk_and_tag_lane_runs_on_the_paid_runner() {
+    let workflows = workflows();
+    let lanes: Vec<&Job> = jobs(&workflows)
+        .into_iter()
+        .filter(|(workflow, job)| workflow.is_trunk_or_tag() && job.runs_on.names_a_runner())
+        .map(|(_, job)| job)
+        .collect();
+    assert!(
+        !lanes.is_empty(),
+        "the repository must run at least one push or tag lane, or every \
+         assertion here passes over an empty set"
+    );
+    let faults: Vec<String> = lanes
+        .iter()
+        .filter(|job| job.labels_in_use().iter().any(|l| l != UBICLOUD_LABEL))
+        .map(|job| {
+            format!(
+                "{} can reach {:?} rather than {UBICLOUD_LABEL} alone",
+                job.coordinate(),
+                job.labels_in_use()
+            )
+        })
+        .collect();
+    assert!(
+        faults.is_empty(),
+        "a push or tag lane serves no fork, so it names the paid runner \
+         outright rather than choosing. Without this, moving one lane back to \
+         a hosted runner leaves every other contract here passing: the \
+         ceiling contract inspects only lanes already on the paid runner, and \
+         the registry stays balanced while the pull-request lanes keep the \
+         label in use: {faults:?}"
+    );
+}
+
+#[test]
 fn api_bound_lanes_stay_on_hosted_runners() {
     let workflows = workflows();
     let misplaced: Vec<String> = jobs(&workflows)
@@ -228,4 +263,114 @@ fn no_required_context_interpolates_its_runner() {
          runner label changes the context when the label does, and the \
          ruleset then requires one that nothing reports: {unstable:?}"
     );
+}
+
+/// Properties of the two readings that take arbitrary input.
+///
+/// The contracts above are claims about five checked-in files, and a
+/// generator of arbitrary workflows would not make them stronger: their
+/// subject is this repository's configuration, not the space of possible
+/// configurations. Two functions are different. `arms_of` parses a runner
+/// expression a maintainer writes by hand, and `events_of` reads a trigger
+/// block whose YAML shape varies. Both take input the repository does not
+/// control, so both are stated as properties rather than as examples.
+mod parser_properties {
+    use proptest::prelude::*;
+    use serde_norway::Value;
+
+    use super::workflow_placement::{arms_of, events_of};
+
+    /// A label a workflow might plausibly name, quote characters excluded.
+    fn label() -> impl Strategy<Value = String> {
+        "[a-z][a-z0-9-]{0,20}"
+    }
+
+    proptest! {
+        /// Every single-quoted run is an arm, whatever surrounds it.
+        ///
+        /// The reader splits on the quote and takes the odd positions rather
+        /// than slicing, so the property that matters is that it recovers
+        /// exactly the quoted runs, in order, however the expression is
+        /// wrapped, indented or spaced.
+        #[test]
+        fn arms_are_exactly_the_quoted_runs(
+            arms in prop::collection::vec(label(), 0..5),
+            gap in "[ \n\t]{0,4}",
+        ) {
+            let expression = arms
+                .iter()
+                .map(|arm| format!("{gap}'{arm}'{gap}"))
+                .collect::<Vec<_>>()
+                .join("||");
+            prop_assert_eq!(arms_of(&expression), arms);
+        }
+
+        /// An unterminated quote yields no arm from the dangling run.
+        ///
+        /// A selection whose final quote is missing is malformed, and the
+        /// reader must not invent an arm from the remainder. Were it to, a
+        /// lane whose fallback was mistyped could still present two arms and
+        /// satisfy the fork-fallback contract.
+        #[test]
+        fn a_dangling_quote_contributes_no_arm(
+            complete in prop::collection::vec(label(), 1..4),
+            dangling in label(),
+        ) {
+            let closed = complete
+                .iter()
+                .map(|arm| format!("'{arm}'"))
+                .collect::<Vec<_>>()
+                .join(" || ");
+            let expression = format!("{closed} || '{dangling}");
+            prop_assert_eq!(arms_of(&expression), complete);
+        }
+
+        /// The three YAML shapes of a trigger block read alike.
+        ///
+        /// A workflow may write its triggers as a mapping, a sequence or a
+        /// single scalar, and one of this repository's five quotes the `on`
+        /// key while the others do not. A reader that understood only one
+        /// shape would report those workflows as answering nothing, and every
+        /// placement contract keyed on a trigger would pass over an empty set
+        /// while appearing to assert something.
+        #[test]
+        fn every_trigger_shape_reads_the_same(
+            events in prop::collection::hash_set(label(), 1..4),
+            quoted in any::<bool>(),
+        ) {
+            let key = if quoted { "'on'" } else { "on" };
+            let names: Vec<&str> = events.iter().map(String::as_str).collect();
+            let expected: std::collections::BTreeSet<String> =
+                events.iter().cloned().collect();
+
+            let as_mapping = format!(
+                "{key}:\n{}\njobs: {{}}\n",
+                names
+                    .iter()
+                    .map(|name| format!("  {name}: null"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
+            let as_sequence = format!("{key}: [{}]\njobs: {{}}\n", names.join(", "));
+
+            for text in [as_mapping, as_sequence] {
+                let document: Value = serde_norway::from_str(&text)
+                    .expect("the generated document must parse");
+                prop_assert_eq!(events_of(&document), expected.clone());
+            }
+        }
+
+        /// A single scalar trigger is the one event it names.
+        #[test]
+        fn a_scalar_trigger_is_its_own_event(event in label(), quoted in any::<bool>()) {
+            let key = if quoted { "'on'" } else { "on" };
+            let text = format!("{key}: {event}\njobs: {{}}\n");
+            let document: Value =
+                serde_norway::from_str(&text).expect("the generated document must parse");
+            prop_assert_eq!(
+                events_of(&document),
+                std::collections::BTreeSet::from([event])
+            );
+        }
+    }
 }
