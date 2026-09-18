@@ -1,0 +1,17 @@
+# Runner labels actionlint must accept.
+#
+# actionlint rejects any `runs-on` label it does not know, so a paid
+# runner has to be registered here before a lane can name it. The
+# registry is held equal to the labels actually in use by
+# `every_label_in_use_is_registered_and_every_registration_is_in_use`
+# in `tests/workflow_placement_contract.rs`: a label left here after its
+# last lane moved away is as much a defect as an unregistered one,
+# because it is what lets a second paid provider appear without anyone
+# deciding to pay for it.
+#
+# GitHub-hosted labels are not listed. actionlint knows them already,
+# and the contract holds them in a frozen set rather than deriving
+# them, so adding one here would fail the equality.
+self-hosted-runner:
+  labels:
+    - ubicloud-standard-2
