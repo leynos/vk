@@ -37,9 +37,15 @@ const DEPRECATED_INPUT: &str = "installer-checksum";
 const DEPRECATED_VARIABLE: &str = "CODESCENE_CLI_SHA256";
 
 /// The `workflow_dispatch` that hashed the installer script and wrote the
-/// variable back through the API. Other repositories in the estate carry it;
-/// this contract keeps it from arriving here.
-const REFRESH_WORKFLOW: &str = "get-codescene-sha.yml";
+/// variable back through the API, named without an extension. Other
+/// repositories in the estate carry it; this contract keeps it from arriving
+/// here under either GitHub extension.
+const REFRESH_WORKFLOW_STEM: &str = "get-codescene-sha";
+
+/// The extensions GitHub accepts for a workflow document. The reader and the
+/// absence clause share this one list, so neither can range over a narrower
+/// set than the platform actually runs.
+const WORKFLOW_EXTENSIONS: [&str; 2] = ["yml", "yaml"];
 
 fn workflow_directory() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -62,8 +68,11 @@ fn workflow_sources() -> Vec<(String, String)> {
                 .path()
         })
         .filter(|path| {
-            path.extension()
-                .is_some_and(|extension| extension == "yml" || extension == "yaml")
+            path.extension().is_some_and(|extension| {
+                WORKFLOW_EXTENSIONS
+                    .iter()
+                    .any(|accepted| extension.eq_ignore_ascii_case(accepted))
+            })
         })
         .map(|path| {
             let name = path
@@ -186,13 +195,27 @@ fn every_uploader_reference_is_pinned_to_the_approved_revision() {
 /// Asserted against the filesystem rather than the parsed workflows: a
 /// dispatch-only workflow appears in no job or step list another contract
 /// reads, so its absence is the only property that can be stated.
+///
+/// Both extensions are checked. A placeholder of that name which references
+/// no variable is exactly the shape this clause exists to catch, and under
+/// one extension only it would have passed.
 #[test]
 fn the_checksum_refresh_workflow_is_absent() {
-    let refresh = workflow_directory().join(REFRESH_WORKFLOW);
+    let dir = workflow_directory();
+    // Both extensions, aligned with the reader above. Checking only `.yml`
+    // would let a `.yaml` placeholder that names no variable satisfy this
+    // clause, which is precisely the shape the clause exists to catch. A real
+    // refresh workflow under either extension also fails the variable clause,
+    // because it names the variable, but this one must not lean on that.
+    let present: Vec<String> = WORKFLOW_EXTENSIONS
+        .iter()
+        .map(|extension| format!("{REFRESH_WORKFLOW_STEM}.{extension}"))
+        .filter(|name| dir.join(name).exists())
+        .collect();
     assert!(
-        !refresh.exists(),
-        "{REFRESH_WORKFLOW} maintains {DEPRECATED_VARIABLE}, which no workflow \
-         reads; delete it rather than keeping a dispatch that writes an unread \
-         repository variable"
+        present.is_empty(),
+        "{present:?} maintains {DEPRECATED_VARIABLE}, which no workflow \
+         reads; delete it rather than keeping a dispatch that writes an \
+         unread repository variable"
     );
 }
