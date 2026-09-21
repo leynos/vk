@@ -7,6 +7,7 @@
 
 use graphql_client::GraphQLQuery;
 use serde::Deserialize;
+use std::collections::HashSet;
 
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, PageInfo, VkError};
@@ -116,6 +117,7 @@ pub async fn fetch_pr_for_branch(
     head_owner: Option<&str>,
 ) -> Result<u64, VkError> {
     let mut after = None;
+    let mut seen_cursors = HashSet::new();
     loop {
         let request_cursor = after.take();
         let variables = pr_for_branch_query::Variables {
@@ -138,7 +140,7 @@ pub async fn fetch_pr_for_branch(
         let Some(cursor) = page_info.next_cursor()? else {
             break;
         };
-        if request_cursor.as_deref() == Some(cursor) {
+        if !seen_cursors.insert(cursor.to_string()) {
             return Err(VkError::BadResponse(
                 "non-progressing pagination (repeated endCursor)".into(),
             ));

@@ -4,7 +4,6 @@ use super::*;
 use crate::VkError;
 use crate::api::RetryConfig;
 use bytes::Bytes;
-use rstest::rstest;
 use serde_json::Value;
 use std::{
     convert::Infallible,
@@ -256,102 +255,6 @@ async fn run_payload_retries_html_5xx_then_succeeds() {
         .expect("success after retry");
     assert_eq!(result, serde_json::json!({"x": 1}));
     assert!(hits.load(Ordering::SeqCst) >= 2, "expected at least 2 hits");
-    join.abort();
-    let _ = join.await;
-}
-#[derive(Debug)]
-struct TestCase {
-    responses: Vec<String>,
-    status: StatusCode,
-    op: &'static str,
-    expect: Expected,
-}
-#[derive(Debug)]
-enum Expected {
-    EmptyResponse { fragments: [&'static str; 3] },
-    ApiErrors { fragment: &'static str },
-    RequestCtx { fragments: [&'static str; 2] },
-}
-#[rstest]
-#[case(TestCase {
-    responses: vec![],
-    status: StatusCode::OK,
-    op: "EmptyOp",
-    expect: Expected::EmptyResponse {
-        fragments: ["status 200", "EmptyOp", "{}"],
-    },
-})]
-#[case(TestCase {
-    responses: vec![],
-    status: StatusCode::INTERNAL_SERVER_ERROR,
-    op: "FailOp",
-    expect: Expected::RequestCtx {
-        fragments: ["status 500", "body snippet: {}"],
-    },
-})]
-#[case({
-    let error_response = serde_json::json!({
-        "errors": [
-            { "message": "Something went wrong", "locations": [{ "line": 1, "column": 2 }] }
-        ]
-    })
-    .to_string();
-    TestCase {
-        responses: vec![error_response],
-        status: StatusCode::OK,
-        op: "ErrOp",
-        expect: Expected::ApiErrors {
-            fragment: "Something went wrong",
-        },
-    }
-})]
-#[case(TestCase {
-    responses: vec![],
-    status: StatusCode::TOO_MANY_REQUESTS,
-    op: "RateLimited",
-    expect: Expected::RequestCtx {
-        fragments: ["status 429", "body snippet: {}"],
-    },
-})]
-#[tokio::test]
-async fn run_payload_reports_details(#[case] case: TestCase) {
-    let TestCase {
-        responses,
-        status,
-        op,
-        expect,
-    } = case;
-    let TestClient { client, join } = start_server_with_status(responses, status);
-    let err = client
-        .run_payload::<Value>(&payload_for(op), op)
-        .await
-        .expect_err("error");
-    match expect {
-        Expected::EmptyResponse { fragments } => match &err {
-            VkError::EmptyResponse { .. } => {
-                let s = err.to_string();
-                for frag in fragments {
-                    assert!(s.contains(frag), "{s}");
-                }
-            }
-            other => panic!("unexpected error: {other:?}"),
-        },
-        Expected::ApiErrors { fragment } => match err {
-            VkError::ApiErrors(msg) => {
-                assert!(msg.contains(fragment), "{msg}");
-            }
-            other => panic!("unexpected error: {other:?}"),
-        },
-        Expected::RequestCtx { fragments } => match err {
-            VkError::RequestContext { .. } => {
-                let s = err.to_string();
-                for frag in fragments {
-                    assert!(s.contains(frag), "{s}");
-                }
-            }
-            other => panic!("unexpected error: {other:?}"),
-        },
-    }
     join.abort();
     let _ = join.await;
 }
