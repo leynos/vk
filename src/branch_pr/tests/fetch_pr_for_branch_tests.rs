@@ -126,6 +126,24 @@ fn start_mock_server_pages(bodies: Vec<String>) -> MockServer {
     }
 }
 
+/// Assert that scripted pagination stops when a cursor repeats.
+async fn assert_repeated_cursor_rejected(
+    basic_repo: &RepoInfo,
+    pages: Vec<String>,
+    expected_requests: usize,
+) {
+    let server = start_mock_server_pages(pages);
+
+    let result = fetch_pr_for_branch(server.client(), basic_repo, "feature", None).await;
+
+    assert!(matches!(
+        result,
+        Err(VkError::BadResponse(message))
+            if message.as_ref() == "non-progressing pagination (repeated endCursor)"
+    ));
+    assert_eq!(server.requests().len(), expected_requests);
+}
+
 #[fixture]
 fn basic_repo() -> RepoInfo {
     RepoInfo {
@@ -368,14 +386,7 @@ async fn finds_a_matching_pr_on_a_later_page(basic_repo: RepoInfo) {
 #[tokio::test]
 async fn rejects_an_unchanged_end_cursor(basic_repo: RepoInfo) {
     let page = build_pr_lookup_response(&[], true, Some("same"));
-    let server = start_mock_server_pages(vec![page.clone(), page]);
-
-    let result = fetch_pr_for_branch(server.client(), &basic_repo, "feature", None).await;
-
-    assert!(
-        matches!(result, Err(VkError::BadResponse(message)) if message.as_ref() == "non-progressing pagination (repeated endCursor)")
-    );
-    assert_eq!(server.requests().len(), 2);
+    assert_repeated_cursor_rejected(&basic_repo, vec![page.clone(), page], 2).await;
 }
 
 #[rstest]
@@ -383,12 +394,5 @@ async fn rejects_an_unchanged_end_cursor(basic_repo: RepoInfo) {
 async fn rejects_a_cursor_cycle(basic_repo: RepoInfo) {
     let page_a = build_pr_lookup_response(&[], true, Some("a"));
     let page_b = build_pr_lookup_response(&[], true, Some("b"));
-    let server = start_mock_server_pages(vec![page_a.clone(), page_b, page_a]);
-
-    let result = fetch_pr_for_branch(server.client(), &basic_repo, "feature", None).await;
-
-    assert!(
-        matches!(result, Err(VkError::BadResponse(message)) if message.as_ref() == "non-progressing pagination (repeated endCursor)")
-    );
-    assert_eq!(server.requests().len(), 3);
+    assert_repeated_cursor_rejected(&basic_repo, vec![page_a.clone(), page_b, page_a], 3).await;
 }
