@@ -5,9 +5,11 @@
 //! `crate::api::client::pagination`; this module covers the [`PageInfo`]
 //! cursor invariants those traversals rely on.
 
+use super::CursorHistory;
 use crate::{PageInfo, VkError};
 use proptest::prelude::*;
 use rstest::rstest;
+use std::collections::HashSet;
 
 #[rstest]
 #[case(false, None, None)]
@@ -56,6 +58,41 @@ proptest! {
             }
         } else {
             prop_assert_eq!(cursor.expect("terminal page"), None);
+        }
+    }
+
+    #[test]
+    fn cursor_history_stops_before_a_repeated_cursor_is_reused(
+        initial in proptest::option::of("[a-z0-9]{1,16}"),
+        pages in proptest::collection::vec(
+            (any::<bool>(), proptest::option::of("[a-z0-9]{1,16}")),
+            0..32,
+        ),
+    ) {
+        let mut history = CursorHistory::new(initial.as_deref());
+        let mut expected_seen: HashSet<String> = initial.into_iter().collect();
+
+        for (has_next_page, end_cursor) in pages {
+            let page = PageInfo {
+                has_next_page,
+                end_cursor: end_cursor.clone(),
+            };
+            match page.next_cursor() {
+                Ok(None) => break,
+                Err(error) => {
+                    prop_assert!(matches!(error, VkError::BadResponse(_)));
+                    break;
+                }
+                Ok(Some(cursor)) => {
+                    let is_new = expected_seen.insert(cursor.to_string());
+                    let result = history.record_next(cursor);
+                    prop_assert_eq!(result.is_ok(), is_new);
+                    if !is_new {
+                        prop_assert!(matches!(result, Err(VkError::BadResponse(_))));
+                        break;
+                    }
+                }
+            }
         }
     }
 }

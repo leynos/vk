@@ -72,7 +72,7 @@ fn next_thread_cursor_finishes_without_a_next_page() {
     };
 
     assert!(matches!(
-        next_thread_cursor(&page_info, &Some("previous".to_string())),
+        next_thread_cursor(&page_info, &mut CursorHistory::new(Some("previous")),),
         Ok(None)
     ));
 }
@@ -100,7 +100,7 @@ fn next_thread_cursor_rejects_invalid_progress(
     #[case] expected: &str,
 ) {
     assert!(
-        matches!(next_thread_cursor(&page_info, &previous), Err(VkError::BadResponse(message)) if message.as_ref() == expected)
+        matches!(next_thread_cursor(&page_info, &mut CursorHistory::new(previous.as_deref())), Err(VkError::BadResponse(message)) if message.as_ref() == expected)
     );
 }
 
@@ -128,6 +128,14 @@ fn thread_lookup_error_reports_the_terminal_lookup_result(
 #[case::repeated_cursor(
     vec![
         page(vec![], Some("a"), true),
+        page(vec![], Some("a"), true),
+    ],
+    VkError::BadResponse("non-progressing pagination (repeated endCursor)".into()),
+)]
+#[case::cursor_cycle(
+    vec![
+        page(vec![], Some("a"), true),
+        page(vec![], Some("b"), true),
         page(vec![], Some("a"), true),
     ],
     VkError::BadResponse("non-progressing pagination (repeated endCursor)".into()),

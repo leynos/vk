@@ -3,26 +3,18 @@
 use super::GraphQLClient;
 use super::metrics::record_page_limit;
 use crate::VkError;
-use crate::api::CursorVariables;
-use crate::boxed::BoxedStr;
+use crate::api::{CursorHistory, CursorVariables, page_limit_error, page_limit_exceeded};
 use serde::de::DeserializeOwned;
-
-/// Maximum number of pages fetched by one pagination operation.
-const MAX_PAGES: usize = 1000;
 
 /// Advance pagination only when the API returned a new cursor.
 fn next_cursor(
-    request_cursor: Option<&String>,
+    cursor_history: &mut CursorHistory,
     page_info: &crate::PageInfo,
 ) -> Result<Option<String>, VkError> {
     let Some(next) = page_info.next_cursor()? else {
         return Ok(None);
     };
-    if request_cursor.map(String::as_str) == Some(next) {
-        return Err(VkError::BadResponse(
-            "non-progressing pagination (repeated endCursor)".boxed(),
-        ));
-    }
+    cursor_history.record_next(next)?;
     Ok(Some(next.to_string()))
 }
 
@@ -63,14 +55,13 @@ impl GraphQLClient {
     {
         let mut items = Vec::new();
         let mut cursor = start_cursor;
+        let mut cursor_history = CursorHistory::new(cursor.as_deref());
         let mut pages_seen = 0usize;
         loop {
             pages_seen += 1;
-            if pages_seen > MAX_PAGES {
+            if page_limit_exceeded(pages_seen) {
                 record_page_limit();
-                return Err(VkError::BadResponse(
-                    format!("pagination exceeded max pages {MAX_PAGES}").boxed(),
-                ));
+                return Err(page_limit_error());
             }
             let mut vars = variables.clone();
             let request_cursor = cursor.take();
@@ -78,7 +69,7 @@ impl GraphQLClient {
             let data = self.run_operation_as::<Q, T>(vars).await?;
             let (mut page, info) = map(data)?;
             items.append(&mut page);
-            let Some(next) = next_cursor(request_cursor.as_ref(), &info)? else {
+            let Some(next) = next_cursor(&mut cursor_history, &info)? else {
                 break;
             };
             cursor = Some(next);
@@ -89,6 +80,11 @@ impl GraphQLClient {
 
 #[cfg(test)]
 mod tests {
+    //! Tests typed cursor traversal against a scripted GraphQL server.
+    //!
+    //! They exercise [`GraphQLClient::paginate_operation_as`],
+    //! [`CursorVariables`], cursor advancement, and pagination error handling.
+
     use super::*;
     use crate::api::CursorVariables;
     use crate::test_utils::start_server;
@@ -253,7 +249,7 @@ mod tests {
 
     #[tokio::test]
     async fn paginate_operation_stops_at_the_page_limit() {
-        let pages = (0..MAX_PAGES)
+        let pages = (0..crate::api::MAX_PAGES)
             .map(|page| page_body("item", true, Some(&format!("next-{page}"))))
             .collect();
         let server = start_server(pages);
@@ -272,7 +268,7 @@ mod tests {
         );
         assert_eq!(
             server.hits.load(std::sync::atomic::Ordering::SeqCst),
-            MAX_PAGES
+            crate::api::MAX_PAGES
         );
         server.join.abort();
         let _ = server.join.await;
@@ -290,5 +286,20 @@ mod tests {
             matches!(result, Err(VkError::BadResponse(message)) if message.as_ref() == "non-progressing pagination (repeated endCursor)")
         );
         assert_eq!(hits, 2);
+    }
+
+    #[tokio::test]
+    async fn paginate_operation_stops_on_a_non_adjacent_cursor_cycle() {
+        let (result, hits) = paginate_page_bodies(vec![
+            page_body("first", true, Some("a")),
+            page_body("second", true, Some("b")),
+            page_body("third", true, Some("a")),
+        ])
+        .await;
+
+        assert!(
+            matches!(result, Err(VkError::BadResponse(message)) if message.as_ref() == "non-progressing pagination (repeated endCursor)")
+        );
+        assert_eq!(hits, 3);
     }
 }

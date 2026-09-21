@@ -11,5 +11,9 @@ mod retry;
 pub(crate) mod scalars;
 
 pub use client::{Endpoint, GraphQLClient, Token};
-pub(crate) use pagination::CursorVariables;
+#[cfg(test)]
+pub(crate) use pagination::MAX_PAGES;
+pub(crate) use pagination::{
+    CursorHistory, CursorVariables, page_limit_error, page_limit_exceeded,
+};
 pub use retry::RetryConfig;

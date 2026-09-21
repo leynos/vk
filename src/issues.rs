@@ -107,6 +107,7 @@ mod tests {
         let issue = fetch_issue(&client, &repo, 42).await.expect("fetch issue");
 
         assert_eq!(issue.title, "Issue title");
+        assert_eq!(issue.body, "Issue body");
         {
             let requests = requests.lock().expect("lock requests");
             let request = requests.first().expect("one request");
@@ -136,6 +137,46 @@ mod tests {
         assert!(
             matches!(result, Err(VkError::BadResponse(message)) if message.as_ref() == "issue #42 not found")
         );
+        join.abort();
+        let _ = join.await;
+    }
+
+    #[tokio::test]
+    async fn missing_issue_node_returns_a_semantic_error() {
+        let TestClient { client, join, .. } = start_server(vec![
+            json!({
+                "data": {"repository": {"issue": null}}
+            })
+            .to_string(),
+        ]);
+        let repo = RepoInfo {
+            owner: "owner".into(),
+            name: "repository".into(),
+        };
+
+        let result = fetch_issue(&client, &repo, 42).await;
+
+        assert!(
+            matches!(result, Err(VkError::BadResponse(message)) if message.as_ref() == "issue #42 not found")
+        );
+        join.abort();
+        let _ = join.await;
+    }
+
+    #[tokio::test]
+    async fn out_of_range_issue_number_does_not_send_a_request() {
+        let TestClient {
+            client, join, hits, ..
+        } = start_server(Vec::new());
+        let repo = RepoInfo {
+            owner: "owner".into(),
+            name: "repository".into(),
+        };
+
+        let result = fetch_issue(&client, &repo, i32::MAX as u64 + 1).await;
+
+        assert!(matches!(result, Err(VkError::InvalidNumber)));
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 0);
         join.abort();
         let _ = join.await;
     }

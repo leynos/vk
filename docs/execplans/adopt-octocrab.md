@@ -447,38 +447,43 @@ Rust version (MSRV) 1.89) with sources under `src/` and integration tests under
 `tests/`. The `Makefile` is the canonical command runner. Read `AGENTS.md`
 before contributing.
 
-The API layer, all under `src/api/`:
+The current API layer is under `src/api/`:
 
-- `src/api/mod.rs` re-exports `GraphQLClient`, `Endpoint`, `Query`, `Token`
-  (from `client/`), `paginate` (from `pagination.rs`), and `RetryConfig` (from
-  `retry.rs`).
-- `src/api/client/mod.rs` defines `GraphQLClient` (fields: a private pooled
-  `Transport`, headers, endpoint, optional transcript, and retry config) with
-  constructors `new` (endpoint from the `GITHUB_GRAPHQL_URL` env var, default
-  `https://api.github.com/graphql`), `with_endpoint`, and
-  `with_endpoint_retry`; methods `run_query` (POST, backon retry loop),
-  `fetch_page` (cursor merge), and private `execute_single_request` /
-  `process_graphql_response` (status handling, transcript logging, GraphQL
-  error surfacing, `serde_path_to_error` deserialization).
-- `src/api/client/helpers.rs` builds headers (`User-Agent: vk`, `Accept`,
-  optional `Authorization`) and provides snippet/redaction helpers.
-- `src/api/client/types.rs` defines the `Query`, `Token`, and `Endpoint`
-  newtypes and the `GraphQLResponse<T>` envelope.
-- `src/api/client/transcript.rs` appends one JSON line per request to the
-  optional transcript file.
-- `src/api/client/pagination.rs` implements `paginate_all` (cursor loop,
-  1,000-page cap); `src/api/pagination.rs` holds the generic `paginate` helper
-  and `PageInfo` handling.
-- `src/api/retry.rs` defines `RetryConfig` (5 attempts, 200 ms base delay,
-  30 s request timeout, jitter) and `should_retry` transient classification.
+- `src/api/mod.rs` re-exports `GraphQLClient`, `Endpoint`, `Token`, and
+  `RetryConfig`. `CursorVariables` is crate-visible and is implemented by the
+  generated variable types used by paginated operations.
+- `src/api/client/mod.rs` defines `GraphQLClient` with a private pooled
+  `Transport`, request headers, endpoint, optional transcript, and retry
+  configuration. Its constructors use `GITHUB_GRAPHQL_URL` when set, falling
+  back to `https://api.github.com/graphql`. `run_operation` returns generated
+  `ResponseData`; the crate-visible `run_operation_as` uses the generated query
+  document but deserializes into a hand-written wire or domain shape when the
+  documented behaviour needs a more lenient representation.
+- `src/api/client/transport.rs` owns the pooled Hyper/rustls POST client,
+  response-size limit, request timeout, and transport metrics. The transport
+  does not use environment proxies or follow redirects; both behaviours are
+  unused and untested on the GraphQL path.
+- `src/api/client/transcript.rs` records one JSON object per request in the
+  established JSON-lines format when a transcript is configured. Transcript
+  serialization and file I/O are best-effort and do not replace a completed
+  remote response with a client error.
+- `src/api/client/pagination.rs` implements typed
+  `paginate_operation_as` with cursor replacement, repeated-cursor detection,
+  and a 1,000-page cap. `src/api/pagination.rs` provides the public `PageInfo`
+  type and its invariant checks.
+- `src/api/retry.rs` defines `RetryConfig` (five attempts, a 200 ms base delay,
+  a 30 s request timeout, and jitter) and the transient-error classifier.
+- `src/api/scalars.rs` is the sole home for the custom scalar aliases used by
+  code generation: `DateTime`, `URI`, and `BigInt`.
 
-GraphQL queries are raw string constants in `src/graphql_queries.rs`
-(`THREADS_QUERY`, `COMMENT_QUERY`, `ISSUE_QUERY`, `PR_FOR_BRANCH_QUERY`) and in
-`src/resolve/graphql.rs` (`RESOLVE_THREAD_MUTATION`, `REVIEW_COMMENTS_PAGE`).
-Responses deserialize into per-module serde structs that mirror the GraphQL
-wire shape; the exported ones (`ReviewThread`, `ReviewComment`,
-`CommentConnection`, `PageInfo`, `PullRequestReview`, `Issue`, `User`) are
-public API and survive all three PRs.
+Every GraphQL operation is a named document under `graphql/`, compiled against
+the vendored `graphql/schema.docs.graphql` schema. Operation marker types,
+generated variables, and generated response types remain implementation details
+of their feature modules. The `wire` submodules under `src/review_threads/` and
+`src/reviews/` hold the generated operations and hand-written deserialization
+envelopes; their parent modules expose the public domain values (`ReviewThread`,
+`ReviewComment`, `CommentConnection`, `PageInfo`, `PullRequestReview`,
+`Issue`, and `User`).
 
 The REST reply boundary (only compiled with `--features unstable-rest-resolve`)
 uses an Octocrab client with the resolved GitHub API base URL, defaulting to
@@ -525,11 +530,9 @@ Key library facts (verified 2026-07-09):
   `Variables` and `ResponseData` types per operation.
   `Operation::build_query(variables)` returns a `QueryBody` that serializes to
   the standard `{"query", "variables", "operationName"}` envelope, and
-  responses are plain serde — both compose with any transport, so the bespoke
-  client's envelope handling, transcript, and `serde_path_to_error` diagnostics
-  continue to work. The reqwest features are optional and stay off. Custom
-  scalars used by GitHub (`DateTime`, `URI`, `HTML`, and friends) need type
-  aliases in scope of the derive.
+  responses are plain serde. Custom scalars used by the selected operations
+  (`DateTime`, `URI`, and `BigInt`) are mapped by aliases in
+  `src/api/scalars.rs`.
 - GitHub's public GraphQL schema is published at
   `https://docs.github.com/public/fpt/schema.docs.graphql` (~73,000 lines, ~1.5
   MB SDL); vendoring it whole is the established practice (octocrab and
@@ -775,7 +778,9 @@ Recorded evidence:
   0.2.12/1.5.0, `hyper` 0.14.32/1.11.1, `tokio-util` 0.6.10/0.7.19, `toml`
   0.8.23/1.1.6, and `thiserror` 1.0.69/2.0.20. These are transitive duplicates
   retained by the REST, GraphQL, and test stacks.
-- A generated transcript line retains the established JSON-lines shape:
+- A generated transcript entry retains the established JSON-lines shape. The
+  following is that entry shown as formatted JSON for readability; the
+  transcript writer emits one such object per physical line:
 
   ```json
   {
@@ -796,80 +801,53 @@ Recorded evidence:
 
 ## Interfaces and dependencies
 
-Dependencies to add:
+The completed implementation uses these runtime dependencies:
 
 ```toml
-# PR 1. Tilde pin: octocrab has shipped breaking changes in patch
-# releases (upstream issue 899); widen only after review.
-# jwt-rust-crypto is mandatory under default-features = false.
+graphql_client = "0.16"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = [
+    "client-legacy", "http1", "tokio", "server",
+] }
+hyper-rustls = { version = "0.27", default-features = false, features = [
+    "ring", "webpki-roots", "http1", "tls12",
+] }
+http-body-util = "0.1"
 octocrab = { version = "~0.54", default-features = false, features = [
     "default-client", "jwt-rust-crypto", "rustls", "rustls-ring", "timeout",
 ] }
-
-# PR 2 (promoted from dev-dependencies; align versions with the lockfile)
-hyper = "1"
-hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
-hyper-rustls = { version = "0.27", features = ["webpki-roots", "http1", "ring"] }
-http-body-util = "0.1"
-
-# PR 3
-graphql_client = "0.16"
 ```
 
-Dependency to remove (PR 2): `reqwest`.
+`reqwest` has been removed. The REST reply path uses Octocrab without its retry
+feature. The GraphQL path uses the pooled Hyper/rustls transport in
+`src/api/client/transport.rs`, with a one-MiB response limit, a total request
+timeout, and bounded request metrics. `src/api/client/transcript.rs` retains
+the optional JSON-lines transcript as a best-effort diagnostic sink.
 
-In `src/api/client/transport.rs` (PR 2, new, private to `client`):
+The typed GraphQL interface is:
 
-```rust
-/// Owns the pooled hyper client used for GraphQL requests.
-pub(super) struct Transport { /* hyper_util legacy client + HTTPS connector */ }
+- `GraphQLClient::run_operation<Q>` is the public operation entry point and
+  returns `Q::ResponseData`.
+- `GraphQLClient::run_operation_as<Q, T>` is crate-visible. It validates the
+  generated query while decoding into a hand-written `T` for documented
+  leniency, such as nullable or future-valued fields.
+- `GraphQLClient::paginate_operation_as` is crate-visible and combines
+  `CursorVariables` cursor replacement, repeated-cursor detection, and the
+  1,000-page limit. It discards accumulated items when a request or mapper
+  returns an error.
+- `src/api/scalars.rs` supplies the crate-visible `DateTime`, `URI`, and
+  `BigInt` aliases required by the operation derives.
 
-pub(super) struct PostJsonRequest<'a> {
-    pub(super) endpoint: &'a Endpoint,
-    pub(super) headers: &'a http::HeaderMap,
-    pub(super) payload: &'a serde_json::Value,
-    pub(super) timeout: std::time::Duration,
-}
+Each operation marker, generated variables type, and generated response type is
+kept inside its feature module. The operation documents live under `graphql/`
+and use `graphql/schema.docs.graphql`, while the `wire` modules in
+`src/review_threads/` and `src/reviews/` own the hand-written envelopes and
+public domain mappings. `GraphQLClient`, its constructors, `Endpoint`, `Token`,
+`RetryConfig`, and the public domain values remain available through their
+existing module paths.
 
-impl Transport {
-    pub(super) fn new() -> Result<Self, VkError>;
-
-    /// Send a JSON POST request and return its status and body.
-    pub(super) async fn post_json(
-        &self,
-        request: PostJsonRequest<'_>,
-    ) -> Result<HttpResponse, VkError>;
-}
-```
-
-In `src/api/client/mod.rs` (PR 3, added; string-based methods retained until
-unused, then deprecated per the Interface tolerance):
-
-```rust
-/// Execute a codegen'd GraphQL operation using this client.
-pub async fn run_operation<Q: graphql_client::GraphQLQuery>(
-    &self,
-    variables: Q::Variables,
-) -> Result<Q::ResponseData, VkError>;
-```
-
-In `src/api/pagination.rs` or a sibling module (PR 3):
-
-```rust
-/// Implemented by generated Variables types for paginated operations.
-pub(crate) trait CursorVariables {
-    fn set_cursor(&mut self, cursor: Option<String>);
-}
-```
-
-Unchanged public surface (re-exported from `src/lib.rs` and `src/api/`):
-`GraphQLClient` and its constructors, `Endpoint`, `Token`, `Query`,
-`RetryConfig`, `paginate`, `PageInfo`, `CommentConnection`, `ReviewThread`,
-`ReviewComment`, `PullRequestReview`, `Issue`, `User`, and `VkError`.
-
-In `src/resolve/rest.rs` (PR 1), `RestClient` keeps its `pub(crate)`
-construction and the `post_reply` free function; only the inner client type
-changes from `reqwest::Client` to `octocrab::Octocrab`.
+In `src/resolve/rest.rs`, `RestClient` retains its `pub(crate)` construction and
+`post_reply` boundary; only its inner client is Octocrab-backed.
 
 ## Revision note
 

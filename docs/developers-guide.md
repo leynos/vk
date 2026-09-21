@@ -165,7 +165,10 @@ Paginated operations implement the internal `CursorVariables` trait for their
 generated variables and use `paginate_operation_as`. The helper clones the base
 variables, replaces the cursor for each request, stops at the first page
 without a next cursor, and discards accumulated items if a request or mapping
-fails. It caps a traversal at 1,000 pages.
+fails. It caps a traversal at 1,000 pages. The crate-visible `CursorHistory` is
+the single owner of cursor cycle detection: typed GraphQL paginators seed it
+with the request's initial cursor and record each returned cursor before a
+follow-up request. Only typed GraphQL paginators may use this history.
 
 Hand-written wire envelopes that model GraphQL connection `nodes` use the
 internal `api::deserialize::nullable_nodes` deserializer. It is limited to

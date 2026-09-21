@@ -5,12 +5,11 @@
 //! forks have PRs with the same branch name by filtering on the head repository
 //! owner.
 
-use graphql_client::GraphQLQuery;
-use serde::Deserialize;
-use std::collections::HashSet;
-
+use crate::api::{CursorHistory, page_limit_error, page_limit_exceeded};
 use crate::ref_parser::RepoInfo;
 use crate::{GraphQLClient, PageInfo, VkError};
+use graphql_client::GraphQLQuery;
+use serde::Deserialize;
 
 /// GraphQL data returned when looking up pull requests for a branch.
 #[derive(Debug, Deserialize)]
@@ -117,8 +116,13 @@ pub async fn fetch_pr_for_branch(
     head_owner: Option<&str>,
 ) -> Result<u64, VkError> {
     let mut after = None;
-    let mut seen_cursors = HashSet::new();
+    let mut cursor_history = CursorHistory::new(after.as_deref());
+    let mut pages_seen = 0usize;
     loop {
+        pages_seen += 1;
+        if page_limit_exceeded(pages_seen) {
+            return Err(page_limit_error());
+        }
         let request_cursor = after.take();
         let variables = pr_for_branch_query::Variables {
             owner: repo.owner.clone(),
@@ -140,11 +144,7 @@ pub async fn fetch_pr_for_branch(
         let Some(cursor) = page_info.next_cursor()? else {
             break;
         };
-        if !seen_cursors.insert(cursor.to_string()) {
-            return Err(VkError::BadResponse(
-                "non-progressing pagination (repeated endCursor)".into(),
-            ));
-        }
+        cursor_history.record_next(cursor)?;
         after = Some(cursor.to_owned());
     }
     Err(VkError::NoPrForBranch {

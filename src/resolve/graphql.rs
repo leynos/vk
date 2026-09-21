@@ -18,6 +18,7 @@ use super::CommentRef;
 // `graphql_client` resolves the `BigInt` scalar (`fullDatabaseId`) to a type
 // of the same name in scope of the derive; the shared alias supplies it.
 use crate::api::scalars::BigInt;
+use crate::api::{CursorHistory, page_limit_error, page_limit_exceeded};
 use crate::{VkError, api::GraphQLClient};
 use graphql_client::GraphQLQuery;
 
@@ -146,13 +147,9 @@ fn review_threads_from_page(data: ThreadPage) -> Result<ReviewThreads, VkError> 
 }
 
 /// Return the cursor for the next review-thread page, if one exists.
-#[expect(
-    clippy::ref_option,
-    reason = "the extraction contract retains the caller's cursor representation"
-)]
 fn next_thread_cursor(
     page_info: &ReviewThreadsPageInfo,
-    previous: &Option<String>,
+    cursor_history: &mut CursorHistory,
 ) -> Result<Option<String>, VkError> {
     if !page_info.has_next_page {
         return Ok(None);
@@ -161,11 +158,7 @@ fn next_thread_cursor(
         .end_cursor
         .clone()
         .ok_or_else(|| VkError::BadResponse("missing endCursor with hasNextPage".into()))?;
-    if previous.as_deref() == Some(next.as_str()) {
-        return Err(VkError::BadResponse(
-            "non-progressing pagination (repeated endCursor)".into(),
-        ));
-    }
+    cursor_history.record_next(&next)?;
     Ok(Some(next))
 }
 
@@ -192,8 +185,14 @@ pub(crate) async fn get_thread_id(
     // by its canonical string form.
     let target = reference.comment_id.to_string();
     let mut cursor: Option<String> = None;
+    let mut cursor_history = CursorHistory::new(cursor.as_deref());
     let mut comments_truncated = false;
+    let mut pages_seen = 0usize;
     loop {
+        pages_seen += 1;
+        if page_limit_exceeded(pages_seen) {
+            return Err(page_limit_error());
+        }
         let data = gql
             .fetch_review_comments(ReviewCommentsQuery {
                 owner: &reference.repo.owner,
@@ -210,7 +209,7 @@ pub(crate) async fn get_thread_id(
             }
             comments_truncated |= page_truncated;
         }
-        let Some(next) = next_thread_cursor(&threads.page_info, &cursor)? else {
+        let Some(next) = next_thread_cursor(&threads.page_info, &mut cursor_history)? else {
             break;
         };
         cursor = Some(next);
