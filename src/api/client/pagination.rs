@@ -155,6 +155,25 @@ mod tests {
         .to_string()
     }
 
+    /// Run the standard typed pagination operation against scripted page bodies.
+    async fn paginate_page_bodies(
+        page_bodies: Vec<String>,
+    ) -> (Result<Vec<String>, VkError>, usize) {
+        let server = start_server(page_bodies);
+        let result = server
+            .client
+            .paginate_operation_as::<PageTestQuery, page_test_query::ResponseData, String, _>(
+                page_test_query::Variables { cursor: None },
+                None,
+                map_page,
+            )
+            .await;
+        let hits = server.hits.load(std::sync::atomic::Ordering::SeqCst);
+        server.join.abort();
+        let _ = server.join.await;
+        (result, hits)
+    }
+
     #[test]
     fn set_cursor_replaces_the_cursor_field() {
         let mut vars = page_test_query::Variables { cursor: None };
@@ -166,23 +185,14 @@ mod tests {
 
     #[tokio::test]
     async fn paginate_operation_concatenates_all_pages() {
-        let server = start_server(vec![
+        let (result, hits) = paginate_page_bodies(vec![
             page_body("a", true, Some("c1")),
             page_body("b", false, None),
-        ]);
-        let items = server
-            .client
-            .paginate_operation_as::<PageTestQuery, page_test_query::ResponseData, String, _>(
-                page_test_query::Variables { cursor: None },
-                None,
-                map_page,
-            )
-            .await
-            .expect("pagination succeeds");
+        ])
+        .await;
+        let items = result.expect("pagination succeeds");
         assert_eq!(items, vec!["a".to_string(), "b".to_string()]);
-        assert_eq!(server.hits.load(std::sync::atomic::Ordering::SeqCst), 2);
-        server.join.abort();
-        let _ = server.join.await;
+        assert_eq!(hits, 2);
     }
 
     /// The cursor characterization: the cursor
@@ -270,25 +280,15 @@ mod tests {
 
     #[tokio::test]
     async fn paginate_operation_stops_on_the_first_repeated_cursor() {
-        let server = start_server(vec![
+        let (result, hits) = paginate_page_bodies(vec![
             page_body("first", true, Some("cursor")),
             page_body("second", true, Some("cursor")),
-        ]);
-
-        let result = server
-            .client
-            .paginate_operation_as::<PageTestQuery, page_test_query::ResponseData, String, _>(
-                page_test_query::Variables { cursor: None },
-                None,
-                map_page,
-            )
-            .await;
+        ])
+        .await;
 
         assert!(
             matches!(result, Err(VkError::BadResponse(message)) if message.as_ref() == "non-progressing pagination (repeated endCursor)")
         );
-        assert_eq!(server.hits.load(std::sync::atomic::Ordering::SeqCst), 2);
-        server.join.abort();
-        let _ = server.join.await;
+        assert_eq!(hits, 2);
     }
 }
