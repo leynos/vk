@@ -14,7 +14,7 @@
 
 use rstest::rstest;
 
-use crate::reader::{Workflow, WorkflowError, jobs, steps};
+use crate::reader::{Workflow, WorkflowError, jobs, parse_workflow, steps};
 use crate::repository;
 
 /// The one approved revision of the shared uploader.
@@ -37,29 +37,48 @@ const DEPRECATED_INPUT: &str = "installer-checksum";
 /// The repository variable whose only consumer was that input.
 const DEPRECATED_VARIABLE: &str = "CODESCENE_CLI_SHA256";
 
+/// The shared repository's reusable workflows, which a job calls rather than
+/// a step.
+const SHARED_WORKFLOWS: &str = "leynos/shared-actions/.github/workflows/";
+
 /// The `workflow_dispatch` that hashed the installer script and wrote the
 /// variable back through the API, named without an extension. Other
 /// repositories in the estate carry it; this contract keeps it from arriving
 /// here under any extension GitHub reads.
 const REFRESH_WORKFLOW_STEM: &str = "get-codescene-sha";
 
+/// Return the revision a step's uploader action is pinned to, if the step
+/// calls it.
+fn action_revision(uses: &str) -> Option<String> {
+    uses.strip_prefix(UPLOADER_MARKER).map(str::to_owned)
+}
+
+/// Return the revision a job's shared CodeScene workflow is pinned to, if the
+/// job calls one.
+///
+/// A reusable workflow is a job-level `uses`, which the action marker never
+/// matches, so it needs its own: any shared workflow whose name mentions
+/// CodeScene reaches the same service and is held to the same revision.
+fn workflow_revision(calls: &str) -> Option<String> {
+    let (path, revision) = calls.strip_prefix(SHARED_WORKFLOWS)?.split_once('@')?;
+    path.to_ascii_lowercase()
+        .contains("codescene")
+        .then(|| revision.to_owned())
+}
+
 /// Return the revision of every uploader reference, with the job naming it.
 ///
-/// Read from every step's `uses` and every job's reusable-workflow call, so a
-/// reference is found wherever GitHub would resolve one.
+/// Read from every step's `uses` and every job's reusable-workflow call, each
+/// with its own matcher, so a reference is found wherever GitHub would
+/// resolve one.
 fn uploader_references(workflows: &[Workflow]) -> Vec<(String, String)> {
-    let from_steps = steps(workflows)
-        .into_iter()
-        .filter_map(|(_, job, step)| Some((job.coordinate(), step.uses.as_deref()?)));
+    let from_steps = steps(workflows).into_iter().filter_map(|(_, job, step)| {
+        Some((job.coordinate(), action_revision(step.uses.as_deref()?)?))
+    });
     let from_calls = jobs(workflows)
         .into_iter()
-        .filter_map(|(_, job)| Some((job.coordinate(), job.calls.as_deref()?)));
-    from_steps
-        .chain(from_calls)
-        .filter_map(|(coordinate, uses)| {
-            Some((coordinate, uses.strip_prefix(UPLOADER_MARKER)?.to_owned()))
-        })
-        .collect()
+        .filter_map(|(_, job)| Some((job.coordinate(), workflow_revision(job.calls.as_deref()?)?)));
+    from_steps.chain(from_calls).collect()
 }
 
 /// Return the workflows whose text names `needle`, comments included.
@@ -186,4 +205,41 @@ fn the_checksum_refresh_workflow_is_absent(
 #[case::coverage("coverage.yml", false)]
 fn the_refresh_workflow_is_recognized_by_stem(#[case] file: &str, #[case] expected: bool) {
     assert_eq!(is_refresh_workflow(file), expected);
+}
+
+#[test]
+fn uploader_references_are_found_on_steps_and_on_reusable_workflow_calls()
+-> Result<(), WorkflowError> {
+    // A wrong pin on either path must surface as its own reference, so the
+    // pin contract refuses it rather than letting a correct reference
+    // elsewhere keep the collection green.
+    let text = concat!(
+        "on: push\njobs:\n",
+        "  step:\n    steps:\n",
+        "      - uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@aaa\n",
+        "  call:\n",
+        "    uses: leynos/shared-actions/.github/workflows/codescene-upload.yml@bbb\n",
+        "  other:\n",
+        "    uses: leynos/shared-actions/.github/workflows/dependabot-automerge.yml@ccc\n",
+    );
+    let references = uploader_references(&[parse_workflow("x.yml", text)?]);
+    assert_eq!(
+        references,
+        vec![
+            ("x.yml:step".to_owned(), "aaa".to_owned()),
+            ("x.yml:call".to_owned(), "bbb".to_owned()),
+        ]
+    );
+    Ok(())
+}
+
+#[test]
+fn a_deprecated_name_in_a_comment_alone_is_reported() -> Result<(), WorkflowError> {
+    let text = "# CODESCENE_CLI_SHA256 is still set somewhere.\non: push\njobs: {}\n";
+    let workflows = [parse_workflow("x.yml", text)?];
+    assert_eq!(
+        workflows_naming(&workflows, DEPRECATED_VARIABLE),
+        vec!["x.yml"]
+    );
+    Ok(())
 }
