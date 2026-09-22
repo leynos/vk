@@ -27,6 +27,8 @@ mod placement_tests;
 mod properties;
 #[path = "workflow_contracts/publisher.rs"]
 mod publisher;
+#[path = "workflow_contracts/pull_request_concurrency.rs"]
+mod pull_request_concurrency;
 #[path = "workflow_contracts/pull_request_lanes.rs"]
 mod pull_request_lanes;
 #[path = "support/workflows/mod.rs"]

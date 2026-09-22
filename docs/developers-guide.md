@@ -471,6 +471,29 @@ the label is the called workflow's business rather than this repository's.
 `api_bound_lanes_stay_on_hosted_runners` requires them to stay where minutes
 are free.
 
+### Superseded pull-request runs are cancelled
+
+A second push to a pull request leaves the run already in flight charging a
+full set of minutes for a result nobody reads. `coverage.yml` therefore
+declares a workflow-level concurrency group keyed on the pull request, and
+`cancel-in-progress: ${{ github.event_name == 'pull_request' }}`.
+
+The guard is on the event rather than a literal `true`, so a push or dispatch
+trigger added later cannot start cancelling the runs that write the record.
+`every_pull_request_workflow_cancels_superseded_runs` in
+`tests/workflow_contracts/pull_request_concurrency.rs` holds every workflow a
+`pull_request` starts to that shape, and refuses a missing block, a literal
+`true`, and a block written under a job instead of the workflow. The group must
+be exactly the deployed expression, because each part carries identity: without
+the workflow name two workflows share a group and cancel each other; without
+the pull request number every pull request shares one, so a push to one cancels
+another's run; and `github.ref` is the fallback for an event with no pull
+request. A group keyed on `github.run_id` is unique per run, so it serializes
+nothing and never cancels a predecessor. `pull_request_target` is out of scope:
+`dependabot-automerge.yml` runs on it and merges, so cancelling it mid-write is
+not a saving. The push-to-`main` publisher queues instead, as described under
+the coverage lanes above.
+
 ### Job names
 
 `no_required_context_interpolates_its_runner` refuses an expression in
