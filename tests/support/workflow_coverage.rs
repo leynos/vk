@@ -7,9 +7,10 @@
 //! rather than as parsing.
 
 use std::collections::BTreeSet;
-use std::fs;
-use std::path::{Path, PathBuf};
 
+use camino::{Utf8Path, Utf8PathBuf};
+use cap_std::ambient_authority;
+use cap_std::fs_utf8::Dir;
 use serde_norway::Value;
 
 /// The directory holding this repository's own workflows.
@@ -17,6 +18,10 @@ pub(crate) const WORKFLOWS: &str = ".github/workflows";
 
 /// The secret that authenticates a CodeScene upload.
 pub(crate) const CODESCENE_TOKEN: &str = "CS_ACCESS_TOKEN";
+
+/// The branch whose coverage CodeScene analyses, and so the only one that may
+/// be published from.
+pub(crate) const PUBLISHED_BRANCH: &str = "main";
 
 /// One step of one job, as the contracts need to see it.
 #[derive(Debug, Clone)]
@@ -78,6 +83,14 @@ pub(crate) struct Workflow {
     pub(crate) file: String,
     /// The events the workflow answers.
     pub(crate) events: BTreeSet<String>,
+    /// The environment names declared at workflow level.
+    ///
+    /// GitHub exports these into every step of every job, so a secret here
+    /// has the widest reach a workflow can give it, and a reader that saw
+    /// only job and step scope would call such a workflow clean.
+    pub(crate) env: BTreeSet<String>,
+    /// The branches a `push` trigger is filtered to, when it names any.
+    pub(crate) push_branches: BTreeSet<String>,
     /// Every job the workflow declares.
     pub(crate) jobs: Vec<Job>,
 }
@@ -99,12 +112,21 @@ impl Workflow {
 
     /// Return whether this workflow is the coverage publisher.
     ///
-    /// Two conditions, not one. A workflow that answers a push **and** serves
-    /// no pull request is the publisher; a repository whose one workflow
-    /// declares both triggers would otherwise be required to upload and
-    /// forbidden from uploading at the same time.
+    /// Three conditions, not one. It answers a push; it serves no pull
+    /// request, since a workflow declaring both triggers would otherwise be
+    /// required to upload and forbidden from uploading at once; and its push
+    /// trigger is filtered to `main`.
+    ///
+    /// The branch filter is what makes the rule mean anything. A tag-triggered
+    /// workflow answers `push` and serves no pull request, so without it
+    /// `release.yml` qualified as the publisher and could have carried a
+    /// CodeScene upload with no contract objecting. CodeScene accepts an
+    /// upload only for a branch it analyses, so a tag upload would fail at
+    /// run time rather than be caught here.
     pub(crate) fn is_publisher(&self) -> bool {
-        self.serves_pushes() && !self.serves_pull_requests()
+        self.serves_pushes()
+            && !self.serves_pull_requests()
+            && self.push_branches.contains(PUBLISHED_BRANCH)
     }
 }
 
@@ -187,48 +209,86 @@ fn events_of(document: &Value) -> BTreeSet<String> {
     }
 }
 
-/// Return the repository root, from this crate's manifest directory.
-fn repository_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+/// Return the branches a workflow's `push` trigger is filtered to.
+///
+/// An unfiltered `push` returns nothing rather than every branch: a trigger
+/// naming no filter fires for all of them, which is not the same as being
+/// restricted to the published one, and the publisher rule wants the
+/// restriction stated rather than inferred.
+fn push_branches_of(document: &Value) -> BTreeSet<String> {
+    let triggers = document
+        .get("on")
+        .or_else(|| document.get(Value::Bool(true)));
+    match triggers
+        .and_then(|on| on.get("push"))
+        .and_then(|push| push.get("branches"))
+    {
+        Some(Value::Sequence(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        Some(Value::String(one)) => BTreeSet::from([one.clone()]),
+        _ => BTreeSet::new(),
+    }
 }
 
-/// Return every workflow file this repository owns.
-fn workflow_paths() -> Vec<PathBuf> {
-    let directory = repository_root().join(WORKFLOWS);
-    let mut paths: Vec<PathBuf> = fs::read_dir(&directory)
-        .unwrap_or_else(|err| panic!("{} must be readable: {err}", directory.display()))
+/// Return a capability for the directory holding this repository's workflows.
+///
+/// Ambient authority is taken once, here, and everything below reads through
+/// the returned capability rather than through a path. That is this
+/// repository's rule for filesystem access generally, and it means a contract
+/// cannot accidentally read outside the directory it reasons about.
+fn workflow_directory() -> Dir {
+    let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let directory = root.join(WORKFLOWS);
+    Dir::open_ambient_dir(directory.as_str(), ambient_authority())
+        .unwrap_or_else(|err| panic!("{directory} must be an openable directory: {err}"))
+}
+
+/// Return the name of every workflow file this repository owns, sorted.
+fn workflow_names(directory: &Dir) -> Vec<String> {
+    let entries = directory
+        .entries()
+        .unwrap_or_else(|err| panic!("{WORKFLOWS} must be readable: {err}"));
+    let mut names: Vec<String> = entries
         // An entry that cannot be read is a fault, not an absence. Discarding
         // it would shrink the set every contract below iterates over, and a
         // contract that silently inspects four workflows where there are five
         // reports success for the one it never saw.
+        .map(|entry| entry.unwrap_or_else(|err| panic!("{WORKFLOWS} must list cleanly: {err}")))
         .map(|entry| {
-            entry.unwrap_or_else(|err| panic!("{} must list cleanly: {err}", directory.display()))
+            entry
+                .file_name()
+                .unwrap_or_else(|err| panic!("{WORKFLOWS} entries must have UTF-8 names: {err}"))
         })
-        .map(|entry| entry.path())
-        .filter(|path| path.extension().is_some_and(|e| e == "yml" || e == "yaml"))
+        // Compared through camino's extension reader rather than by suffix:
+        // a suffix test is case-sensitive, and GitHub reads `.YML` as readily
+        // as `.yml`, so a workflow named that way would be skipped in silence.
+        .filter(|name| {
+            Utf8Path::new(name).extension().is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("yml") || ext.eq_ignore_ascii_case("yaml")
+            })
+        })
         .collect();
-    paths.sort();
-    assert!(!paths.is_empty(), "the repository must declare workflows");
-    paths
+    names.sort();
+    assert!(!names.is_empty(), "the repository must declare workflows");
+    names
 }
 
-/// Return one workflow, parsed.
-fn workflow_at(path: &Path) -> Workflow {
-    let text = fs::read_to_string(path)
-        .unwrap_or_else(|err| panic!("{} must be readable: {err}", path.display()));
+/// Return one workflow, parsed, read through the directory capability.
+fn workflow_at(directory: &Dir, file: &str) -> Workflow {
+    let text = directory
+        .read_to_string(file)
+        .unwrap_or_else(|err| panic!("{file} must be readable: {err}"));
     let document: Value = serde_norway::from_str(&text)
-        .unwrap_or_else(|err| panic!("{} must be valid YAML: {err}", path.display()));
-    let file = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or_default()
-        .to_owned();
+        .unwrap_or_else(|err| panic!("{file} must be valid YAML: {err}"));
     let jobs = match document.get("jobs") {
         Some(Value::Mapping(map)) => map
             .iter()
             .filter_map(|(id, job)| id.as_str().map(|id| (id, job)))
             .map(|(id, job)| Job {
-                workflow: file.clone(),
+                workflow: file.to_owned(),
                 id: id.to_owned(),
                 env: keys_of(job.get("env")),
                 steps: steps_of(job),
@@ -237,17 +297,20 @@ fn workflow_at(path: &Path) -> Workflow {
         _ => Vec::new(),
     };
     Workflow {
-        file,
+        file: file.to_owned(),
         events: events_of(&document),
+        env: keys_of(document.get("env")),
+        push_branches: push_branches_of(&document),
         jobs,
     }
 }
 
 /// Return every workflow this repository owns, parsed.
 pub(crate) fn workflows() -> Vec<Workflow> {
-    workflow_paths()
+    let directory = workflow_directory();
+    workflow_names(&directory)
         .iter()
-        .map(|path| workflow_at(path))
+        .map(|name| workflow_at(&directory, name))
         .collect()
 }
 

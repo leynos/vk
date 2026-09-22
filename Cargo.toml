@@ -76,6 +76,12 @@ unstable-rest-resolve = []
 # maintained fork of serde_yaml, and the crate the estate's other Rust
 # workflow contracts already use, so the parse behaves the same here.
 serde_norway = "0.9"
+# The contracts reach the filesystem through a directory capability rather
+# than through ambient authority, as AGENTS.md requires of this repository's
+# code generally. Both are already in the lock file as transitive
+# dependencies, so neither adds a crate to the build.
+cap-std = { version = "4.0", features = ["fs_utf8"] }
+camino = "1.2"
 tempfile = "3.22.0"
 serial_test = "3.2.0"
 rstest = "0.27.0"

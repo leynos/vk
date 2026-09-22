@@ -17,6 +17,7 @@
 #[path = "support/workflow_coverage.rs"]
 mod workflow_coverage;
 
+use rstest::{fixture, rstest};
 use workflow_coverage::{CODESCENE_TOKEN, Job, Step, Workflow, jobs, steps};
 
 /// The markdownlint action, pinned to a commit rather than a tag object.
@@ -80,9 +81,8 @@ fn codescene_reach_faults(job: &Job) -> Vec<String> {
         .collect()
 }
 
-#[test]
-fn no_pull_request_lane_contacts_codescene() {
-    let workflows = workflows_of();
+#[rstest]
+fn no_pull_request_lane_contacts_codescene(workflows: Vec<Workflow>) {
     let lanes: Vec<_> = jobs(&workflows)
         .into_iter()
         .filter(|(workflow, _)| workflow.serves_pull_requests())
@@ -93,9 +93,22 @@ fn no_pull_request_lane_contacts_codescene() {
          assertion here passes over an empty set"
     );
 
+    let at_workflow_level = workflows
+        .iter()
+        .filter(|workflow| {
+            workflow.serves_pull_requests() && workflow.env.contains(CODESCENE_TOKEN)
+        })
+        .map(|workflow| {
+            format!(
+                "{} declares {CODESCENE_TOKEN} at workflow level, so every \
+                 step of every job receives it",
+                workflow.file
+            )
+        });
     let faults: Vec<String> = lanes
         .iter()
         .flat_map(|(_, job)| codescene_reach_faults(job))
+        .chain(at_workflow_level)
         .collect();
     assert!(
         faults.is_empty(),
@@ -105,28 +118,57 @@ fn no_pull_request_lane_contacts_codescene() {
     );
 }
 
-#[test]
-fn every_pull_request_coverage_lane_ratchets() {
-    let workflows = workflows_of();
-    let generators: Vec<_> = steps(&workflows)
-        .into_iter()
-        .filter(|(workflow, _, step)| {
-            workflow.serves_pull_requests()
-                && step
-                    .uses
-                    .as_deref()
-                    .is_some_and(|action| action.contains("generate-coverage"))
-        })
+#[rstest]
+fn every_pull_request_workflow_ratchets_its_own_coverage(workflows: Vec<Workflow>) {
+    // A coverage lane is a workflow that generates coverage, derived rather
+    // than named. Requiring every pull-request workflow to generate coverage
+    // would refuse `dependabot-automerge.yml`, which answers
+    // `pull_request_target` and rightly generates none.
+    let lanes: Vec<&Workflow> = workflows
+        .iter()
+        .filter(|workflow| workflow.serves_pull_requests() && !generators_of(workflow).is_empty())
         .collect();
     assert!(
-        !generators.is_empty(),
-        "a pull-request lane must generate coverage, or this contract asserts \
-         nothing and the ratchet has no subject"
+        !lanes.is_empty(),
+        "a pull-request workflow must generate coverage, or this contract \
+         asserts nothing and the ratchet has no subject"
     );
-    let faults: Vec<String> = generators
+    // Judged per workflow rather than over one pooled list. Pooling lets a
+    // second lane's ratcheting generator stand in for a lane whose own
+    // generator does not ratchet, because the faults are counted together
+    // and the collection is non-empty either way.
+    let faults: Vec<String> = lanes
         .iter()
-        .filter(|(_, _, step)| step.input("with-ratchet") != Some("true"))
-        .map(|(_, job, step)| {
+        .filter_map(|workflow| ratchet_fault(workflow))
+        .collect();
+    assert!(
+        faults.is_empty(),
+        "a lane generating coverage without the ratchet measures nothing it \
+         can fail on, and the ratchet is the whole of what replaces the \
+         CodeScene changed-line gate: {faults:?}"
+    );
+}
+
+/// Return every coverage-generating step of one workflow, with its job.
+fn generators_of(workflow: &Workflow) -> Vec<(&Job, &Step)> {
+    workflow
+        .jobs
+        .iter()
+        .flat_map(|job| job.steps.iter().map(move |step| (job, step)))
+        .filter(|(_, step)| {
+            step.uses
+                .as_deref()
+                .is_some_and(|action| action.contains("generate-coverage"))
+        })
+        .collect()
+}
+
+/// Return why one lane's coverage is not ratcheted, if it is not.
+fn ratchet_fault(workflow: &Workflow) -> Option<String> {
+    let unratcheted: Vec<String> = generators_of(workflow)
+        .iter()
+        .filter(|(_, step)| step.input("with-ratchet") != Some("true"))
+        .map(|(job, step)| {
             format!(
                 "{} step {:?} passes with-ratchet {:?}",
                 job.coordinate(),
@@ -135,17 +177,11 @@ fn every_pull_request_coverage_lane_ratchets() {
             )
         })
         .collect();
-    assert!(
-        faults.is_empty(),
-        "a pull-request lane generating coverage without the ratchet measures \
-         nothing it can fail on, which is the whole of what replaces the \
-         CodeScene changed-line gate: {faults:?}"
-    );
+    (!unratcheted.is_empty()).then(|| unratcheted.join("; "))
 }
 
-#[test]
-fn only_the_publisher_uploads_coverage() {
-    let workflows = workflows_of();
+#[rstest]
+fn only_the_publisher_uploads_coverage(workflows: Vec<Workflow>) {
     let uploads: Vec<_> = steps(&workflows)
         .into_iter()
         .filter(|(_, _, step)| contacts_codescene(step.uses.as_deref(), step.run.as_deref()))
@@ -161,7 +197,7 @@ fn only_the_publisher_uploads_coverage() {
         .map(|(workflow, job, step)| {
             format!(
                 "{} step {:?} uploads, but {} answers {:?} rather than a push \
-                 to main alone",
+                 to the published branch alone",
                 job.coordinate(),
                 step.label(),
                 workflow.file,
@@ -175,9 +211,8 @@ fn only_the_publisher_uploads_coverage() {
     );
 }
 
-#[test]
-fn the_publisher_uploads_rather_than_checks() {
-    let workflows = workflows_of();
+#[rstest]
+fn the_publisher_uploads_rather_than_checks(workflows: Vec<Workflow>) {
     let uploads: Vec<_> = steps(&workflows)
         .into_iter()
         .filter(|(workflow, _, step)| {
@@ -213,45 +248,93 @@ fn the_publisher_uploads_rather_than_checks() {
     );
 }
 
-#[test]
-fn the_codescene_token_is_declared_on_the_step_that_uses_it() {
-    let workflows = workflows_of();
-    let holders: Vec<_> = jobs(&workflows)
+#[rstest]
+fn the_codescene_token_reaches_the_upload_step_and_nothing_else(workflows: Vec<Workflow>) {
+    let codescene_steps: Vec<(&Workflow, &Job, &Step)> = steps(&workflows)
         .into_iter()
-        .filter(|(_, job)| {
-            job.env.contains(CODESCENE_TOKEN)
-                || job
-                    .steps
-                    .iter()
-                    .any(|step| step.env.contains(CODESCENE_TOKEN))
+        .filter(|(_, _, step)| {
+            step.uses
+                .as_deref()
+                .is_some_and(|action| action.contains("codescene"))
         })
         .collect();
     assert!(
-        !holders.is_empty(),
-        "some job must hold the token, or this contract passes over a \
-         repository that stopped uploading altogether"
+        !codescene_steps.is_empty(),
+        "some step must upload to CodeScene, or this contract passes over a \
+         repository that stopped reporting altogether"
     );
-    let faults: Vec<String> = holders
+
+    // Three claims, not one. The step that needs the token has it; no other
+    // step does; and no wider scope does. Asserting only that *some* step
+    // holds it and no job does would be satisfied by moving the token to the
+    // coverage-generation step: this contract would stay green while the
+    // upload step's `if` went false and the publish silently stopped
+    // happening.
+    let mut faults: Vec<String> = codescene_steps
         .iter()
+        .filter(|(_, _, step)| !step.env.contains(CODESCENE_TOKEN))
+        .map(|(_, job, step)| {
+            format!(
+                "{} step {:?} uploads without {CODESCENE_TOKEN}, so its guard \
+                 is false and the upload never runs",
+                job.coordinate(),
+                step.label()
+            )
+        })
+        .collect();
+    faults.extend(
+        steps(&workflows)
+            .into_iter()
+            .filter(|(_, _, step)| {
+                step.env.contains(CODESCENE_TOKEN)
+                    && !step
+                        .uses
+                        .as_deref()
+                        .is_some_and(|action| action.contains("codescene"))
+            })
+            .map(|(_, job, step)| {
+                format!(
+                    "{} step {:?} receives {CODESCENE_TOKEN} without uploading",
+                    job.coordinate(),
+                    step.label()
+                )
+            }),
+    );
+    faults.extend(wider_scope_faults(&workflows));
+    assert!(
+        faults.is_empty(),
+        "the token belongs to the upload step and to nothing else: a wider \
+         scope exports it into this repository's own build, where a \
+         compromised dependency reaches it: {faults:?}"
+    );
+}
+
+/// Return every scope wider than a step that exports the token.
+fn wider_scope_faults(workflows: &[Workflow]) -> Vec<String> {
+    let at_workflow_level = workflows
+        .iter()
+        .filter(|workflow| workflow.env.contains(CODESCENE_TOKEN))
+        .map(|workflow| {
+            format!(
+                "{} declares {CODESCENE_TOKEN} at workflow level, reaching \
+                 every step of every job",
+                workflow.file
+            )
+        });
+    let at_job_level = jobs(workflows)
+        .into_iter()
         .filter(|(_, job)| job.env.contains(CODESCENE_TOKEN))
         .map(|(_, job)| {
             format!(
                 "{} declares {CODESCENE_TOKEN} at job level",
                 job.coordinate()
             )
-        })
-        .collect();
-    assert!(
-        faults.is_empty(),
-        "a job-level secret is exported into every step the job runs, this \
-         repository's own build included, so a compromised dependency reaches \
-         it; declare it on the step that uses it: {faults:?}"
-    );
+        });
+    at_workflow_level.chain(at_job_level).collect()
 }
 
-#[test]
-fn markdown_is_linted_only_through_the_pinned_action() {
-    let workflows = workflows_of();
+#[rstest]
+fn markdown_is_linted_only_through_the_pinned_action(workflows: Vec<Workflow>) {
     let all = steps(&workflows);
     let pinned: Vec<_> = all
         .iter()
@@ -299,7 +382,11 @@ fn markdown_is_linted_only_through_the_pinned_action() {
     );
 }
 
-/// Return every workflow, parsed, for one contract.
-fn workflows_of() -> Vec<Workflow> {
+/// Every workflow this repository declares, parsed once per contract.
+///
+/// A fixture rather than a call repeated in six places: the parse is shared
+/// setup, and `rstest` is how this repository expresses that.
+#[fixture]
+fn workflows() -> Vec<Workflow> {
     workflow_coverage::workflows()
 }

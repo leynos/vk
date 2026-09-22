@@ -163,33 +163,68 @@ CodeScene puts a third-party network call, and the token that authenticates it,
 on the fork-facing side of the repository.
 
 What replaces the changed-line gate is the ratchet.
-`every_pull_request_coverage_lane_ratchets` requires `with-ratchet: 'true'` on
-the pull-request generator, because a lane generating coverage without it
-measures nothing it can fail on. The baseline it compares against is the one
-`coverage-main.yml` writes: caches saved on `main` are readable by every
-pull-request run.
+`every_pull_request_workflow_ratchets_its_own_coverage` requires
+`with-ratchet: 'true'` on every pull-request generator, because a lane
+generating coverage without it measures nothing it can fail on. The baseline it
+compares against is the one `coverage-main.yml` writes: caches saved on `main`
+are readable by every pull-request run.
+
+It judges each lane separately rather than pooling every generator into one
+list, since pooling lets a second lane's ratcheting generator stand in for a
+lane whose own does not ratchet. A coverage lane is derived as a workflow that
+generates coverage, not named: requiring every pull-request workflow to
+generate coverage would refuse `dependabot-automerge.yml`, which answers
+`pull_request_target` and rightly generates none.
 
 ### The publisher is derived, not named
 
-`only_the_publisher_uploads_coverage` asks two things of a workflow before it
-may upload: that it answers a push, **and** that it serves no pull request. The
-second condition is what makes the rule applicable. A repository whose single
-workflow declares both triggers would otherwise be required to upload and
-forbidden from uploading at the same time, and the contract would have no
+`only_the_publisher_uploads_coverage` asks three things of a workflow before it
+may upload: that it answers a push, that it serves no pull request, and that
+its push trigger is filtered to `main`.
+
+The second condition is what makes the rule applicable. A repository whose
+single workflow declares both triggers would otherwise be required to upload
+and forbidden from uploading at the same time, and the contract would have no
 consistent reading.
+
+The third is what makes it mean anything. `release.yml` answers a push, of
+tags, and serves no pull request, so without the branch filter it qualified as
+the publisher and could have carried a CodeScene upload with no contract
+objecting. CodeScene accepts an upload only for a branch it analyses, so that
+upload would have failed at run time instead of being refused here.
 
 `the_publisher_uploads_rather_than_checks` requires `mode: upload` explicitly
 rather than leaving the action's default in force. The default is `upload`
 today, so this changes no behaviour; it makes which mode is running readable in
 the file, and assertable.
 
-### The token sits on its step
+### The token belongs to the upload step, and to nothing else
 
-`the_codescene_token_is_declared_on_the_step_that_uses_it` refuses
-`CS_ACCESS_TOKEN` in a job's `env`. A job-level secret is exported into the
-environment of every step the job runs, this repository's own build among them,
-so a compromised build dependency can read it. Declared on the upload step, the
-blast radius is that one step.
+A secret declared at job level is exported into the environment of every step
+the job runs, this repository's own build among them, so a compromised build
+dependency can read it. At workflow level it reaches every step of every job,
+which is wider still. Declared on the upload step, the blast radius is that one
+step.
+
+`the_codescene_token_reaches_the_upload_step_and_nothing_else` makes three
+claims rather than one: the step that uploads has the token, no other step has
+it, and no wider scope declares it. The first claim is not redundant. The
+upload step is guarded on the token being non-empty, so moving the token to the
+coverage-generation step would leave a contract asking only "some step has it,
+no job has it" perfectly green while the guard went false and the publish
+silently stopped happening.
+
+### Reading the workflows
+
+The contracts reach the filesystem through a `cap_std::fs_utf8::Dir` capability
+opened once, with `camino` paths, rather than through `std::fs` and ambient
+authority. That is this repository's rule for filesystem access generally, and
+here it also means a contract cannot read outside the directory it reasons
+about.
+
+Parsing covers all three scopes GitHub exports an environment from, workflow,
+job and step, because a reader seeing only two would call a workflow clean
+while its widest scope held the secret.
 
 ### Markdown is linted through the pinned action alone
 
