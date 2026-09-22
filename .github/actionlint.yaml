@@ -4,7 +4,7 @@
 # runner has to be registered here before a lane can name it. The
 # registry is held equal to the labels actually in use by
 # `every_label_in_use_is_registered_and_every_registration_is_in_use`
-# in `tests/workflow_placement_contract.rs`: a label left here after its
+# in `tests/workflow_contracts/placement.rs`: a label left here after its
 # last lane moved away is as much a defect as an unregistered one,
 # because it is what lets a second paid provider appear without anyone
 # deciding to pay for it.

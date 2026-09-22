@@ -270,6 +270,15 @@ indexed spellings, so `secrets.cs_access_token` and
 `secrets['CS_ACCESS_TOKEN']` count, as does `toJSON(secrets)`, which serializes
 every secret at once.
 
+### The coverage workflows' token reads contents only
+
+Both coverage workflows declare `permissions: contents: read` at workflow
+level. No step in them writes to GitHub, and the shared actions hand
+`github.token` to the installers they run, so a wider default would be exposed
+to them for no use. `every_coverage_workflow_reads_contents_only` holds every
+workflow that generates coverage to exactly that block, and refuses a job-level
+`permissions`, which replaces the workflow's rather than narrowing it.
+
 ### Reading the workflows
 
 The reader parses with `serde_norway`, the maintained fork of `serde_yaml` that
@@ -314,15 +323,19 @@ object's SHA is immutable, so the old pin was not unsafe, but it is not a
 commit, and the estate's rule asks for the commit the tag points at. The shell
 direction matters because a `run:` invocation takes whatever linter version the
 runner image carries, which is not a pin at all.
+
 ## CI lanes: where each one runs and what it may bill
 
 This repository's pull-request, push and tag lanes run on Ubicloud
 (`ubicloud-standard-2`) and are billed per minute. Its manual and automation
 lanes stay on GitHub-hosted runners, where minutes are free for a public
-repository. `tests/workflow_placement_contract.rs` holds all of it, deriving
+repository. `tests/workflow_contracts/placement.rs` holds all of it, deriving
 what it asserts from each workflow's own triggers rather than from a list of
 job names, so adding a lane asks the placement question again instead of
-slipping past a contract keyed on names.
+slipping past a contract keyed on names. It is a module of the same
+`tests/workflow_contracts.rs` binary as the coverage contracts and reads the
+workflows through the same fallible reader; the actionlint registry is read
+through a capability for `.github` opened in its own fixture.
 
 ### The fork fallback
 
@@ -365,7 +378,7 @@ from the last three green pull-request runs and the last green push run:
 | `unstable-rest-resolve` | 2         | 238, 291, 440 |
 | `coverage-upload`       | 3         | 184           |
 
-_Table 1: Measured queue and run times per job before the move._
+*Table 1: Measured queue and run times per job before the move.*
 
 Two things follow. There is no queueing to relieve here, so the case for the
 move is consistency and the fork-fallback shape rather than contention. And the
@@ -406,22 +419,23 @@ fallback, so requiring it to name the paid label outright would contradict the
 fallback rule. No workflow here declares both today, which is why the predicate
 has to say so now rather than when one is added.
 
-### Properties, and what is not one
+### Rules tested one break at a time, and properties
 
-Most of these contracts are claims about five checked-in files. Generating
-arbitrary workflows would not make them stronger, because their subject is this
-repository's configuration rather than the space of possible configurations.
+`tests/workflow_contracts/placement_tests.rs` breaks each placement rule one
+way at a time against constructed workflows: a bare paid label on a
+pull-request lane, a fallback on the wrong field or with the wrong arm, a trunk
+lane reverted to a hosted runner, a paid lane with no ceiling or no measured
+bounds, and a `runs-on` of no accepted shape.
 
-Two readings are different, and `parser_properties` states them as properties.
-`arms_of` parses an expression a maintainer writes by hand, so it is driven
-over arbitrary arm counts, orders and surrounding whitespace, and over a
-malformed expression whose final quote is missing: a reader inventing an arm
-from the dangling run would let a mistyped fallback satisfy the fork-fallback
-contract. `events_of` reads a trigger block whose YAML shape varies between
-mapping, sequence and scalar, with the `on` key quoted or bare. A reader
-understanding one shape would report the other workflows as answering nothing,
-and every contract keyed on a trigger would then pass over an empty set while
-appearing to assert something.
+Four readings take input a maintainer writes by hand, so they are stated as
+`proptest` properties. `arms_of` is driven over arbitrary arm counts, orders
+and surrounding whitespace, and over a malformed expression whose final quote
+is missing: a reader inventing an arm from the dangling run would let a
+mistyped fallback satisfy the fork-fallback contract. The labels in use are
+compared with a reference model over generated jobs written in every `runs-on`
+form, some delegating. And each measured ceiling is checked to pass exactly
+within its band. Trigger shapes are covered by the shared reader's own cases
+and properties.
 
 ### The actionlint registry
 

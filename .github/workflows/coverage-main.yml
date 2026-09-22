@@ -31,6 +31,12 @@ concurrency:
   group: coverage-main-${{ github.ref }}
   cancel-in-progress: false
 
+# The workflow token reads the repository and nothing more. No step here
+# writes to GitHub, and the shared actions pass `github.token` on to
+# installers, so a wider default would be exposed to them for no use.
+permissions:
+  contents: read
+
 jobs:
   coverage-upload:
     runs-on: ubicloud-standard-2

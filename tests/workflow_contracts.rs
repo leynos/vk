@@ -1,9 +1,11 @@
 //! Contracts over this repository's own workflow files.
 //!
-//! Who may contact CodeScene, who owns the coverage upload, and how Markdown
-//! is linted. None of these is visible in a green run: a pull-request lane
-//! that reaches CodeScene, a token exported into a whole job, or a linter
-//! taken from the runner image all pass CI while breaking the rule.
+//! Who may contact CodeScene, who owns the coverage upload, where each lane
+//! runs and what it may bill, and how Markdown is linted. None of these is
+//! visible in a green run: a pull-request lane that reaches CodeScene, a token
+//! exported into a whole job, a lane moved back to a runner nobody pays for,
+//! or a linter taken from the runner image all pass CI while breaking the
+//! rule.
 //!
 //! Every contract derives its subject from the workflows' own triggers and
 //! calls rather than from a list of file names. A contract keyed on names
@@ -17,6 +19,10 @@
 mod codescene;
 #[path = "workflow_contracts/markdown_lint.rs"]
 mod markdown_lint;
+#[path = "workflow_contracts/placement.rs"]
+mod placement;
+#[path = "workflow_contracts/placement_tests.rs"]
+mod placement_tests;
 #[path = "workflow_contracts/properties.rs"]
 mod properties;
 #[path = "workflow_contracts/publisher.rs"]
@@ -27,6 +33,8 @@ mod pull_request_lanes;
 mod reader;
 #[path = "workflow_contracts/reader_tests.rs"]
 mod reader_tests;
+#[path = "workflow_contracts/registry.rs"]
+mod registry;
 #[path = "workflow_contracts/rule_tests.rs"]
 mod rule_tests;
 

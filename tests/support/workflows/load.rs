@@ -48,6 +48,12 @@ pub(crate) enum WorkflowError {
     /// The directory holds no workflow files at all.
     #[error("the workflow directory declares no workflows")]
     Empty,
+    /// A job's `runs-on` is none of the shapes GitHub accepts.
+    #[error("{job} declares a runs-on that is not a string, sequence or mapping")]
+    RunsOn {
+        /// The job's coordinate.
+        job: String,
+    },
     /// A job calls a workflow in this repository that does not exist.
     #[error("{caller} calls {target}, which is not a workflow in this repository")]
     UnresolvedCall {

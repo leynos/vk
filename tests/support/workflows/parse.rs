@@ -10,6 +10,7 @@ use serde_norway::Value;
 
 use super::load::WorkflowError;
 use super::model::{Job, Pair, Step, Workflow};
+use super::runner::selection_of;
 
 /// Return one workflow, parsed from its text.
 ///
@@ -26,8 +27,9 @@ use super::model::{Job, Pair, Step, Workflow};
 /// # Errors
 ///
 /// Returns [`WorkflowError::Parse`] for text that is not YAML, or that
-/// repeats a key, and [`WorkflowError::Shape`] for YAML that is not a
-/// mapping.
+/// repeats a key, [`WorkflowError::Shape`] for YAML that is not a mapping,
+/// and [`WorkflowError::RunsOn`] for a job whose `runs-on` has no shape
+/// GitHub accepts.
 pub(crate) fn parse_workflow(file: &str, text: &str) -> Result<Workflow, WorkflowError> {
     let document: Value = serde_norway::from_str(text).map_err(|source| WorkflowError::Parse {
         file: file.to_owned(),
@@ -46,7 +48,7 @@ pub(crate) fn parse_workflow(file: &str, text: &str) -> Result<Workflow, Workflo
         push_branches: names_of(push.and_then(|filter| filter.get("branches"))),
         push_tags: names_of(push.and_then(|filter| filter.get("tags"))),
         cancels_in_progress: cancels_in_progress(document.get("concurrency")),
-        jobs: jobs_of(file, &document),
+        jobs: jobs_of(file, &document)?,
         raw: document,
     })
 }
@@ -151,23 +153,32 @@ fn steps_of(job: &Value) -> Vec<Step> {
 /// Return one job, read from its entry in the `jobs` mapping.
 ///
 /// `None` for an entry whose key is not text, which GitHub would refuse.
-fn job_of(file: &str, (id, job): (&Value, &Value)) -> Option<Job> {
-    Some(Job {
+fn job_of(file: &str, (id, job): (&Value, &Value)) -> Option<Result<Job, WorkflowError>> {
+    let id = id.as_str()?;
+    let Some(runs_on) = selection_of(job) else {
+        return Some(Err(WorkflowError::RunsOn {
+            job: format!("{file}:{id}"),
+        }));
+    };
+    Some(Ok(Job {
         workflow: file.to_owned(),
-        id: id.as_str()?.to_owned(),
+        id: id.to_owned(),
+        name: text_at(job.get("name")),
+        runs_on,
+        timeout_minutes: job.get("timeout-minutes").and_then(Value::as_u64),
         env: pairs_of(job.get("env")),
         calls: text_at(job.get("uses")),
         inherits_secrets: job.get("secrets").and_then(Value::as_str) == Some("inherit"),
         cancels_in_progress: cancels_in_progress(job.get("concurrency")),
         steps: steps_of(job),
         raw: job.clone(),
-    })
+    }))
 }
 
 /// Return every job a workflow declares.
-fn jobs_of(file: &str, document: &Value) -> Vec<Job> {
+fn jobs_of(file: &str, document: &Value) -> Result<Vec<Job>, WorkflowError> {
     let Some(Value::Mapping(map)) = document.get("jobs") else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     map.iter().filter_map(|entry| job_of(file, entry)).collect()
 }
