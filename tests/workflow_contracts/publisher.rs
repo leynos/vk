@@ -15,6 +15,7 @@ use crate::codescene::{
     CODESCENE_TOKEN, Operation, REF_GUARD, TOKEN_GUARD, TOKEN_INPUT, TOKEN_SECRET, TOKEN_SITE,
     calls_codescene, holds_token, is_publisher, operation_of,
 };
+use crate::pull_request_lanes::generators_of;
 use crate::reader::{Condition, Job, Step, Workflow, WorkflowError, jobs, steps};
 
 /// Return every step that reaches CodeScene, with what it asks.
@@ -184,6 +185,46 @@ pub(crate) fn concurrency_faults(workflows: &[Workflow]) -> Vec<String> {
     at_workflow.chain(at_job).collect()
 }
 
+/// Return why one workflow's token is wider than read-only contents.
+///
+/// Declared once at workflow level, and widened by no job: a job-level
+/// `permissions` block replaces the workflow's rather than narrowing it.
+fn permissions_fault(workflow: &Workflow) -> Option<String> {
+    let declared = workflow.raw.get("permissions");
+    let is_read_only = declared
+        .and_then(|block| block.as_mapping())
+        .is_some_and(|block| {
+            block.len() == 1
+                && block.get("contents").and_then(|scope| scope.as_str()) == Some("read")
+        });
+    let widening: Vec<&str> = workflow
+        .jobs
+        .iter()
+        .filter(|job| job.raw.get("permissions").is_some())
+        .map(|job| job.id.as_str())
+        .collect();
+    (!is_read_only || !widening.is_empty()).then(|| {
+        format!(
+            "{} declares {declared:?} at workflow level, and jobs {widening:?} \
+             declare their own",
+            workflow.file
+        )
+    })
+}
+
+/// Return every coverage workflow, and why each one's token is too wide.
+pub(crate) fn permissions_faults(workflows: &[Workflow]) -> (usize, Vec<String>) {
+    let coverage: Vec<&Workflow> = workflows
+        .iter()
+        .filter(|workflow| !generators_of(workflow).is_empty())
+        .collect();
+    let faults = coverage
+        .iter()
+        .filter_map(|workflow| permissions_fault(workflow))
+        .collect();
+    (coverage.len(), faults)
+}
+
 #[rstest]
 fn only_the_publisher_uploads_coverage(
     repository: Result<Vec<Workflow>, WorkflowError>,
@@ -257,6 +298,25 @@ fn the_publisher_queues_rather_than_cancels(
         faults.is_empty(),
         "a cancelled publisher abandons its upload and its ratchet baseline: \
          {faults:?}"
+    );
+    Ok(())
+}
+
+#[rstest]
+fn every_coverage_workflow_reads_contents_only(
+    repository: Result<Vec<Workflow>, WorkflowError>,
+) -> Result<(), WorkflowError> {
+    let (coverage, faults) = permissions_faults(&repository?);
+    assert!(
+        coverage >= 2,
+        "the pull-request lane and the publisher both generate coverage, or \
+         this contract has lost one of its subjects"
+    );
+    assert!(
+        faults.is_empty(),
+        "a coverage workflow's token reads contents and nothing more; these \
+         lanes write nothing to GitHub, and the shared actions hand the token \
+         to installers: {faults:?}"
     );
     Ok(())
 }

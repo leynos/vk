@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use serde_norway::Value;
 
 use super::expression::{Scope, Secret};
+use super::runner::RunnerSelection;
 
 /// A name and the value it is set to, both rendered as text.
 pub(crate) type Pair = (String, String);
@@ -71,8 +72,15 @@ impl Step {
 pub(crate) struct Job {
     /// The file the job is declared in.
     pub(crate) workflow: String,
-    /// The job's identifier.
+    /// The job's identifier, which is what a required context is derived
+    /// from when the job sets no name.
     pub(crate) id: String,
+    /// The job's display name, when it sets one.
+    pub(crate) name: Option<String>,
+    /// How the job chooses its runner.
+    pub(crate) runs_on: RunnerSelection,
+    /// The declared ceiling, or `None` when the job inherits GitHub's default.
+    pub(crate) timeout_minutes: Option<u64>,
     /// The environment the job exports into every one of its steps.
     pub(crate) env: Vec<Pair>,
     /// The reusable workflow the job calls, when it calls one.
@@ -92,6 +100,16 @@ impl Job {
     /// Return the job's coordinate, for a message that names the fault.
     pub(crate) fn coordinate(&self) -> String {
         format!("{}:{}", self.workflow, self.id)
+    }
+
+    /// Return the text a required check's context is derived from.
+    ///
+    /// GitHub uses the job's `name` when it declares one and its identifier
+    /// otherwise, so a contract reading only the identifier would miss the
+    /// shape that actually causes the fault: a display name interpolating the
+    /// runner.
+    pub(crate) fn context_source(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.id)
     }
 
     /// Return whether the job exports an environment variable named `key`.

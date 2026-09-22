@@ -270,6 +270,15 @@ indexed spellings, so `secrets.cs_access_token` and
 `secrets['CS_ACCESS_TOKEN']` count, as does `toJSON(secrets)`, which serializes
 every secret at once.
 
+### The coverage workflows' token reads contents only
+
+Both coverage workflows declare `permissions: contents: read` at workflow
+level. No step in them writes to GitHub, and the shared actions hand
+`github.token` to the installers they run, so a wider default would be exposed
+to them for no use. `every_coverage_workflow_reads_contents_only` holds every
+workflow that generates coverage to exactly that block, and refuses a job-level
+`permissions`, which replaces the workflow's rather than narrowing it.
+
 ### Reading the workflows
 
 The reader parses with `serde_norway`, the maintained fork of `serde_yaml` that
@@ -314,6 +323,161 @@ object's SHA is immutable, so the old pin was not unsafe, but it is not a
 commit, and the estate's rule asks for the commit the tag points at. The shell
 direction matters because a `run:` invocation takes whatever linter version the
 runner image carries, which is not a pin at all.
+
+## CI lanes: where each one runs and what it may bill
+
+This repository's pull-request, push and tag lanes run on Ubicloud
+(`ubicloud-standard-2`) and are billed per minute. Its manual and automation
+lanes stay on GitHub-hosted runners, where minutes are free for a public
+repository. `tests/workflow_contracts/placement.rs` holds all of it, deriving
+what it asserts from each workflow's own triggers rather than from a list of
+job names, so adding a lane asks the placement question again instead of
+slipping past a contract keyed on names. It is a module of the same
+`tests/workflow_contracts.rs` binary as the coverage contracts and reads the
+workflows through the same fallible reader; the actionlint registry is read
+through a capability for `.github` opened in its own fixture.
+
+### The fork fallback
+
+A pull request from a fork cannot obtain a paid runner, so a pull-request lane
+naming one outright would leave every fork contributor's pull request with no
+runner at all. Both lanes in `coverage.yml` therefore choose:
+
+```yaml
+    runs-on: >-
+      ${{ github.event.pull_request.head.repo.fork
+      && 'ubuntu-latest' || 'ubicloud-standard-2' }}
+```
+
+The continuation sits at the same indent as the first line of the scalar. A
+continuation indented one level deeper keeps its line break, and GitHub
+evaluates the broken value regardless, so a green run is not evidence that the
+expression is well-formed. `no_runner_selection_carries_an_embedded_line_break`
+reads every `runs-on` from the parsed document and refuses one containing a
+break, which is the only way to tell the two apart.
+
+`every_pull_request_lane_falls_back_for_a_fork` checks three separate things:
+that the lane chooses rather than naming a label outright, that it chooses on
+the fork field rather than on some other field that happens to read similarly,
+and that the two arms are exactly the hosted label and the paid one. Reading
+the arms rather than matching the whole expression against a pattern means a
+lane that is correctly placed but merely wrapped differently still passes.
+
+### Ceilings
+
+Every paid lane declares `timeout-minutes`. Without one a job inherits GitHub's
+six-hour default, which costs nothing on a hosted runner and is the expensive
+failure mode on a per-minute one.
+
+The values are sized from measured work rather than chosen. Taken on 2026-09-17
+from the last three green pull-request runs and the last green push run:
+
+| Job                     | Queue (s) | Run (s)       |
+| ----------------------- | --------- | ------------- |
+| `build-test`            | 2         | 237, 302, 420 |
+| `unstable-rest-resolve` | 2         | 238, 291, 440 |
+| `coverage-upload`       | 3         | 184           |
+
+*Table 1: Measured queue and run times per job before the move.*
+
+Two things follow. There is no queueing to relieve here, so the case for the
+move is consistency and the fork-fallback shape rather than contention. And the
+ceilings are sized against those figures doubled, because these lanes move from
+four vCPUs to two: a ceiling sized from the hosted figure would cancel an
+ordinary run rather than a hung one.
+`every_paid_lane_declares_a_bounded_ceiling` holds each lane inside a measured
+band, and refuses a paid lane it has no measurement for at all.
+
+### Every form `runs-on` can take
+
+GitHub accepts `runs-on` as a scalar, as a sequence of labels, or as a `group`/
+`labels` mapping. The reader modelled only the scalar and treated everything
+else as a job that declares no runner, which meant the other two forms were
+invisible to every contract here rather than merely unhandled. A lane written
+`runs-on: [self-hosted, ubicloud-standard-8]` names a runner, can name a paid
+or unregistered one, and was skipped in silence by the placement, ceiling and
+registry contracts alike.
+
+All three forms are now modelled, and a shape GitHub does not accept is refused
+loudly rather than read as an absent runner. `Delegated` now means one thing
+only: the key is not there, because the job calls a reusable workflow.
+
+### Trunk and tag lanes
+
+`every_trunk_and_tag_lane_runs_on_the_paid_runner` requires every lane in a
+push or tag workflow to name `ubicloud-standard-2` outright. Without it the
+suite had a hole a reviewer found: reverting `coverage-main.yml` to
+`ubuntu-latest` left all six other contracts passing. The ceiling contract
+inspects only lanes already on the paid runner, so a lane leaving that set
+leaves its scope; and the registry stays balanced because the pull-request
+lanes keep the label in use. A contract suite can be individually sound and
+still leave a change undetected.
+
+A runner group with no labels, `runs-on: { group: some-group }`, is valid
+GitHub Actions syntax and names a runner, but it proves nothing about which
+label that runner carries. The contract therefore requires a trunk or tag lane
+to name at least one label, and every label it names to be the paid one; a
+group-only lane is refused rather than passing with nothing to check. A group's
+own name is never read as a label, so it cannot satisfy the registry either.
+
+The predicate asks two things before a workflow counts: that it answers a push,
+**and** that it serves no pull request. A workflow declaring both owes the fork
+fallback, so requiring it to name the paid label outright would contradict the
+fallback rule. No workflow here declares both today, which is why the predicate
+has to say so now rather than when one is added.
+
+### Rules tested one break at a time, and properties
+
+`tests/workflow_contracts/placement_tests.rs` breaks each placement rule one
+way at a time against constructed workflows: a bare paid label on a
+pull-request lane, a fallback on the wrong field or with the wrong arm, a trunk
+lane reverted to a hosted runner or naming only a runner group, a paid lane
+with no ceiling or no measured bounds, and a `runs-on` of no accepted shape.
+
+The readings that take input a maintainer writes by hand are stated as
+`proptest` properties. `arms_of` is driven over arbitrary arm counts, orders
+and surrounding whitespace, and over a malformed expression whose final quote
+is missing: a reader inventing an arm from the dangling run would let a
+mistyped fallback satisfy the fork-fallback contract. The labels in use are
+compared with a reference model over generated jobs written in every `runs-on`
+form, group-only mappings and delegating jobs included, and so is the trunk
+rule. And each measured ceiling is checked to pass exactly within its band.
+Trigger shapes are covered by the shared reader's own cases and properties.
+
+### The actionlint registry
+
+actionlint rejects a `runs-on` label it does not know, so `ubicloud-standard-2`
+is registered in `.github/actionlint.yaml`. The contract holds the registry and
+the labels in use **equal in both directions**.
+
+The second direction is the substantive one. A subset assertion catches an
+unregistered label, which actionlint would have caught anyway, but it says
+nothing about a registration left behind after its lane moved away, and that
+stale entry is what lets a second paid provider's label appear in a workflow
+without anyone deciding to pay for it. The labels in use are derived from both
+arms of a conditional and from every job, minus a frozen set of GitHub-hosted
+labels. The set is frozen rather than derived from a prefix, because a prefix
+test would let a second provider's labels pass as hosted and so escape the
+registry question entirely, which is the defect being guarded against.
+
+Jobs that call a reusable workflow are exempt: they declare no `runs-on`, and
+the label is the called workflow's business rather than this repository's.
+
+### What stays hosted
+
+`delayed-pr-comment.yml` answers only `workflow_dispatch`, and
+`dependabot-automerge.yml` answers `pull_request_target` and
+`workflow_dispatch`. Neither is a pull-request nor a push lane, so
+`api_bound_lanes_stay_on_hosted_runners` requires them to stay where minutes
+are free.
+
+### Job names
+
+`no_required_context_interpolates_its_runner` refuses an expression in
+whichever of the two a required context is derived from: a job's `name` when it
+declares one, and its identifier otherwise. Either one carrying the runner
+label changes the context when the label does, and the ruleset then requires a
+context that nothing reports.
 
 ## Documentation maintenance
 

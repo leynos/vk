@@ -13,9 +13,11 @@ mod expression;
 mod load;
 mod model;
 mod parse;
+mod runner;
 
 pub(crate) use closure::{local_call_target, pull_request_closure};
 pub(crate) use expression::{Condition, Scope, Secret};
 pub(crate) use load::{WorkflowError, load};
 pub(crate) use model::{Job, Step, Workflow, jobs, steps};
 pub(crate) use parse::parse_workflow;
+pub(crate) use runner::{RunnerSelection, arms_of};

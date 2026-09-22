@@ -26,3 +26,7 @@ target/
 *.swp
 *.swo
 *~
+
+# Proptest records a failing seed here. The failures this file would hold
+# came from mutation runs that were reverted, so it records nothing real.
+tests/*.proptest-regressions

@@ -84,7 +84,7 @@ pub(crate) fn reach_faults(workflows: &[Workflow]) -> Result<Vec<String>, Workfl
 }
 
 /// Return every coverage-generating step of one workflow, with its job.
-fn generators_of(workflow: &Workflow) -> Vec<(&Job, &Step)> {
+pub(crate) fn generators_of(workflow: &Workflow) -> Vec<(&Job, &Step)> {
     workflow
         .jobs
         .iter()
