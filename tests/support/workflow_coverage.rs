@@ -141,14 +141,32 @@ impl Workflow {
     }
 }
 
-/// Return the names a mapping declares, or nothing when it is not one.
-fn keys_of(node: Option<&Value>) -> BTreeSet<String> {
+/// Return the names a node spells, whichever of the three shapes it takes.
+///
+/// GitHub writes a set of names as a mapping, as a sequence or as a bare
+/// scalar depending on the key and the author, and this repository's
+/// workflows use all three. One reader rather than one per key, so a shape
+/// handled in one place cannot be forgotten in another: a reader that
+/// understood only mappings would report a branch filter written
+/// `branches: main` as no filter at all.
+fn names_of(node: Option<&Value>) -> BTreeSet<String> {
     match node {
+        // A mapping contributes its keys: this is how `env` and a trigger
+        // block with per-event configuration are written.
         Some(Value::Mapping(map)) => map
             .keys()
             .filter_map(Value::as_str)
             .map(str::to_owned)
             .collect(),
+        // A sequence contributes its items: `on: [push, pull_request]`, or a
+        // branch filter.
+        Some(Value::Sequence(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        // A bare scalar is the single name it spells.
+        Some(Value::String(one)) => BTreeSet::from([one.clone()]),
         _ => BTreeSet::new(),
     }
 }
@@ -188,36 +206,27 @@ fn steps_of(job: &Value) -> Vec<Step> {
             uses: step.get("uses").and_then(Value::as_str).map(str::to_owned),
             run: step.get("run").and_then(Value::as_str).map(str::to_owned),
             with: inputs_of(step.get("with")),
-            env: keys_of(step.get("env")),
+            env: names_of(step.get("env")),
         })
         .collect()
 }
 
 /// Return the events a workflow answers.
+fn events_of(document: &Value) -> BTreeSet<String> {
+    names_of(triggers_of(document))
+}
+
+/// Return a workflow's trigger block, under either spelling of the key.
 ///
 /// `on` is looked up as a string and as the boolean it becomes under a YAML
 /// 1.1 reader, because `on` is a boolean key in that schema and this
 /// repository quotes the key in one workflow and not in the others. A reader
 /// finding neither would report every workflow as answering nothing, and
-/// every assertion below would then pass over an empty set.
-fn events_of(document: &Value) -> BTreeSet<String> {
-    let triggers = document
+/// every assertion keyed on a trigger would pass over an empty set.
+fn triggers_of(document: &Value) -> Option<&Value> {
+    document
         .get("on")
-        .or_else(|| document.get(Value::Bool(true)));
-    match triggers {
-        Some(Value::Mapping(map)) => map
-            .keys()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect(),
-        Some(Value::Sequence(items)) => items
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect(),
-        Some(Value::String(one)) => BTreeSet::from([one.clone()]),
-        _ => BTreeSet::new(),
-    }
+        .or_else(|| document.get(Value::Bool(true)))
 }
 
 /// Return the branches a workflow's `push` trigger is filtered to.
@@ -227,21 +236,11 @@ fn events_of(document: &Value) -> BTreeSet<String> {
 /// restricted to the published one, and the publisher rule wants the
 /// restriction stated rather than inferred.
 fn push_branches_of(document: &Value) -> BTreeSet<String> {
-    let triggers = document
-        .get("on")
-        .or_else(|| document.get(Value::Bool(true)));
-    match triggers
-        .and_then(|on| on.get("push"))
-        .and_then(|push| push.get("branches"))
-    {
-        Some(Value::Sequence(items)) => items
-            .iter()
-            .filter_map(Value::as_str)
-            .map(str::to_owned)
-            .collect(),
-        Some(Value::String(one)) => BTreeSet::from([one.clone()]),
-        _ => BTreeSet::new(),
-    }
+    names_of(
+        triggers_of(document)
+            .and_then(|on| on.get("push"))
+            .and_then(|push| push.get("branches")),
+    )
 }
 
 /// Return a capability for the directory holding this repository's workflows.
@@ -301,7 +300,7 @@ fn workflow_at(directory: &Dir, file: &str) -> Workflow {
             .map(|(id, job)| Job {
                 workflow: file.to_owned(),
                 id: id.to_owned(),
-                env: keys_of(job.get("env")),
+                env: names_of(job.get("env")),
                 steps: steps_of(job),
             })
             .collect(),
@@ -310,7 +309,7 @@ fn workflow_at(directory: &Dir, file: &str) -> Workflow {
     Workflow {
         file: file.to_owned(),
         events: events_of(&document),
-        env: keys_of(document.get("env")),
+        env: names_of(document.get("env")),
         push_branches: push_branches_of(&document),
         jobs,
     }
