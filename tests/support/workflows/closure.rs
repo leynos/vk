@@ -7,21 +7,40 @@
 //! every secret the caller holds. Every pull-request rule therefore runs over
 //! the closure computed here, not over the triggered set.
 
-use super::expression::local_call_target;
 use super::load::WorkflowError;
-use super::model::Workflow;
+use super::model::{Job, Workflow};
 
-/// Return the workflow a job's local call names, or why it names none.
+/// The directory, relative to the repository root, that holds its workflows.
+const WORKFLOW_DIRECTORY: &str = ".github/workflows/";
+
+/// Return the workflow file a job-level `uses:` names in this repository.
+///
+/// A local call is recognized by shape rather than by a list of prefixes:
+/// strip a leading `./`, then ask whether the rest is a path under the
+/// workflow directory. A call into another repository starts with its owner
+/// and so never matches.
+///
+/// ```ignore
+/// assert_eq!(local_call_target("./.github/workflows/probe.yml"), Some("probe.yml"));
+/// assert_eq!(local_call_target("leynos/shared-actions/.github/workflows/x.yml@abc"), None);
+/// ```
+pub(crate) fn local_call_target(uses: &str) -> Option<&str> {
+    uses.strip_prefix("./")
+        .unwrap_or(uses)
+        .strip_prefix(WORKFLOW_DIRECTORY)
+}
+
+/// Return the workflow `job` calls locally, or why it names none.
 fn callee<'a>(
     workflows: &'a [Workflow],
-    caller: String,
+    job: &Job,
     target: &str,
 ) -> Result<&'a Workflow, WorkflowError> {
     workflows
         .iter()
         .find(|workflow| workflow.file == target)
         .ok_or_else(|| WorkflowError::UnresolvedCall {
-            caller,
+            caller: job.coordinate(),
             target: target.to_owned(),
         })
 }
@@ -36,7 +55,7 @@ fn local_callees<'a>(
         .iter()
         .filter_map(|job| {
             let target = job.calls.as_deref().and_then(local_call_target)?;
-            Some(callee(workflows, job.coordinate(), target))
+            Some(callee(workflows, job, target))
         })
         .collect()
 }

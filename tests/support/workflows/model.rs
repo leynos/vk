@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use serde_norway::Value;
 
-use super::expression::secret_sites;
+use super::expression::{Scope, Secret};
 
 /// A name and the value it is set to, both rendered as text.
 pub(crate) type Pair = (String, String);
@@ -53,8 +53,8 @@ impl Step {
     }
 
     /// Return every key path within the step that references `secret`.
-    pub(crate) fn secret_sites(&self, secret: &str) -> Vec<String> {
-        secret_sites(&self.raw, secret, None)
+    pub(crate) fn secret_sites(&self, secret: Secret) -> Vec<String> {
+        secret.sites_in(&self.raw, Scope::Whole)
     }
 
     /// Return how the step is identified in a message.
@@ -103,8 +103,8 @@ impl Job {
     ///
     /// The steps are left to [`Step::secret_sites`], so a site is reported
     /// once, against the narrowest scope that holds it.
-    pub(crate) fn secret_sites(&self, secret: &str) -> Vec<String> {
-        secret_sites(&self.raw, secret, Some("steps"))
+    pub(crate) fn secret_sites(&self, secret: Secret) -> Vec<String> {
+        secret.sites_in(&self.raw, Scope::Without("steps"))
     }
 }
 
@@ -156,8 +156,8 @@ impl Workflow {
 
     /// Return every key path outside the workflow's jobs that references
     /// `secret`.
-    pub(crate) fn secret_sites(&self, secret: &str) -> Vec<String> {
-        secret_sites(&self.raw, secret, Some("jobs"))
+    pub(crate) fn secret_sites(&self, secret: Secret) -> Vec<String> {
+        secret.sites_in(&self.raw, Scope::Without("jobs"))
     }
 }
 

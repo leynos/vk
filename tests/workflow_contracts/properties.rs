@@ -10,8 +10,9 @@ use std::collections::BTreeSet;
 
 use proptest::prelude::*;
 
+use crate::codescene::TOKEN_SECRET;
 use crate::codescene::is_publisher;
-use crate::reader::{conjuncts, parse_workflow, references_secret};
+use crate::reader::{Condition, parse_workflow};
 
 /// How a trigger block is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,9 +132,9 @@ proptest! {
     ) {
         let condition = picks.join(&format!("{padding}&&{padding}"));
         let expected: Vec<String> = picks.iter().map(|atom| (*atom).to_owned()).collect();
-        prop_assert_eq!(conjuncts(&condition), Ok(expected));
+        prop_assert_eq!(Condition(&condition).conjuncts(), Ok(expected));
         let widened = format!("{condition} || github.event_name == 'workflow_dispatch'");
-        prop_assert!(conjuncts(&widened).is_err());
+        prop_assert!(Condition(&widened).conjuncts().is_err());
     }
 
     #[test]
@@ -148,8 +149,8 @@ proptest! {
             _ => format!("secrets[\"{name}\"]"),
         };
         let expression = format!("${{{{ {reference} }}}}");
-        prop_assert!(references_secret(&expression, "CS_ACCESS_TOKEN"), "{}", expression);
+        prop_assert!(TOKEN_SECRET.is_read_by(&expression), "{}", expression);
         let longer = format!("${{{{ secrets.{name}{suffix} }}}}");
-        prop_assert!(!references_secret(&longer, "CS_ACCESS_TOKEN"), "{}", longer);
+        prop_assert!(!TOKEN_SECRET.is_read_by(&longer), "{}", longer);
     }
 }

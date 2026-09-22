@@ -11,9 +11,10 @@ use cap_std::ambient_authority;
 use cap_std::fs_utf8::Dir;
 use rstest::rstest;
 
+use crate::codescene::TOKEN_SECRET;
 use crate::reader::{
-    WorkflowError, conjuncts, load, local_call_target, parse_workflow, pull_request_closure,
-    references_secret,
+    Condition, Scope, Secret, WorkflowError, load, local_call_target, parse_workflow,
+    pull_request_closure,
 };
 
 /// Return a set of names, for comparing against a parsed one.
@@ -114,7 +115,7 @@ fn cancel_in_progress_is_read_conservatively(
 #[case::longer_name("${{ secrets.CS_ACCESS_TOKEN_OLD }}", false)]
 #[case::environment("${{ env.CS_ACCESS_TOKEN }}", false)]
 fn secret_references_are_read_in_every_spelling(#[case] text: &str, #[case] expected: bool) {
-    assert_eq!(references_secret(text, "CS_ACCESS_TOKEN"), expected);
+    assert_eq!(TOKEN_SECRET.is_read_by(text), expected);
 }
 
 #[test]
@@ -127,9 +128,23 @@ fn secret_sites_are_reported_against_the_narrowest_scope() -> Result<(), Workflo
     let workflow = parse_workflow("x.yml", text)?;
     let job = workflow.jobs.first().expect("the job is parsed");
     let step = job.steps.first().expect("the step is parsed");
-    assert_eq!(workflow.secret_sites("T"), vec!["env.A".to_owned()]);
-    assert_eq!(job.secret_sites("T"), vec!["env.B".to_owned()]);
-    assert_eq!(step.secret_sites("T"), vec!["env.C".to_owned()]);
+    let secret = Secret("T");
+    assert_eq!(workflow.secret_sites(secret), vec!["env.A".to_owned()]);
+    assert_eq!(job.secret_sites(secret), vec!["env.B".to_owned()]);
+    assert_eq!(step.secret_sites(secret), vec!["env.C".to_owned()]);
+    Ok(())
+}
+
+#[test]
+fn secret_sites_inside_a_sequence_are_reported_by_index() -> Result<(), serde_norway::Error> {
+    // A sequence is walked item by item, so a secret passed as the second of
+    // a job's service options is found, and its path says which item it is.
+    let node: serde_norway::Value =
+        serde_norway::from_str("options: ['--rm', '${{ secrets.T }}']\n")?;
+    assert_eq!(
+        Secret("T").sites_in(&node, Scope::Whole),
+        vec!["options[1]".to_owned()]
+    );
     Ok(())
 }
 
@@ -142,7 +157,7 @@ fn conditions_split_on_conjunction_and_refuse_disjunction(
     #[case] condition: &str,
     #[case] expected: Result<Vec<&str>, ()>,
 ) {
-    let parts = conjuncts(condition).map_err(|_| ());
+    let parts = Condition(condition).conjuncts().map_err(|_| ());
     let expected = expected.map(|parts| parts.into_iter().map(str::to_owned).collect::<Vec<_>>());
     assert_eq!(parts, expected);
 }

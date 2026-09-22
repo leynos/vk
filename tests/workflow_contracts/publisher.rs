@@ -12,10 +12,10 @@ use rstest::rstest;
 use crate::repository;
 
 use crate::codescene::{
-    CODESCENE_TOKEN, Operation, REF_GUARD, TOKEN_GUARD, TOKEN_INPUT, TOKEN_SITE, calls_codescene,
-    holds_token, is_publisher, operation_of,
+    CODESCENE_TOKEN, Operation, REF_GUARD, TOKEN_GUARD, TOKEN_INPUT, TOKEN_SECRET, TOKEN_SITE,
+    calls_codescene, holds_token, is_publisher, operation_of,
 };
-use crate::reader::{Job, Step, Workflow, WorkflowError, conjuncts, jobs, steps};
+use crate::reader::{Condition, Job, Step, Workflow, WorkflowError, jobs, steps};
 
 /// Return every step that reaches CodeScene, with what it asks.
 fn contacts(workflows: &[Workflow]) -> Vec<(&Workflow, &Job, &Step, Operation)> {
@@ -79,7 +79,7 @@ fn uploads(workflows: &[Workflow]) -> Vec<(&Job, &Step)> {
 /// upload step must.
 fn step_token_fault(job: &Job, step: &Step) -> Option<String> {
     let is_upload = operation_of(step) == Some(Operation::Upload);
-    let sites = step.secret_sites(CODESCENE_TOKEN);
+    let sites = step.secret_sites(TOKEN_SECRET);
     let expected = if is_upload {
         vec![TOKEN_SITE.to_owned()]
     } else {
@@ -102,14 +102,14 @@ fn scope_token_faults(workflows: &[Workflow]) -> Vec<String> {
         .iter()
         .filter(|workflow| {
             workflow.declares_env(CODESCENE_TOKEN)
-                || !workflow.secret_sites(CODESCENE_TOKEN).is_empty()
+                || !workflow.secret_sites(TOKEN_SECRET).is_empty()
         })
         .map(|workflow| format!("{} reads the token at workflow level", workflow.file));
     let at_job = jobs(workflows)
         .into_iter()
         .filter(|(_, job)| {
             job.declares_env(CODESCENE_TOKEN)
-                || !job.secret_sites(CODESCENE_TOKEN).is_empty()
+                || !job.secret_sites(TOKEN_SECRET).is_empty()
                 || job.inherits_secrets
         })
         .map(|(_, job)| {
@@ -138,7 +138,11 @@ pub(crate) fn token_faults(workflows: &[Workflow]) -> Vec<String> {
 /// Return why one upload step's guard or credential is not as required.
 fn guard_fault(job: &Job, step: &Step) -> Option<String> {
     let at = format!("{} step {:?}", job.coordinate(), step.label());
-    let parts = match step.condition.as_deref().map(conjuncts) {
+    let parts = match step
+        .condition
+        .as_deref()
+        .map(|text| Condition(text).conjuncts())
+    {
         None => return Some(format!("{at} has no `if` guard")),
         Some(Err(condition)) => return Some(format!("{at} guard {condition:?} has an `||`")),
         Some(Ok(parts)) => parts,

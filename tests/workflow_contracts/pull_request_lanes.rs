@@ -14,7 +14,7 @@ use rstest::rstest;
 
 use crate::repository;
 
-use crate::codescene::{CODESCENE_TOKEN, calls_codescene, holds_token, operation_of};
+use crate::codescene::{CODESCENE_TOKEN, TOKEN_SECRET, calls_codescene, holds_token, operation_of};
 use crate::reader::{Job, Step, Workflow, WorkflowError, pull_request_closure};
 
 /// Return every way one step reaches CodeScene or its token.
@@ -35,7 +35,7 @@ fn job_faults(job: &Job) -> Vec<String> {
             "exports the token into every step",
         ),
         (
-            !job.secret_sites(CODESCENE_TOKEN).is_empty(),
+            !job.secret_sites(TOKEN_SECRET).is_empty(),
             "reads the token outside its steps",
         ),
         (
@@ -53,8 +53,8 @@ fn job_faults(job: &Job) -> Vec<String> {
 
 /// Return every way one workflow's own scope reaches the token.
 fn workflow_faults(workflow: &Workflow) -> Vec<String> {
-    let exported = workflow.declares_env(CODESCENE_TOKEN)
-        || !workflow.secret_sites(CODESCENE_TOKEN).is_empty();
+    let exported =
+        workflow.declares_env(CODESCENE_TOKEN) || !workflow.secret_sites(TOKEN_SECRET).is_empty();
     exported
         .then(|| {
             format!(

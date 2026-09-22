@@ -6,10 +6,14 @@
 
 use std::collections::BTreeSet;
 
-use crate::reader::{Job, Step, Workflow};
+use crate::reader::{Job, Secret, Step, Workflow};
 
-/// The secret that authenticates a CodeScene upload.
+/// The secret that authenticates a CodeScene upload, and the environment
+/// variable the upload step holds it in.
 pub(crate) const CODESCENE_TOKEN: &str = "CS_ACCESS_TOKEN";
+
+/// The same secret, as the `secrets` context reads it.
+pub(crate) const TOKEN_SECRET: Secret = Secret(CODESCENE_TOKEN);
 
 /// The branch whose coverage CodeScene analyses, and so the only one that may
 /// be published from.
@@ -120,7 +124,7 @@ pub(crate) fn calls_codescene(job: &Job) -> bool {
 /// Declaring it under its own name is one route; reading the secret into a
 /// variable of any other name, an input, or a script is another.
 pub(crate) fn holds_token(step: &Step) -> bool {
-    step.env_value(CODESCENE_TOKEN).is_some() || !step.secret_sites(CODESCENE_TOKEN).is_empty()
+    step.env_value(CODESCENE_TOKEN).is_some() || !step.secret_sites(TOKEN_SECRET).is_empty()
 }
 
 /// Return whether this workflow is the coverage publisher.

@@ -124,9 +124,9 @@ fn cancels_in_progress(concurrency: Option<&Value>) -> bool {
     }
 }
 
-/// Return the text at `key` in `node`, when it is text.
-fn text_at(node: &Value, key: &str) -> Option<String> {
-    node.get(key).and_then(Value::as_str).map(str::to_owned)
+/// Return a node's text, when it is present and is text.
+fn text_at(node: Option<&Value>) -> Option<String> {
+    node.and_then(Value::as_str).map(str::to_owned)
 }
 
 /// Return the steps of one job.
@@ -137,10 +137,10 @@ fn steps_of(job: &Value) -> Vec<Step> {
     items
         .iter()
         .map(|step| Step {
-            name: text_at(step, "name"),
-            uses: text_at(step, "uses"),
-            run: text_at(step, "run"),
-            condition: text_at(step, "if"),
+            name: text_at(step.get("name")),
+            uses: text_at(step.get("uses")),
+            run: text_at(step.get("run")),
+            condition: text_at(step.get("if")),
             with: pairs_of(step.get("with")),
             env: pairs_of(step.get("env")),
             raw: step.clone(),
@@ -148,18 +148,20 @@ fn steps_of(job: &Value) -> Vec<Step> {
         .collect()
 }
 
-/// Return one job, read from its node.
-fn job_of(file: &str, id: &str, job: &Value) -> Job {
-    Job {
+/// Return one job, read from its entry in the `jobs` mapping.
+///
+/// `None` for an entry whose key is not text, which GitHub would refuse.
+fn job_of(file: &str, (id, job): (&Value, &Value)) -> Option<Job> {
+    Some(Job {
         workflow: file.to_owned(),
-        id: id.to_owned(),
+        id: id.as_str()?.to_owned(),
         env: pairs_of(job.get("env")),
-        calls: text_at(job, "uses"),
+        calls: text_at(job.get("uses")),
         inherits_secrets: job.get("secrets").and_then(Value::as_str) == Some("inherit"),
         cancels_in_progress: cancels_in_progress(job.get("concurrency")),
         steps: steps_of(job),
         raw: job.clone(),
-    }
+    })
 }
 
 /// Return every job a workflow declares.
@@ -167,7 +169,5 @@ fn jobs_of(file: &str, document: &Value) -> Vec<Job> {
     let Some(Value::Mapping(map)) = document.get("jobs") else {
         return Vec::new();
     };
-    map.iter()
-        .filter_map(|(id, job)| id.as_str().map(|id| job_of(file, id, job)))
-        .collect()
+    map.iter().filter_map(|entry| job_of(file, entry)).collect()
 }
