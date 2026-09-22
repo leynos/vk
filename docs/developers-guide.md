@@ -431,18 +431,18 @@ has to say so now rather than when one is added.
 `tests/workflow_contracts/placement_tests.rs` breaks each placement rule one
 way at a time against constructed workflows: a bare paid label on a
 pull-request lane, a fallback on the wrong field or with the wrong arm, a trunk
-lane reverted to a hosted runner, a paid lane with no ceiling or no measured
-bounds, and a `runs-on` of no accepted shape.
+lane reverted to a hosted runner or naming only a runner group, a paid lane
+with no ceiling or no measured bounds, and a `runs-on` of no accepted shape.
 
-Four readings take input a maintainer writes by hand, so they are stated as
+The readings that take input a maintainer writes by hand are stated as
 `proptest` properties. `arms_of` is driven over arbitrary arm counts, orders
 and surrounding whitespace, and over a malformed expression whose final quote
 is missing: a reader inventing an arm from the dangling run would let a
 mistyped fallback satisfy the fork-fallback contract. The labels in use are
 compared with a reference model over generated jobs written in every `runs-on`
-form, some delegating. And each measured ceiling is checked to pass exactly
-within its band. Trigger shapes are covered by the shared reader's own cases
-and properties.
+form, group-only mappings and delegating jobs included, and so is the trunk
+rule. And each measured ceiling is checked to pass exactly within its band.
+Trigger shapes are covered by the shared reader's own cases and properties.
 
 ### The actionlint registry
 
