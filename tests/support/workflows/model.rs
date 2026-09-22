@@ -147,8 +147,14 @@ pub(crate) struct Workflow {
     pub(crate) cancels_in_progress: bool,
     /// Every job the workflow declares.
     pub(crate) jobs: Vec<Job>,
-    /// The workflow as written.
+    /// The workflow as parsed.
     pub(crate) raw: Value,
+    /// The workflow's text, comments included.
+    ///
+    /// Kept for the contracts about names that must not appear at all: a
+    /// commented-out reference is still what a later reader would take as
+    /// evidence that the name is wanted.
+    pub(crate) text: String,
 }
 
 impl Workflow {

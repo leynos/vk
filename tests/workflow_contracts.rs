@@ -39,6 +39,8 @@ mod reader_tests;
 mod registry;
 #[path = "workflow_contracts/rule_tests.rs"]
 mod rule_tests;
+#[path = "workflow_contracts/uploader.rs"]
+mod uploader;
 
 use cap_std::ambient_authority;
 use cap_std::fs_utf8::Dir;
