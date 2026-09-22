@@ -4,6 +4,15 @@ on:
   pull_request:
     branches: [main]
 
+# A second push to a pull request supersedes the run already in flight, which
+# otherwise charges a full set of minutes for a result nobody reads. This
+# workflow starts on pull requests alone today; the guard is on the event and
+# not a literal `true` so that adding a push or a dispatch trigger later cannot
+# silently start cancelling the runs that write the record.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # The workflow token reads the repository and nothing more. No step here
 # writes to GitHub, and the shared actions pass `github.token` on to
 # installers, so a wider default would be exposed to them for no use.
