@@ -17,7 +17,7 @@
 #[path = "support/workflow_coverage.rs"]
 mod workflow_coverage;
 
-use workflow_coverage::{CODESCENE_TOKEN, Workflow, jobs, steps};
+use workflow_coverage::{CODESCENE_TOKEN, Job, Step, Workflow, jobs, steps};
 
 /// The markdownlint action, pinned to a commit rather than a tag object.
 ///
@@ -36,6 +36,50 @@ fn contacts_codescene(uses: Option<&str>, run: Option<&str>) -> bool {
     by_action || by_command
 }
 
+/// Return why a job exports the token to steps that have no use for it.
+fn job_token_fault(job: &Job) -> Option<String> {
+    job.env.contains(CODESCENE_TOKEN).then(|| {
+        format!(
+            "{} exports {CODESCENE_TOKEN} into every step it runs",
+            job.coordinate()
+        )
+    })
+}
+
+/// Return every way one step of a pull-request lane reaches CodeScene.
+fn step_reach_faults(job: &Job, step: &Step) -> Vec<String> {
+    let by_call = contacts_codescene(step.uses.as_deref(), step.run.as_deref()).then(|| {
+        format!(
+            "{} step {:?} contacts CodeScene",
+            job.coordinate(),
+            step.label()
+        )
+    });
+    let by_secret = step.env.contains(CODESCENE_TOKEN).then(|| {
+        format!(
+            "{} step {:?} receives {CODESCENE_TOKEN}",
+            job.coordinate(),
+            step.label()
+        )
+    });
+    by_call.into_iter().chain(by_secret).collect()
+}
+
+/// Return every way one pull-request lane reaches CodeScene.
+///
+/// The job's own environment and each of its steps, flattened into one list
+/// so the assertion reports every fault at once rather than the first.
+fn codescene_reach_faults(job: &Job) -> Vec<String> {
+    job_token_fault(job)
+        .into_iter()
+        .chain(
+            job.steps
+                .iter()
+                .flat_map(|step| step_reach_faults(job, step)),
+        )
+        .collect()
+}
+
 #[test]
 fn no_pull_request_lane_contacts_codescene() {
     let workflows = workflows_of();
@@ -49,31 +93,10 @@ fn no_pull_request_lane_contacts_codescene() {
          assertion here passes over an empty set"
     );
 
-    let mut faults: Vec<String> = Vec::new();
-    for (_, job) in &lanes {
-        if job.env.contains(CODESCENE_TOKEN) {
-            faults.push(format!(
-                "{} exports {CODESCENE_TOKEN} into every step it runs",
-                job.coordinate()
-            ));
-        }
-        for step in &job.steps {
-            if contacts_codescene(step.uses.as_deref(), step.run.as_deref()) {
-                faults.push(format!(
-                    "{} step {:?} contacts CodeScene",
-                    job.coordinate(),
-                    step.label()
-                ));
-            }
-            if step.env.contains(CODESCENE_TOKEN) {
-                faults.push(format!(
-                    "{} step {:?} receives {CODESCENE_TOKEN}",
-                    job.coordinate(),
-                    step.label()
-                ));
-            }
-        }
-    }
+    let faults: Vec<String> = lanes
+        .iter()
+        .flat_map(|(_, job)| codescene_reach_faults(job))
+        .collect();
     assert!(
         faults.is_empty(),
         "a pull-request lane must not reach CodeScene: the upload is refused \
@@ -244,7 +267,7 @@ fn markdown_is_linted_only_through_the_pinned_action() {
          that stopped linting it"
     );
 
-    let mut faults: Vec<String> = pinned
+    let mispinned = pinned
         .iter()
         .filter(|(_, _, step)| step.uses.as_deref() != Some(MARKDOWNLINT_ACTION))
         .map(|(_, job, step)| {
@@ -253,24 +276,23 @@ fn markdown_is_linted_only_through_the_pinned_action() {
                 job.coordinate(),
                 step.uses
             )
+        });
+    let from_a_shell = all
+        .iter()
+        .filter(|(_, _, step)| {
+            step.run
+                .as_deref()
+                .is_some_and(|script| script.contains("markdownlint"))
         })
-        .collect();
-    faults.extend(
-        all.iter()
-            .filter(|(_, _, step)| {
-                step.run
-                    .as_deref()
-                    .is_some_and(|script| script.contains("markdownlint"))
-            })
-            .map(|(_, job, step)| {
-                format!(
-                    "{} step {:?} invokes the linter from a shell, whose \
-                     version is whatever the runner image carries",
-                    job.coordinate(),
-                    step.label()
-                )
-            }),
-    );
+        .map(|(_, job, step)| {
+            format!(
+                "{} step {:?} invokes the linter from a shell, whose version \
+                 is whatever the runner image carries",
+                job.coordinate(),
+                step.label()
+            )
+        });
+    let faults: Vec<String> = mispinned.chain(from_a_shell).collect();
     assert!(
         faults.is_empty(),
         "Markdown is linted through the pinned action alone: {faults:?}"

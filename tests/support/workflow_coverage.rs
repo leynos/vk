@@ -197,7 +197,13 @@ fn workflow_paths() -> Vec<PathBuf> {
     let directory = repository_root().join(WORKFLOWS);
     let mut paths: Vec<PathBuf> = fs::read_dir(&directory)
         .unwrap_or_else(|err| panic!("{} must be readable: {err}", directory.display()))
-        .filter_map(Result::ok)
+        // An entry that cannot be read is a fault, not an absence. Discarding
+        // it would shrink the set every contract below iterates over, and a
+        // contract that silently inspects four workflows where there are five
+        // reports success for the one it never saw.
+        .map(|entry| {
+            entry.unwrap_or_else(|err| panic!("{} must list cleanly: {err}", directory.display()))
+        })
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|e| e == "yml" || e == "yaml"))
         .collect();
