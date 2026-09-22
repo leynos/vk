@@ -26,7 +26,8 @@ listing.
 │   ├── fixtures/
 │   ├── snapshots/
 │   ├── support/
-│   └── utils/
+│   ├── utils/
+│   └── workflow_contracts/
 ├── AGENTS.md
 ├── Cargo.toml
 ├── Makefile
@@ -58,6 +59,9 @@ _Figure 1: Compact repository tree for contributor orientation._
   diffs carefully.
 - `tests/support/`: Shared integration-test support code.
 - `tests/utils/`: Test utility modules used across the test suite.
+- `tests/workflow_contracts/`: Modules of the `tests/workflow_contracts.rs`
+  binary, which holds contracts over the repository's own workflow files; the
+  reader they share lives in `tests/support/workflows/`.
 - `AGENTS.md`: Repository-specific agent instructions and quality-gate
   expectations.
 - `Cargo.toml`: Crate metadata, dependencies, features, and lint configuration.

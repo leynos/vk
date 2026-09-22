@@ -1,2 +1,9 @@
 # Align with CodeScene’s ceiling
 cognitive-complexity-threshold = 12     # default is 25
+
+# `CodeScene` is a proper noun, not a code item. `doc_markdown` cannot tell
+# the two apart, and backticking a company name through every line of prose
+# that mentions it makes the documentation worse to read. `".."` extends
+# clippy's own list rather than replacing it, so the default identifiers are
+# still recognised.
+doc-valid-idents = ["CodeScene", ".."]
