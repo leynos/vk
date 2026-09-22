@@ -163,17 +163,23 @@ pub(crate) fn ceiling_faults(workflows: &[Workflow]) -> (usize, Vec<String>) {
     (paid.len(), faults)
 }
 
-/// Return every trunk or tag lane, and each one that can reach another label.
+/// Return whether a selection names the paid runner and nothing else.
+///
+/// An empty label set is not vacuously compliant. `runs-on: { group: g }` is
+/// valid GitHub Actions syntax and names a runner, but it proves nothing
+/// about which label that runner carries, so a trunk lane written that way
+/// could run anywhere the group reaches.
+fn is_paid_runner_alone(labels: &[String]) -> bool {
+    !labels.is_empty() && labels.iter().all(|label| label == UBICLOUD_LABEL)
+}
+
+/// Return every trunk or tag lane, and each one that can reach another label
+/// or names no label at all.
 pub(crate) fn trunk_faults(workflows: &[Workflow]) -> (usize, Vec<String>) {
     let trunk = lanes(workflows, is_trunk_or_tag);
     let faults = trunk
         .iter()
-        .filter(|job| {
-            job.runs_on
-                .labels()
-                .iter()
-                .any(|label| label != UBICLOUD_LABEL)
-        })
+        .filter(|job| !is_paid_runner_alone(&job.runs_on.labels()))
         .map(|job| {
             format!(
                 "{} can reach {:?} rather than {UBICLOUD_LABEL} alone",

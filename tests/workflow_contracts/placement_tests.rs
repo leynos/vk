@@ -104,6 +104,20 @@ fn a_trunk_lane_reverted_to_a_hosted_runner_is_refused() -> Result<(), WorkflowE
 }
 
 #[test]
+fn a_trunk_lane_naming_only_a_runner_group_is_refused() -> Result<(), WorkflowError> {
+    // Valid syntax that names a runner without naming its label: the group
+    // could reach any runner, so it does not prove the paid one.
+    let group_only = [workflow(
+        "push",
+        "build",
+        "    runs-on: {group: arbitrary-runners}\n",
+    )?];
+    assert_eq!(trunk_faults(&group_only).1.len(), 1);
+    assert_eq!(labels_in_use(&group_only), BTreeSet::new());
+    Ok(())
+}
+
+#[test]
 fn a_paid_lane_without_measured_bounds_is_refused() -> Result<(), WorkflowError> {
     let unknown = workflow(
         "push",
@@ -116,9 +130,13 @@ fn a_paid_lane_without_measured_bounds_is_refused() -> Result<(), WorkflowError>
     Ok(())
 }
 
-/// A label a workflow might plausibly name, quote characters excluded.
+/// A label a workflow might plausibly name, quote characters excluded, with
+/// the paid label itself generated often enough to be exercised.
 fn label() -> impl Strategy<Value = String> {
-    "[a-z][a-z0-9-]{0,20}"
+    prop_oneof![
+        Just(crate::placement::UBICLOUD_LABEL.to_owned()),
+        "[a-z][a-z0-9-]{0,20}",
+    ]
 }
 
 /// Return each label single-quoted, so a generated `null` or `true` stays a
@@ -144,6 +162,9 @@ fn selection() -> impl Strategy<Value = (String, Vec<String>)> {
                 many,
             )
         }),
+        // A group with no labels reaches none this repository can name, and
+        // the group's own name is not a label.
+        label().prop_map(|group| (format!("{{group: '{group}'}}"), Vec::new())),
         labels().prop_map(|many| {
             (
                 format!("\"${{{{ x && {} }}}}\"", quoted(&many).join(" || ")),
@@ -200,6 +221,17 @@ proptest! {
             .filter(|label| !crate::registry::HOSTED_LABELS.contains(&label.as_str()))
             .collect();
         prop_assert_eq!(labels_in_use(&[parsed]), model);
+    }
+
+    #[test]
+    fn a_trunk_lane_passes_exactly_when_it_names_the_paid_runner_alone(
+        (runs_on, labels) in selection(),
+    ) {
+        let parsed = workflow("push", "build", &format!("    runs-on: {runs_on}\n"))
+            .map_err(|err| TestCaseError::fail(err.to_string()))?;
+        let is_valid = !labels.is_empty()
+            && labels.iter().all(|label| label == crate::placement::UBICLOUD_LABEL);
+        prop_assert_eq!(trunk_faults(&[parsed]).1.is_empty(), is_valid, "{}", runs_on);
     }
 
     #[test]

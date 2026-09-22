@@ -413,6 +413,13 @@ leaves its scope; and the registry stays balanced because the pull-request
 lanes keep the label in use. A contract suite can be individually sound and
 still leave a change undetected.
 
+A runner group with no labels, `runs-on: { group: some-group }`, is valid
+GitHub Actions syntax and names a runner, but it proves nothing about which
+label that runner carries. The contract therefore requires a trunk or tag lane
+to name at least one label, and every label it names to be the paid one; a
+group-only lane is refused rather than passing with nothing to check. A group's
+own name is never read as a label, so it cannot satisfy the registry either.
+
 The predicate asks two things before a workflow counts: that it answers a push,
 **and** that it serves no pull request. A workflow declaring both owes the fork
 fallback, so requiring it to name the paid label outright would contradict the
