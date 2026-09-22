@@ -6,6 +6,17 @@
 //! steps. Each is derived here so the assertions beside them read as claims
 //! rather than as parsing.
 
+// This module is included by `#[path]` into two test binaries, and each uses
+// a subset of it: the coverage contracts read events, environments and step
+// inputs, while the Markdown contract reads only steps. Every item below is
+// live in one binary or the other, so the compiler's per-binary view of "dead"
+// is not a finding here. `expect` cannot be used, because the expectation
+// would go unfulfilled in whichever binary does use the item.
+#![allow(
+    dead_code,
+    reason = "shared by two test binaries; every item is live in one of them"
+)]
+
 use std::collections::BTreeSet;
 
 use camino::{Utf8Path, Utf8PathBuf};

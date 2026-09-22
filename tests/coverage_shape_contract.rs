@@ -20,16 +20,6 @@ mod workflow_coverage;
 use rstest::{fixture, rstest};
 use workflow_coverage::{CODESCENE_TOKEN, Job, Step, Workflow, jobs, steps};
 
-/// The markdownlint action, pinned to a commit rather than a tag object.
-///
-/// `4580e161`, which this repository carried until this contract, is the
-/// annotated tag object for v24.2.0. A tag object's SHA is immutable, so the
-/// pin was not unsafe, but it is not a commit and the estate's rule asks for
-/// the commit the tag points at. Held as a literal here so that a repin has
-/// to be a visible edit in two places rather than one.
-const MARKDOWNLINT_ACTION: &str =
-    "DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff";
-
 /// Return whether a step reaches CodeScene by any of the three routes.
 fn contacts_codescene(uses: Option<&str>, run: Option<&str>) -> bool {
     let by_action = uses.is_some_and(|action| action.contains("codescene"));
@@ -248,31 +238,23 @@ fn the_publisher_uploads_rather_than_checks(workflows: Vec<Workflow>) {
     );
 }
 
-#[rstest]
-fn the_codescene_token_reaches_the_upload_step_and_nothing_else(workflows: Vec<Workflow>) {
-    let codescene_steps: Vec<(&Workflow, &Job, &Step)> = steps(&workflows)
-        .into_iter()
-        .filter(|(_, _, step)| {
-            step.uses
-                .as_deref()
-                .is_some_and(|action| action.contains("codescene"))
-        })
-        .collect();
-    assert!(
-        !codescene_steps.is_empty(),
-        "some step must upload to CodeScene, or this contract passes over a \
-         repository that stopped reporting altogether"
-    );
+/// Return whether a step calls the CodeScene uploader.
+fn uploads_to_codescene(step: &Step) -> bool {
+    step.uses
+        .as_deref()
+        .is_some_and(|action| action.contains("codescene"))
+}
 
-    // Three claims, not one. The step that needs the token has it; no other
-    // step does; and no wider scope does. Asserting only that *some* step
-    // holds it and no job does would be satisfied by moving the token to the
-    // coverage-generation step: this contract would stay green while the
-    // upload step's `if` went false and the publish silently stopped
-    // happening.
-    let mut faults: Vec<String> = codescene_steps
-        .iter()
-        .filter(|(_, _, step)| !step.env.contains(CODESCENE_TOKEN))
+/// Return every upload step that lacks the token its own guard tests.
+///
+/// The positive half of the rule, and the one that was missing. The upload
+/// step runs only when the token is non-empty, so a token moved elsewhere
+/// leaves the guard false: the publish stops happening and a contract stating
+/// only where the token may *not* be stays green.
+fn upload_without_token_faults(workflows: &[Workflow]) -> Vec<String> {
+    steps(workflows)
+        .into_iter()
+        .filter(|(_, _, step)| uploads_to_codescene(step) && !step.env.contains(CODESCENE_TOKEN))
         .map(|(_, job, step)| {
             format!(
                 "{} step {:?} uploads without {CODESCENE_TOKEN}, so its guard \
@@ -281,26 +263,45 @@ fn the_codescene_token_reaches_the_upload_step_and_nothing_else(workflows: Vec<W
                 step.label()
             )
         })
-        .collect();
-    faults.extend(
-        steps(&workflows)
-            .into_iter()
-            .filter(|(_, _, step)| {
-                step.env.contains(CODESCENE_TOKEN)
-                    && !step
-                        .uses
-                        .as_deref()
-                        .is_some_and(|action| action.contains("codescene"))
-            })
-            .map(|(_, job, step)| {
-                format!(
-                    "{} step {:?} receives {CODESCENE_TOKEN} without uploading",
-                    job.coordinate(),
-                    step.label()
-                )
-            }),
+        .collect()
+}
+
+/// Return every step holding the token that does not upload with it.
+fn token_without_upload_faults(workflows: &[Workflow]) -> Vec<String> {
+    steps(workflows)
+        .into_iter()
+        .filter(|(_, _, step)| step.env.contains(CODESCENE_TOKEN) && !uploads_to_codescene(step))
+        .map(|(_, job, step)| {
+            format!(
+                "{} step {:?} receives {CODESCENE_TOKEN} without uploading",
+                job.coordinate(),
+                step.label()
+            )
+        })
+        .collect()
+}
+
+#[rstest]
+fn the_codescene_token_reaches_the_upload_step_and_nothing_else(workflows: Vec<Workflow>) {
+    let uploads = steps(&workflows)
+        .into_iter()
+        .filter(|(_, _, step)| uploads_to_codescene(step))
+        .count();
+    assert!(
+        uploads > 0,
+        "some step must upload to CodeScene, or this contract passes over a \
+         repository that stopped reporting altogether"
     );
-    faults.extend(wider_scope_faults(&workflows));
+
+    // Three claims, not one. The step that needs the token has it; no other
+    // step does; and no wider scope does. The first is what a rule stated
+    // only as a prohibition leaves out, and it is the one that keeps the
+    // upload alive.
+    let faults: Vec<String> = upload_without_token_faults(&workflows)
+        .into_iter()
+        .chain(token_without_upload_faults(&workflows))
+        .chain(wider_scope_faults(&workflows))
+        .collect();
     assert!(
         faults.is_empty(),
         "the token belongs to the upload step and to nothing else: a wider \
@@ -331,55 +332,6 @@ fn wider_scope_faults(workflows: &[Workflow]) -> Vec<String> {
             )
         });
     at_workflow_level.chain(at_job_level).collect()
-}
-
-#[rstest]
-fn markdown_is_linted_only_through_the_pinned_action(workflows: Vec<Workflow>) {
-    let all = steps(&workflows);
-    let pinned: Vec<_> = all
-        .iter()
-        .filter(|(_, _, step)| {
-            step.uses
-                .as_deref()
-                .is_some_and(|action| action.contains("markdownlint-cli2-action"))
-        })
-        .collect();
-    assert!(
-        !pinned.is_empty(),
-        "CI must lint Markdown, or this contract passes over a repository \
-         that stopped linting it"
-    );
-
-    let mispinned = pinned
-        .iter()
-        .filter(|(_, _, step)| step.uses.as_deref() != Some(MARKDOWNLINT_ACTION))
-        .map(|(_, job, step)| {
-            format!(
-                "{} pins {:?} rather than the commit {MARKDOWNLINT_ACTION}",
-                job.coordinate(),
-                step.uses
-            )
-        });
-    let from_a_shell = all
-        .iter()
-        .filter(|(_, _, step)| {
-            step.run
-                .as_deref()
-                .is_some_and(|script| script.contains("markdownlint"))
-        })
-        .map(|(_, job, step)| {
-            format!(
-                "{} step {:?} invokes the linter from a shell, whose version \
-                 is whatever the runner image carries",
-                job.coordinate(),
-                step.label()
-            )
-        });
-    let faults: Vec<String> = mispinned.chain(from_a_shell).collect();
-    assert!(
-        faults.is_empty(),
-        "Markdown is linted through the pinned action alone: {faults:?}"
-    );
 }
 
 /// Every workflow this repository declares, parsed once per contract.
