@@ -279,6 +279,21 @@ to them for no use. `every_coverage_workflow_reads_contents_only` holds every
 workflow that generates coverage to exactly that block, and refuses a job-level
 `permissions`, which replaces the workflow's rather than narrowing it.
 
+### The uploader is pinned, and its retired input stays retired
+
+`tests/workflow_contracts/uploader.rs` holds the shared CodeScene uploader to
+one approved revision. It reads every step's `uses` for the uploader action,
+and every job's reusable-workflow call for a shared workflow whose name
+mentions CodeScene, each with its own matcher: the action's path never matches
+a job-level call, so one matcher over both would let a stale workflow pin pass
+while the action kept the collection non-empty. It also keeps three retired
+things from returning: the `installer-checksum` input, which the uploader now
+rejects when non-empty; the `CODESCENE_CLI_SHA256` variable that fed it; and the
+`get-codescene-sha` dispatch that wrote the variable. The two names are
+searched for in each workflow's text, comments included, because a
+commented-out reference is what a later reader would take as evidence that the
+name is still wanted.
+
 ### Reading the workflows
 
 The reader parses with `serde_norway`, the maintained fork of `serde_yaml` that

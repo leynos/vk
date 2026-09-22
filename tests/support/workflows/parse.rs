@@ -50,6 +50,7 @@ pub(crate) fn parse_workflow(file: &str, text: &str) -> Result<Workflow, Workflo
         cancels_in_progress: cancels_in_progress(document.get("concurrency")),
         jobs: jobs_of(file, &document)?,
         raw: document,
+        text: text.to_owned(),
     })
 }
 

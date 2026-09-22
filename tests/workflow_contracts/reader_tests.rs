@@ -74,6 +74,13 @@ fn a_document_that_is_not_a_mapping_is_refused() {
 }
 
 #[test]
+fn the_source_text_is_kept_exactly_comments_included() -> Result<(), WorkflowError> {
+    let text = "# a comment the parse discards\non: push # and another\njobs: {}\n";
+    assert_eq!(parse_workflow("x.yml", text)?.text, text);
+    Ok(())
+}
+
+#[test]
 fn unquoted_scalars_are_rendered_rather_than_dropped() -> Result<(), WorkflowError> {
     let text = "jobs:\n  a:\n    steps:\n      - with: {mode: upload, retries: 3, quiet: true}\n";
     let workflow = parse_workflow("x.yml", text)?;
