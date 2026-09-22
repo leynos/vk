@@ -32,9 +32,16 @@ const PULL_REQUEST_TRIGGER: &str = "pull_request";
 /// truthy setting.
 const CANCEL_IN_PROGRESS: &str = "${{ github.event_name == 'pull_request' }}";
 
-/// A group keyed on the run identifier is unique per run, so it serializes
-/// nothing and can never cancel a predecessor.
-const RUN_ID_EXPRESSION: &str = "github.run_id";
+/// The only accepted concurrency group.
+///
+/// Each part carries identity. Without the workflow name, two workflows
+/// would share a group and cancel each other; without the pull request
+/// number, every pull request would share one and a push to one would cancel
+/// another's run; and `github.ref` is the fallback for an event with no pull
+/// request. A group keyed on `github.run_id` is unique per run, so it
+/// serializes nothing and never cancels a predecessor.
+const CONCURRENCY_GROUP: &str =
+    "${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}";
 
 /// Return a concurrency setting as text, whether written as text or not.
 fn text_of(setting: Option<&Value>) -> Option<String> {
@@ -42,6 +49,29 @@ fn text_of(setting: Option<&Value>) -> Option<String> {
         Value::String(text) => Some(text.clone()),
         Value::Bool(flag) => Some(flag.to_string()),
         other => Some(format!("{other:?}")),
+    }
+}
+
+/// Return why a concurrency group is not the accepted one, if it is not.
+fn group_violation(group: Option<&str>) -> Option<String> {
+    match group {
+        None | Some("") => Some("declares no concurrency group".to_owned()),
+        Some(CONCURRENCY_GROUP) => None,
+        Some(other) => Some(format!(
+            "sets its concurrency group to {other} and not {CONCURRENCY_GROUP}"
+        )),
+    }
+}
+
+/// Return why a `cancel-in-progress` value is not the accepted one, if it is
+/// not.
+fn cancel_violation(value: Option<&str>) -> Option<String> {
+    match value {
+        None => Some("sets no cancel-in-progress".to_owned()),
+        Some(CANCEL_IN_PROGRESS) => None,
+        Some(other) => Some(format!(
+            "sets cancel-in-progress to {other} and not {CANCEL_IN_PROGRESS}"
+        )),
     }
 }
 
@@ -54,21 +84,11 @@ fn violations(workflow: &Workflow) -> Vec<String> {
         Value::String(name) => Some(name.clone()),
         _ => text_of(block.get("group")),
     };
-    let group_fault = match group.as_deref() {
-        None | Some("") => Some("declares no concurrency group".to_owned()),
-        Some(text) if text.contains(RUN_ID_EXPRESSION) => {
-            Some(format!("keys its concurrency group on {RUN_ID_EXPRESSION}"))
-        }
-        Some(_) => None,
-    };
-    let cancel_fault = match text_of(block.get("cancel-in-progress")).as_deref() {
-        None => Some("sets no cancel-in-progress".to_owned()),
-        Some(CANCEL_IN_PROGRESS) => None,
-        Some(value) => Some(format!(
-            "sets cancel-in-progress to {value} and not {CANCEL_IN_PROGRESS}"
-        )),
-    };
-    group_fault.into_iter().chain(cancel_fault).collect()
+    let cancel = text_of(block.get("cancel-in-progress"));
+    group_violation(group.as_deref())
+        .into_iter()
+        .chain(cancel_violation(cancel.as_deref()))
+        .collect()
 }
 
 /// Return the workflows a pull request can start.
@@ -114,21 +134,21 @@ fn conforming(block: &str) -> Result<Workflow, WorkflowError> {
 /// The concurrency block this repository deploys.
 const DEPLOYED: &str = concat!(
     "concurrency:\n",
-    "  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}\n",
+    "  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}\n",
     "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
 );
 
 /// The deployed block with its guarded expression replaced by a literal.
 const LITERAL_TRUE: &str = concat!(
     "concurrency:\n",
-    "  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}\n",
+    "  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}\n",
     "  cancel-in-progress: true\n",
 );
 
 /// The deployed block with the literal quoted, which YAML reads as text.
 const QUOTED_TRUE: &str = concat!(
     "concurrency:\n",
-    "  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}\n",
+    "  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}\n",
     "  cancel-in-progress: 'true'\n",
 );
 
@@ -149,6 +169,22 @@ fn the_deployed_shape_reports_no_violation() -> Result<(), WorkflowError> {
 #[case::run_id_group(
     "concurrency:\n  group: ${{ github.run_id }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
     "github.run_id"
+)]
+#[case::no_workflow_name(
+    "concurrency:\n  group: ${{ github.event.pull_request.number || github.ref }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
+    "concurrency group to"
+)]
+#[case::no_pull_request_number(
+    "concurrency:\n  group: ${{ github.workflow }}-${{ github.ref }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
+    "concurrency group to"
+)]
+#[case::no_ref_fallback(
+    "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
+    "concurrency group to"
+)]
+#[case::fixed_group(
+    "concurrency:\n  group: ci\n  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
+    "concurrency group to"
 )]
 #[case::scalar_group("concurrency: ci\n", "sets no cancel-in-progress")]
 #[case::no_concurrency_block("", "no concurrency")]
