@@ -149,10 +149,18 @@ fields.
 Main owns every persistent coverage output. `coverage-main.yml` answers a push
 to `main`, generates ratcheted coverage and uploads it to CodeScene.
 `coverage.yml` answers a pull request, generates coverage for its own ratchet
-check, and contacts CodeScene not at all. `tests/coverage_shape_contract.rs`
-holds all of it, deriving what it asserts from each workflow's own triggers
-rather than from a list of file names, so adding a workflow asks the question
-again instead of slipping past a contract keyed on names.
+check, and contacts CodeScene not at all. The decision and its alternatives are
+recorded in [ADR 002](adr-002-main-owns-coverage-publication.md).
+
+The contracts holding all of it live in one test binary,
+`tests/workflow_contracts.rs`, with its modules under
+`tests/workflow_contracts/` and the shared reader under
+`tests/support/workflows/`. They derive what they assert from each workflow's
+own triggers and calls rather than from a list of file names, so adding a
+workflow asks the question again instead of slipping past a contract keyed on
+names. One binary rather than one per contract means the reader is compiled
+once, and every item in it is used by the binary that compiles it, so no
+`dead_code` allowance is needed.
 
 ### Why a pull request never reaches CodeScene
 
@@ -162,9 +170,23 @@ pull-request head is refused outright. And a pull-request lane that contacts
 CodeScene puts a third-party network call, and the token that authenticates it,
 on the fork-facing side of the repository.
 
+`no_pull_request_lane_contacts_codescene` refuses three routes to CodeScene:
+the CodeScene action, a `cs-coverage` command, and any other mention of
+CodeScene's host, such as a `curl`. It also refuses the token in any scope,
+read under any name, and forwarding it with `secrets: inherit`.
+
+The rule runs over the pull-request *closure*, not over the workflows whose own
+triggers name a pull request. A reusable workflow declaring only
+`workflow_call` runs on behalf of every lane that calls it, and
+`secrets: inherit` hands it every secret the caller holds, so a contract
+enumerating workflows by trigger alone would never look inside it. A local call
+is recognized by shape: strip a leading `./`, then ask whether the rest is a
+path under `.github/workflows/`. A call naming a workflow that does not exist
+is an error rather than a dead end.
+
 What replaces the changed-line gate is the ratchet.
 `every_pull_request_workflow_ratchets_its_own_coverage` requires
-`with-ratchet: 'true'` on every pull-request generator, because a lane
+`with-ratchet: 'true'` on every generator in the closure, because a lane
 generating coverage without it measures nothing it can fail on. The baseline it
 compares against is the one `coverage-main.yml` writes: caches saved on `main`
 are readable by every pull-request run.
@@ -178,25 +200,50 @@ generate coverage would refuse `dependabot-automerge.yml`, which answers
 
 ### The publisher is derived, not named
 
-`only_the_publisher_uploads_coverage` asks three things of a workflow before it
-may upload: that it answers a push, that it serves no pull request, and that
-its push trigger is filtered to `main`.
+`only_the_publisher_uploads_coverage` asks four things of a workflow before it
+may reach CodeScene: that it answers a push, that it serves no pull request,
+that its push trigger is filtered to exactly `main`, and that it names no tag
+filter.
 
 The second condition is what makes the rule applicable. A repository whose
 single workflow declares both triggers would otherwise be required to upload
 and forbidden from uploading at the same time, and the contract would have no
 consistent reading.
 
-The third is what makes it mean anything. `release.yml` answers a push, of
-tags, and serves no pull request, so without the branch filter it qualified as
-the publisher and could have carried a CodeScene upload with no contract
-objecting. CodeScene accepts an upload only for a branch it analyses, so that
-upload would have failed at run time instead of being refused here.
+The third and fourth are what make it mean anything. The branch set must *equal*
+`{main}`: `branches: [main, release]` contains `main` and publishes from
+`release`. `release.yml` answers a push of tags and serves no pull request, so
+without the filter conditions it would qualify as the publisher and could carry
+a CodeScene upload with no contract objecting.
 
-`the_publisher_uploads_rather_than_checks` requires `mode: upload` explicitly
-rather than leaving the action's default in force. The default is `upload`
-today, so this changes no behaviour; it makes which mode is running readable in
-the file, and assertable.
+`the_publisher_uploads_rather_than_checks` classifies every CodeScene step in
+the publisher by operation. The action must say `mode: upload` explicitly
+rather than leave the default in force, and a `cs-coverage` command must run
+`upload`; `check`, an unstated mode, or a bare request to the host are all
+refused, and a script that uploads cannot hide a check beside it.
+
+### The upload is guarded on its token and on `main`
+
+`the_upload_runs_only_on_main_with_its_token` requires the upload step's `if`
+to carry two conjuncts, `env.CS_ACCESS_TOKEN != ''` and
+`github.ref == 'refs/heads/main'`, and the action's `access-token` input to read
+`${{ env.CS_ACCESS_TOKEN }}`. The ref guard is needed as well as the trigger's
+branch filter because the publisher also answers `workflow_dispatch`, which
+runs against whichever branch the dispatcher picks.
+
+The condition is split on `&&` outside quoted strings, and an unquoted `||` is
+refused outright. A substring test for the ref guard passes
+`... && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'`,
+which makes every conjunct optional and uploads a dispatch from any branch.
+
+`the_publisher_queues_rather_than_cancels` refuses `cancel-in-progress` on the
+publisher at workflow and job level, and `coverage-main.yml` declares a
+concurrency group that queues. A cancelled publisher abandons both its upload
+and the ratchet baseline it writes; a queued one publishes after the run ahead
+of it. Anything but an absent or literally false value counts as cancelling, an
+expression included, since a contract cannot promise what an expression will
+decide at run time. Cancelling superseded runs remains right for pull-request
+lanes.
 
 ### The token belongs to the upload step, and to nothing else
 
@@ -207,24 +254,55 @@ which is wider still. Declared on the upload step, the blast radius is that one
 step.
 
 `the_codescene_token_reaches_the_upload_step_and_nothing_else` makes three
-claims rather than one: the step that uploads has the token, no other step has
-it, and no wider scope declares it. The first claim is not redundant. The
-upload step is guarded on the token being non-empty, so moving the token to the
+claims rather than one: the step that uploads reads the token at
+`env.CS_ACCESS_TOKEN` and nowhere else, no other step reads it, and no wider
+scope reads or forwards it. The first claim is not redundant. The upload step
+is guarded on the token being non-empty, so moving the token to the
 coverage-generation step would leave a contract asking only "some step has it,
 no job has it" perfectly green while the guard went false and the publish
 silently stopped happening.
 
+"Reads" means any text value that mentions the secret, found by walking the
+whole node rather than the keys a field was written for: an `env` value under
+another name, an input, a script, a condition, or a named `secrets:` entry.
+GitHub resolves context properties case-insensitively and accepts dotted and
+indexed spellings, so `secrets.cs_access_token` and
+`secrets['CS_ACCESS_TOKEN']` count, as does `toJSON(secrets)`, which serializes
+every secret at once.
+
 ### Reading the workflows
 
-The contracts reach the filesystem through a `cap_std::fs_utf8::Dir` capability
-opened once, with `camino` paths, rather than through `std::fs` and ambient
-authority. That is this repository's rule for filesystem access generally, and
-here it also means a contract cannot read outside the directory it reasons
-about.
+The reader parses with `serde_norway`, the maintained fork of `serde_yaml` that
+the estate's other Rust workflow contracts use. It reads YAML 1.2 and refuses a
+mapping that repeats a key, where PyYAML keeps the last value in silence; a
+workflow declaring `runs-on` twice would otherwise be read with one label
+discarded.
 
-Parsing covers all three scopes GitHub exports an environment from, workflow,
-job and step, because a reader seeing only two would call a workflow clean
-while its widest scope held the secret.
+Reading is fallible and says so: `load` returns a `WorkflowError` for a
+directory it cannot list, a file it cannot read or parse, YAML that is not a
+mapping, or a directory holding no workflows at all, since every contract over
+an empty set passes. Nothing is discarded, because a contract that silently
+inspects four workflows where there are five reports success for the one it
+never saw. The extension test is case-insensitive, since GitHub reads `.YML` as
+readily as `.yml`.
+
+`load` takes a `cap_std::fs_utf8::Dir` capability rather than a path. The
+fixture opens it once with ambient authority, at the boundary, and nothing
+below it takes ambient authority again; the reader's own tests hand it a
+temporary directory instead.
+
+Parsing covers all three scopes from which GitHub exports an environment:
+workflow, job, and step. A reader seeing only two would call a workflow clean
+while its widest scope held the secret. Triggers are read as a scalar, a
+sequence, or a mapping, under the `on` key and under the boolean `true` it
+becomes in a YAML 1.1 tool, because `on: [push, pull_request]` read as a
+mapping would be one event with a strange name.
+
+Every rule is also tested against constructed workflows that break it one way
+at a time, and the classifier and condition splitter carry `proptest`
+properties over generated, workflow-shaped input. Run against the repository
+alone, a rule is only ever seen passing, which is also what a rule that checks
+nothing does.
 
 ### Markdown is linted through the pinned action alone
 

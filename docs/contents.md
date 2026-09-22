@@ -33,6 +33,10 @@
   Records the accepted decision to serve REST through octocrab, move the
   bespoke GraphQL client onto hyper transport, and add `graphql_client` code
   generation for typed queries.
+- [ADR 002: Main owns coverage publication](adr-002-main-owns-coverage-publication.md):
+  Records why only the push-to-`main` workflow contacts CodeScene, why pull
+  requests ratchet coverage instead, and why the token lives on the upload step
+  alone.
 
 ## Migration guides
 

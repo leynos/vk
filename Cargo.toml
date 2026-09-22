@@ -72,7 +72,7 @@ yaml = ["ortho_config/yaml"]
 unstable-rest-resolve = []
 
 [dev-dependencies]
-# Reads the workflow files the coverage-shape contracts assert against. A
+# Reads the workflow files the workflow contracts assert against. A
 # maintained fork of serde_yaml, and the crate the estate's other Rust
 # workflow contracts already use, so the parse behaves the same here.
 serde_norway = "0.9"

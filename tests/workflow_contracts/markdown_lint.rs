@@ -10,11 +10,11 @@
 //! rather than about who may talk to CodeScene, and the two share only the
 //! reader.
 
-#[path = "support/workflow_coverage.rs"]
-mod workflow_coverage;
+use rstest::rstest;
 
-use rstest::{fixture, rstest};
-use workflow_coverage::{Workflow, steps};
+use crate::repository;
+
+use crate::reader::{Workflow, WorkflowError, steps};
 
 /// The markdownlint action, pinned to a commit rather than a tag object.
 ///
@@ -27,7 +27,10 @@ const MARKDOWNLINT_ACTION: &str =
     "DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff";
 
 #[rstest]
-fn markdown_is_linted_only_through_the_pinned_action(workflows: Vec<Workflow>) {
+fn markdown_is_linted_only_through_the_pinned_action(
+    repository: Result<Vec<Workflow>, WorkflowError>,
+) -> Result<(), WorkflowError> {
+    let workflows = repository?;
     let all = steps(&workflows);
     let pinned: Vec<_> = all
         .iter()
@@ -73,13 +76,5 @@ fn markdown_is_linted_only_through_the_pinned_action(workflows: Vec<Workflow>) {
         faults.is_empty(),
         "Markdown is linted through the pinned action alone: {faults:?}"
     );
-}
-
-/// Every workflow this repository declares, parsed once per contract.
-///
-/// A fixture rather than a call repeated in six places: the parse is shared
-/// setup, and `rstest` is how this repository expresses that.
-#[fixture]
-fn workflows() -> Vec<Workflow> {
-    workflow_coverage::workflows()
+    Ok(())
 }

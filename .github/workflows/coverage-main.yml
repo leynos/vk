@@ -24,6 +24,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Queue rather than cancel. A cancelled run abandons both its upload and the
+# ratchet baseline it writes; a queued one publishes after the run ahead of
+# it, so the latest push's baseline is the one that stands.
+concurrency:
+  group: coverage-main-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   coverage-upload:
     runs-on: ubuntu-latest
@@ -48,7 +55,12 @@ jobs:
         # than this one upload.
         env:
           CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
-        if: env.CS_ACCESS_TOKEN != ''
+        # Two guards, and neither may be widened with `||`. The ref guard is
+        # needed as well as the trigger's branch filter because
+        # workflow_dispatch runs against whichever branch the dispatcher
+        # picks, and CodeScene refuses coverage for a branch it does not
+        # analyse.
+        if: env.CS_ACCESS_TOKEN != '' && github.ref == 'refs/heads/main'
         uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
         with:
           format: lcov
