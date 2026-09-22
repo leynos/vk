@@ -31,14 +31,22 @@ use workflow_placement::{
 /// declaring a ceiling is that it is lower than GitHub's six-hour default, and
 /// a ceiling of several hours declares one without meaning it.
 ///
-/// Measured 2026-09-17 from the last three green pull-request runs and the
-/// last green push run, queue and run seconds per job:
+/// Measured from the last three green pull-request runs, the last green push
+/// run, and the last three green tag runs. Queue and run seconds per job:
 ///
 /// | job | queue | run |
 /// | --- | --- | --- |
 /// | `build-test` | 2 | 237, 302, 420 |
 /// | `unstable-rest-resolve` | 2 | 238, 291, 440 |
 /// | `coverage-upload` | 3 | 184 |
+/// | `build` | 3, 2, 4 | 151, 131, 141 |
+/// | `release` | 2, 2, 4 | 10, 9, 5 |
+///
+/// The two tag lanes are quick, and their lower bounds are well above twice
+/// their slowest run rather than close to it. That is deliberate: they run a
+/// handful of times a year, so there is no distribution to size against and
+/// nothing is spent by leaving headroom, whereas a ceiling cancelling a
+/// release build is expensive in a way no other lane here is.
 const CEILING_BOUNDS: [(&str, u64, u64); 5] = [
     ("build-test", 15, 45),
     ("unstable-rest-resolve", 15, 45),

@@ -339,7 +339,7 @@ runner at all. Both lanes in `coverage.yml` therefore choose:
 The continuation sits at the same indent as the first line of the scalar. A
 continuation indented one level deeper keeps its line break, and GitHub
 evaluates the broken value regardless, so a green run is not evidence that the
-expression is well formed. `no_runner_selection_carries_an_embedded_line_break`
+expression is well-formed. `no_runner_selection_carries_an_embedded_line_break`
 reads every `runs-on` from the parsed document and refuses one containing a
 break, which is the only way to tell the two apart.
 
@@ -374,6 +374,20 @@ four vCPUs to two: a ceiling sized from the hosted figure would cancel an
 ordinary run rather than a hung one.
 `every_paid_lane_declares_a_bounded_ceiling` holds each lane inside a measured
 band, and refuses a paid lane it has no measurement for at all.
+
+### Every form `runs-on` can take
+
+GitHub accepts `runs-on` as a scalar, as a sequence of labels, or as a `group`/
+`labels` mapping. The reader modelled only the scalar and treated everything
+else as a job that declares no runner, which meant the other two forms were
+invisible to every contract here rather than merely unhandled. A lane written
+`runs-on: [self-hosted, ubicloud-standard-8]` names a runner, can name a paid
+or unregistered one, and was skipped in silence by the placement, ceiling and
+registry contracts alike.
+
+All three forms are now modelled, and a shape GitHub does not accept is refused
+loudly rather than read as an absent runner. `Delegated` now means one thing
+only: the key is not there, because the job calls a reusable workflow.
 
 ### Trunk and tag lanes
 
@@ -432,7 +446,7 @@ the label is the called workflow's business rather than this repository's.
 
 `delayed-pr-comment.yml` answers only `workflow_dispatch`, and
 `dependabot-automerge.yml` answers `pull_request_target` and
-`workflow_dispatch`. Neither is a pull-request or push lane, so
+`workflow_dispatch`. Neither is a pull-request nor a push lane, so
 `api_bound_lanes_stay_on_hosted_runners` requires them to stay where minutes
 are free.
 

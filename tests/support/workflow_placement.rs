@@ -49,6 +49,15 @@ pub(crate) enum RunnerSelection {
         /// Every label the expression can evaluate to.
         arms: Vec<String>,
     },
+    /// A sequence of labels, every one of which the runner must carry.
+    Labels(Vec<String>),
+    /// A `group`/`labels` mapping, which selects within a runner group.
+    Group {
+        /// The runner group named, when the mapping names one.
+        group: Option<String>,
+        /// The labels required within that group.
+        labels: Vec<String>,
+    },
     /// No `runs-on` at all: the job calls a reusable workflow.
     Delegated,
 }
@@ -59,6 +68,7 @@ impl RunnerSelection {
         match self {
             Self::Literal(label) => vec![label.clone()],
             Self::Expression { arms, .. } => arms.clone(),
+            Self::Labels(labels) | Self::Group { labels, .. } => labels.clone(),
             Self::Delegated => Vec::new(),
         }
     }
@@ -69,11 +79,19 @@ impl RunnerSelection {
     }
 
     /// Return the declaration as written, for the line-break check.
-    pub(crate) fn raw(&self) -> &str {
+    ///
+    /// The sequence and mapping forms are rendered rather than quoted, because
+    /// a break inside one of their scalars is the same defect as a break in a
+    /// bare one and has to stay visible to the reader that looks for it.
+    pub(crate) fn raw(&self) -> String {
         match self {
-            Self::Literal(label) => label,
-            Self::Expression { raw, .. } => raw,
-            Self::Delegated => "",
+            Self::Literal(label) => label.clone(),
+            Self::Expression { raw, .. } => raw.clone(),
+            Self::Labels(labels) => labels.join(", "),
+            Self::Group { group, labels } => {
+                format!("group {group:?} labels {}", labels.join(", "))
+            }
+            Self::Delegated => String::new(),
         }
     }
 }
@@ -204,16 +222,50 @@ pub(crate) fn arms_of(raw: &str) -> Vec<String> {
 
 /// Return the `runs-on` of one job.
 fn selection_of(job: &Value) -> RunnerSelection {
-    let Some(raw) = job.get("runs-on").and_then(Value::as_str) else {
+    // Every form GitHub accepts is modelled. Returning `Delegated` for any
+    // non-string, as this did, made the sequence and mapping forms invisible:
+    // a job written `runs-on: [self-hosted, some-paid-label]` names a runner
+    // and can name a paid or unregistered one, but declared no runner as far
+    // as the placement, ceiling and registry contracts could see, so all
+    // three skipped it in silence. `Delegated` now means the key is absent.
+    let Some(value) = job.get("runs-on") else {
         return RunnerSelection::Delegated;
     };
-    if raw.contains("${{") {
-        RunnerSelection::Expression {
-            raw: raw.to_owned(),
+    match value {
+        Value::String(raw) if raw.contains("${{") => RunnerSelection::Expression {
+            raw: raw.clone(),
             arms: arms_of(raw),
-        }
-    } else {
-        RunnerSelection::Literal(raw.to_owned())
+        },
+        Value::String(raw) => RunnerSelection::Literal(raw.clone()),
+        Value::Sequence(items) => RunnerSelection::Labels(strings_of(items)),
+        Value::Mapping(_) => RunnerSelection::Group {
+            group: value
+                .get("group")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            labels: labels_field_of(value),
+        },
+        // Not a shape GitHub accepts. Refused loudly rather than read as a
+        // job without a runner, which is how the forms above went unseen.
+        other => panic!("runs-on must be a string, sequence or mapping: {other:?}"),
+    }
+}
+
+/// Return the strings of a sequence, in order.
+fn strings_of(items: &[Value]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Return a `runs-on` mapping's labels, whether written as one or as many.
+fn labels_field_of(value: &Value) -> Vec<String> {
+    match value.get("labels") {
+        Some(Value::String(one)) => vec![one.clone()],
+        Some(Value::Sequence(items)) => strings_of(items),
+        _ => Vec::new(),
     }
 }
 
