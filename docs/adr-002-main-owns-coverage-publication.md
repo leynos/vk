@@ -5,6 +5,7 @@
 Accepted (2026-09-22). The push-to-`main` workflow is the only lane that
 contacts CodeScene; pull-request lanes generate coverage for their own ratchet
 check and nothing else; the CodeScene token lives on the upload step alone.
+Amended 2026-09-25: the token is in no `env` at all (see the addendum below).
 
 ## Date
 
@@ -85,3 +86,22 @@ describes each contract and the hole it closes.
   untested code while raising coverage elsewhere.
 - Merges performed by the automerge workflow's `GITHUB_TOKEN` fire no push
   event, so their coverage is published only by a manual dispatch on `main`.
+
+## Addendum (2026-09-25): the token leaves every `env`
+
+The decision above declared the token on the upload step and read it nowhere
+else. That was narrower than a job-level binding, but not narrow enough: the
+uploader is a composite action, and a composite action's nested steps inherit
+the calling step's `env`, so every step inside the action held the token.
+
+The token is now bound in no `env` at any scope. A
+`Check CodeScene token availability` step (id `codescene_token`) runs exactly
+`echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"`,
+unconditionally and with no `env`; GitHub evaluates the expression before it
+sends the command to the runner, so the shell receives only `true` or `false`.
+The upload's guard reads `steps.codescene_token.outputs.available == 'true'`
+beside the main-ref guard, and the upload takes
+`access-token: ${{ secrets.CS_ACCESS_TOKEN }}` directly. A shell upload is no
+longer acceptable, since it could take the token only through `env` or its
+script. `tests/workflow_contracts.rs` enforces the new shape, and the
+[developers' guide](developers-guide.md) describes it.

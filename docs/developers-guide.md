@@ -232,14 +232,15 @@ to carry two conjuncts, `steps.codescene_token.outputs.available == 'true'` and
 earlier in the same job, with no `if` and no `env`, and whose one command is
 exactly
 `echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"`.
-GitHub evaluates that expression before the shell starts, so the command writes
-a literal `true` or `false` and the token enters no process. A missing,
-conditional or renamed check leaves the upload skipping forever, so each is
-refused. The ref guard is needed as well as the trigger's branch filter because
-the publisher also answers `workflow_dispatch`, which runs against whichever
-branch the dispatcher picks. That dispatch is also how a merge made by the
-Dependabot automerge workflow's `GITHUB_TOKEN` gets measured, since such a
-merge fires no push event; it is a known exception (see
+GitHub evaluates that expression before it sends the command to the runner, so
+the shell receives only a literal `true` or `false`: the token is in neither
+the check's command nor its environment. A missing, conditional or renamed
+check leaves the upload skipping forever, so each is refused. The ref guard is
+needed as well as the trigger's branch filter because the publisher also answers
+`workflow_dispatch`, which runs against whichever branch the dispatcher picks.
+That dispatch is also how a merge made by the Dependabot automerge workflow's
+`GITHUB_TOKEN` gets measured, since such a merge fires no push event; it is a
+known exception (see
 [shared-actions issue 518](https://github.com/leynos/shared-actions/issues/518)).
 
 The condition is split on `&&` outside quoted strings, and an unquoted `||` is

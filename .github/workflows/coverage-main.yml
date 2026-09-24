@@ -59,8 +59,9 @@ jobs:
       # every step's environment, this repository's own build among them,
       # and the upload is a composite action whose nested steps inherit the
       # calling step's `env`, so even a step-level binding reached every one
-      # of them. GitHub evaluates the expression before the shell starts, so
-      # the token enters no process.
+      # of them. GitHub evaluates the expression before it sends the command
+      # to the runner, so the shell receives only `true` or `false`: the
+      # token is in neither the check's command nor its environment.
       - name: Check CodeScene token availability
         id: codescene_token
         run: echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"

@@ -26,9 +26,9 @@ pub(crate) const CHECK_ID: &str = "codescene_token";
 
 /// The availability check's one command.
 ///
-/// GitHub evaluates the expression before the shell starts, so the command
-/// writes a literal `true` or `false` and the token enters no process and no
-/// step's `env`.
+/// GitHub evaluates the expression before it sends the command to the runner,
+/// so the shell receives only a literal `true` or `false`: the token is in
+/// neither the check's command nor any step's `env`.
 pub(crate) const CHECK_COMMAND: &str =
     r#"echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT""#;
 
