@@ -111,7 +111,7 @@ fn triggers() -> impl Strategy<Value = Triggers> {
 
 /// The conjuncts an upload guard is built from.
 const ATOMS: [&str; 4] = [
-    "env.CS_ACCESS_TOKEN != ''",
+    "steps.codescene_token.outputs.available == 'true'",
     "github.ref == 'refs/heads/main'",
     "github.event_name == 'push'",
     "matrix.os == 'a || b'",
