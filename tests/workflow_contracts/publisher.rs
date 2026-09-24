@@ -1,10 +1,11 @@
 //! Who owns the coverage upload, and how it is held to `main`.
 //!
 //! The push-to-main workflow is the only one that may reach CodeScene, it
-//! uploads rather than gates, and the token lives on its upload step and
-//! nowhere else. The upload step is guarded twice, on the token and on the
-//! ref, because the publisher also answers `workflow_dispatch`, which runs
-//! against any branch. And the publisher's runs queue rather than cancel, so
+//! uploads rather than gates, and the token is read in exactly two places:
+//! the availability check's command and the upload's `access-token` input,
+//! never in any `env`. The upload step is guarded twice, on the check's
+//! output and on the ref, because the publisher also answers
+//! `workflow_dispatch`, which runs against any branch. And the publisher's runs queue rather than cancel, so
 //! a later push cannot abandon an earlier upload and its baseline.
 
 use rstest::rstest;
@@ -12,8 +13,8 @@ use rstest::rstest;
 use crate::repository;
 
 use crate::codescene::{
-    CODESCENE_TOKEN, Operation, REF_GUARD, TOKEN_GUARD, TOKEN_INPUT, TOKEN_SECRET, TOKEN_SITE,
-    calls_codescene, holds_token, is_publisher, operation_of,
+    CHECK_SITE, CODESCENE_TOKEN, Operation, REF_GUARD, TOKEN_GUARD, TOKEN_INPUT, TOKEN_SECRET,
+    TOKEN_SITE, calls_codescene, is_availability_check, is_publisher, operation_of,
 };
 use crate::pull_request_lanes::generators_of;
 use crate::reader::{Condition, Job, Step, Workflow, WorkflowError, jobs, steps};
@@ -76,21 +77,35 @@ fn uploads(workflows: &[Workflow]) -> Vec<(&Job, &Step)> {
         .collect()
 }
 
-/// Return where one step holds the token, when that is not exactly where an
-/// upload step must.
-fn step_token_fault(job: &Job, step: &Step) -> Option<String> {
-    let is_upload = operation_of(step) == Some(Operation::Upload);
-    let sites = step.secret_sites(TOKEN_SECRET);
-    let expected = if is_upload {
-        vec![TOKEN_SITE.to_owned()]
+/// Return the one key path at which a step may read the token, if any.
+fn expected_site(step: &Step) -> Option<&'static str> {
+    if operation_of(step) == Some(Operation::Upload) {
+        Some(TOKEN_SITE)
+    } else if is_availability_check(step) {
+        Some(CHECK_SITE)
     } else {
-        Vec::new()
-    };
-    let is_misplaced = sites != expected || (!is_upload && holds_token(step));
+        None
+    }
+}
+
+/// Return where one step holds the token, when that is not exactly where it
+/// must.
+///
+/// An upload reads it at its `access-token` input, the availability check in
+/// its command, and every other step nowhere. No step binds it in `env` under
+/// any name: the uploader is a composite action whose nested steps inherit
+/// the calling step's `env`, so a shell upload, which could only take the
+/// token through `env` or its script, is refused as well.
+fn step_token_fault(job: &Job, step: &Step) -> Option<String> {
+    let expected = expected_site(step);
+    let sites = step.secret_sites(TOKEN_SECRET);
+    let allowed: Vec<String> = expected.map(str::to_owned).into_iter().collect();
+    let is_misplaced = sites != allowed || step.env_value(CODESCENE_TOKEN).is_some();
     is_misplaced.then(|| {
         format!(
-            "{} step {:?} (upload: {is_upload}) reads the token at {sites:?}; an \
-             upload step reads it at {TOKEN_SITE} alone and any other step not at all",
+            "{} step {:?} reads the token at {sites:?}, but may read it at {expected:?} \
+             alone: an upload at {TOKEN_SITE}, the availability check at {CHECK_SITE}, \
+             and no step in any env",
             job.coordinate(),
             step.label()
         )
@@ -122,12 +137,13 @@ fn scope_token_faults(workflows: &[Workflow]) -> Vec<String> {
     at_workflow.chain(at_job).collect()
 }
 
-/// Return every place the token is held other than on an upload step.
+/// Return every place the token is held other than where it is used.
 ///
-/// Three claims, not one: the step that uploads has the token, no other step
-/// has it, and no wider scope does. The first is what a rule stated only as a
-/// prohibition leaves out, and it is the one that keeps the upload alive,
-/// since the upload step runs only when the token is non-empty.
+/// Three claims, not one: the upload and the availability check each read
+/// the token exactly where they must, no other step reads it, and no wider
+/// scope does. The first is what a rule stated only as a prohibition leaves
+/// out, and it is the one that keeps the upload alive, since deleting the
+/// token satisfies every prohibition while the upload's guard goes false.
 pub(crate) fn token_faults(workflows: &[Workflow]) -> Vec<String> {
     steps(workflows)
         .into_iter()
@@ -154,13 +170,26 @@ fn guard_fault(job: &Job, step: &Step) -> Option<String> {
         .collect();
     let is_action = step.uses.is_some();
     let is_credential_wrong = is_action && step.input("access-token") != Some(TOKEN_INPUT);
-    (!missing.is_empty() || is_credential_wrong).then(|| {
+    let is_unchecked = !is_checked(job, step);
+    (!missing.is_empty() || is_credential_wrong || is_unchecked).then(|| {
         format!(
-            "{at} guard lacks {missing:?}, or its access-token input {:?} is not \
-             {TOKEN_INPUT}",
+            "{at} guard lacks {missing:?}, its access-token input {:?} is not \
+             {TOKEN_INPUT}, or no availability check precedes it (unchecked: \
+             {is_unchecked})",
             step.input("access-token")
         )
     })
+}
+
+/// Return whether the availability check runs before `upload` in its job.
+///
+/// The guard reads the check's output, so a check that is missing, conditional
+/// or later in the job leaves the upload skipping forever.
+fn is_checked(job: &Job, upload: &Step) -> bool {
+    job.steps
+        .iter()
+        .take_while(|step| !std::ptr::eq(*step, upload))
+        .any(is_availability_check)
 }
 
 /// Return every upload step whose guard or credential is not as required.
@@ -263,15 +292,16 @@ fn the_publisher_uploads_rather_than_checks(
 }
 
 #[rstest]
-fn the_codescene_token_reaches_the_upload_step_and_nothing_else(
+fn the_codescene_token_reaches_the_upload_input_and_nothing_else(
     repository: Result<Vec<Workflow>, WorkflowError>,
 ) -> Result<(), WorkflowError> {
     let faults = token_faults(&repository?);
     assert!(
         faults.is_empty(),
-        "the token belongs to the upload step and to nothing else: a wider \
-         scope exports it into this repository's own build, where a \
-         compromised dependency reaches it: {faults:?}"
+        "the token belongs to the upload's input and the availability check's \
+         command and to nothing else: an env exports it into every nested step \
+         of the composite uploader, and a wider scope into this repository's \
+         own build: {faults:?}"
     );
     Ok(())
 }
@@ -283,8 +313,9 @@ fn the_upload_runs_only_on_main_with_its_token(
     let faults = guard_faults(&repository?);
     assert!(
         faults.is_empty(),
-        "the upload step is guarded on the token and on the main ref, as \
-         separate conjuncts with no `||` to make either optional: {faults:?}"
+        "the upload step is guarded on the availability check's output and on \
+         the main ref, as separate conjuncts with no `||` to make either \
+         optional, after a check that runs unconditionally: {faults:?}"
     );
     Ok(())
 }

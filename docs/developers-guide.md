@@ -225,11 +225,23 @@ refused, and a script that uploads cannot hide a check beside it.
 ### The upload is guarded on its token and on `main`
 
 `the_upload_runs_only_on_main_with_its_token` requires the upload step's `if`
-to carry two conjuncts, `env.CS_ACCESS_TOKEN != ''` and
+to carry two conjuncts, `steps.codescene_token.outputs.available == 'true'` and
 `github.ref == 'refs/heads/main'`, and the action's `access-token` input to read
-`${{ env.CS_ACCESS_TOKEN }}`. The ref guard is needed as well as the trigger's
-branch filter because the publisher also answers `workflow_dispatch`, which
-runs against whichever branch the dispatcher picks.
+`${{ secrets.CS_ACCESS_TOKEN }}`. The first conjunct reads the output of a
+`Check CodeScene token availability` step (id `codescene_token`) that must run
+earlier in the same job, with no `if` and no `env`, and whose one command is
+exactly
+`echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"`.
+GitHub evaluates that expression before it sends the command to the runner, so
+the shell receives only a literal `true` or `false`: the token is in neither
+the check's command nor its environment. A missing, conditional or renamed
+check leaves the upload skipping forever, so each is refused. The ref guard is
+needed as well as the trigger's branch filter because the publisher also answers
+`workflow_dispatch`, which runs against whichever branch the dispatcher picks.
+That dispatch is also how a merge made by the Dependabot automerge workflow's
+`GITHUB_TOKEN` gets measured, since such a merge fires no push event; it is a
+known exception (see
+[shared-actions issue 518](https://github.com/leynos/shared-actions/issues/518)).
 
 The condition is split on `&&` outside quoted strings, and an unquoted `||` is
 refused outright. A substring test for the ref guard passes
@@ -245,22 +257,27 @@ expression included, since a contract cannot promise what an expression will
 decide at run time. Cancelling superseded runs remains right for pull-request
 lanes.
 
-### The token belongs to the upload step, and to nothing else
+### The token belongs to the upload's input, and to nothing else
 
 A secret declared at job level is exported into the environment of every step
 the job runs, this repository's own build among them, so a compromised build
 dependency can read it. At workflow level it reaches every step of every job,
-which is wider still. Declared on the upload step, the blast radius is that one
-step.
+which is wider still. Declared on the upload step it is narrower, but not
+narrow: the uploader is a composite action, and a composite action's nested
+steps inherit the calling step's `env`, so every step inside the action held
+it. The token is therefore in no `env` at all. The upload takes it as its
+`access-token` input, and the availability check names it only inside an
+expression GitHub evaluates before the shell starts.
 
-`the_codescene_token_reaches_the_upload_step_and_nothing_else` makes three
-claims rather than one: the step that uploads reads the token at
-`env.CS_ACCESS_TOKEN` and nowhere else, no other step reads it, and no wider
-scope reads or forwards it. The first claim is not redundant. The upload step
-is guarded on the token being non-empty, so moving the token to the
-coverage-generation step would leave a contract asking only "some step has it,
-no job has it" perfectly green while the guard went false and the publish
-silently stopped happening.
+`the_codescene_token_reaches_the_upload_input_and_nothing_else` makes four
+claims rather than one: the upload reads the token at `with.access-token` and
+the availability check at `run`, each nowhere else; no other step reads it; no
+step binds `CS_ACCESS_TOKEN` in its `env`, whatever the value; and no wider
+scope reads or forwards it. The first claim is not redundant. Deleting the
+token satisfies every prohibition while the upload's guard goes false, so a
+contract asking only "no env has it" would stay green while the publish
+silently stopped happening. A shell upload is refused outright, since it could
+take the token only through `env` or its script.
 
 "Reads" means any text value that mentions the secret, found by walking the
 whole node rather than the keys a field was written for: an `env` value under

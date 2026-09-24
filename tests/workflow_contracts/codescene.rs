@@ -6,10 +6,12 @@
 
 use std::collections::BTreeSet;
 
+use serde_norway::Value;
+
 use crate::reader::{Job, Secret, Step, Workflow};
 
 /// The secret that authenticates a CodeScene upload, and the environment
-/// variable the upload step holds it in.
+/// variable name no step may bind it under.
 pub(crate) const CODESCENE_TOKEN: &str = "CS_ACCESS_TOKEN";
 
 /// The same secret, as the `secrets` context reads it.
@@ -19,8 +21,23 @@ pub(crate) const TOKEN_SECRET: Secret = Secret(CODESCENE_TOKEN);
 /// be published from.
 pub(crate) const PUBLISHED_BRANCH: &str = "main";
 
+/// The id of the step that reports whether the token exists.
+pub(crate) const CHECK_ID: &str = "codescene_token";
+
+/// The availability check's one command.
+///
+/// GitHub evaluates the expression before it sends the command to the runner,
+/// so the shell receives only a literal `true` or `false`: the token is in
+/// neither the check's command nor any step's `env`.
+pub(crate) const CHECK_COMMAND: &str =
+    r#"echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT""#;
+
+/// The only key path within the availability check where the token may be
+/// read.
+pub(crate) const CHECK_SITE: &str = "run";
+
 /// The conjunct that keeps the upload from running without its token.
-pub(crate) const TOKEN_GUARD: &str = "env.CS_ACCESS_TOKEN != ''";
+pub(crate) const TOKEN_GUARD: &str = "steps.codescene_token.outputs.available == 'true'";
 
 /// The conjunct that keeps the upload from running on any ref but `main`.
 ///
@@ -30,10 +47,14 @@ pub(crate) const TOKEN_GUARD: &str = "env.CS_ACCESS_TOKEN != ''";
 pub(crate) const REF_GUARD: &str = "github.ref == 'refs/heads/main'";
 
 /// The value the uploader's `access-token` input must read.
-pub(crate) const TOKEN_INPUT: &str = "${{ env.CS_ACCESS_TOKEN }}";
+///
+/// The secret itself rather than an environment variable: the uploader is a
+/// composite action, and a composite action's nested steps inherit the
+/// calling step's `env`, so a token bound there reaches every one of them.
+pub(crate) const TOKEN_INPUT: &str = "${{ secrets.CS_ACCESS_TOKEN }}";
 
 /// The only key path within an upload step where the token may be read.
-pub(crate) const TOKEN_SITE: &str = "env.CS_ACCESS_TOKEN";
+pub(crate) const TOKEN_SITE: &str = "with.access-token";
 
 /// What a step that reaches CodeScene asks it to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,6 +146,18 @@ pub(crate) fn calls_codescene(job: &Job) -> bool {
 /// variable of any other name, an input, or a script is another.
 pub(crate) fn holds_token(step: &Step) -> bool {
     step.env_value(CODESCENE_TOKEN).is_some() || !step.secret_sites(TOKEN_SECRET).is_empty()
+}
+
+/// Return whether a step is the availability check, exactly.
+///
+/// Its id, its one command, no `if` and no `env`. A condition would leave the
+/// output unset whenever it was false, so the upload would skip forever, and
+/// an `env` would put the token back into an environment.
+pub(crate) fn is_availability_check(step: &Step) -> bool {
+    step.raw.get("id").and_then(Value::as_str) == Some(CHECK_ID)
+        && step.run.as_deref().map(str::trim) == Some(CHECK_COMMAND)
+        && step.raw.get("if").is_none()
+        && step.raw.get("env").is_none()
 }
 
 /// Return whether this workflow is the coverage publisher.

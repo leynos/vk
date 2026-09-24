@@ -54,20 +54,24 @@ jobs:
           format: lcov
           use-cargo-nextest: 'false'
           with-ratchet: 'true'
+      # Publishes whether the token exists, and nothing else. The token is
+      # in no `env` on this workflow: a job-level secret is exported into
+      # every step's environment, this repository's own build among them,
+      # and the upload is a composite action whose nested steps inherit the
+      # calling step's `env`, so even a step-level binding reached every one
+      # of them. GitHub evaluates the expression before it sends the command
+      # to the runner, so the shell receives only `true` or `false`: the
+      # token is in neither the check's command nor its environment.
+      - name: Check CodeScene token availability
+        id: codescene_token
+        run: echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
       - name: Upload coverage data to CodeScene
-        # The token is declared on the step that uses it rather than on the
-        # job. A job-level secret is exported into every step's environment,
-        # including the ones that run this repository's own build, so the
-        # blast radius of a compromised dependency is the whole job rather
-        # than this one upload.
-        env:
-          CS_ACCESS_TOKEN: ${{ secrets.CS_ACCESS_TOKEN }}
         # Two guards, and neither may be widened with `||`. The ref guard is
         # needed as well as the trigger's branch filter because
         # workflow_dispatch runs against whichever branch the dispatcher
         # picks, and CodeScene refuses coverage for a branch it does not
         # analyse.
-        if: env.CS_ACCESS_TOKEN != '' && github.ref == 'refs/heads/main'
+        if: steps.codescene_token.outputs.available == 'true' && github.ref == 'refs/heads/main'
         uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
         with:
           format: lcov
@@ -76,4 +80,4 @@ jobs:
           # contract. "upload" is what an analysed branch does; "check" is
           # the pull-request gate this repository no longer runs.
           mode: upload
-          access-token: ${{ env.CS_ACCESS_TOKEN }}
+          access-token: ${{ secrets.CS_ACCESS_TOKEN }}

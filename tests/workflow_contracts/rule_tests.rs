@@ -20,8 +20,19 @@ const LANE: &str = concat!(
     "        with: {with-ratchet: 'true'}\n",
 );
 
-/// The upload step as the publisher carries it.
+/// The availability check and the upload step, as the publisher carries them.
 const UPLOAD: &str = concat!(
+    "      - name: Check\n",
+    "        id: codescene_token\n",
+    "        run: echo \"available=${{ secrets.CS_ACCESS_TOKEN != '' }}\" >> \"$GITHUB_OUTPUT\"\n",
+    "      - name: Upload\n",
+    "        if: steps.codescene_token.outputs.available == 'true' && github.ref == 'refs/heads/main'\n",
+    "        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@x\n",
+    "        with: {mode: upload, access-token: '${{ secrets.CS_ACCESS_TOKEN }}'}\n",
+);
+
+/// The upload step as the publisher carried it before the token left `env`.
+const RETIRED_UPLOAD: &str = concat!(
     "      - name: Upload\n",
     "        env: {CS_ACCESS_TOKEN: '${{ secrets.CS_ACCESS_TOKEN }}'}\n",
     "        if: env.CS_ACCESS_TOKEN != '' && github.ref == 'refs/heads/main'\n",
@@ -150,16 +161,18 @@ fn a_publisher_step_that_does_not_upload_is_refused(
 }
 
 #[test]
-fn a_shell_upload_is_held_to_the_token_and_guard_rules() -> Result<(), WorkflowError> {
-    let guarded = concat!(
+fn a_shell_upload_cannot_hold_the_token() -> Result<(), WorkflowError> {
+    // A shell upload can take the token only through `env` or its script, and
+    // neither is allowed; without it, the upload has nothing to send.
+    let bound = concat!(
         "      - env: {CS_ACCESS_TOKEN: '${{ secrets.CS_ACCESS_TOKEN }}'}\n",
         "        if: env.CS_ACCESS_TOKEN != '' && github.ref == 'refs/heads/main'\n",
         "        run: cs-coverage upload lcov.info\n",
     );
-    let workflows = set("", guarded)?;
+    let workflows = set("", bound)?;
     assert_eq!(mode_faults(&workflows), Vec::<String>::new());
-    assert_eq!(token_faults(&workflows), Vec::<String>::new());
-    assert_eq!(guard_faults(&workflows), Vec::<String>::new());
+    assert_eq!(token_faults(&workflows).len(), 1);
+    assert_eq!(guard_faults(&workflows).len(), 1);
 
     let tokenless = "      - run: cs-coverage upload lcov.info\n";
     assert_eq!(token_faults(&set("", tokenless)?).len(), 1);
@@ -172,8 +185,25 @@ fn a_shell_upload_is_held_to_the_token_and_guard_rules() -> Result<(), WorkflowE
     "&& github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'"
 )]
 #[case::ref_guard_dropped(" && github.ref == 'refs/heads/main'", "")]
-#[case::token_guard_dropped("env.CS_ACCESS_TOKEN != '' && ", "")]
-#[case::credential_elsewhere("access-token: '${{ env.CS_ACCESS_TOKEN }}'", "access-token: x")]
+#[case::token_guard_dropped("steps.codescene_token.outputs.available == 'true' && ", "")]
+#[case::credential_elsewhere("access-token: '${{ secrets.CS_ACCESS_TOKEN }}'", "access-token: x")]
+#[case::credential_through_env(
+    "access-token: '${{ secrets.CS_ACCESS_TOKEN }}'",
+    "access-token: '${{ env.CS_ACCESS_TOKEN }}'"
+)]
+#[case::check_deleted(
+    "      - name: Check\n        id: codescene_token\n        run: echo \"available=${{ secrets.CS_ACCESS_TOKEN != '' }}\" >> \"$GITHUB_OUTPUT\"\n",
+    ""
+)]
+#[case::check_conditioned(
+    "        id: codescene_token\n",
+    "        id: codescene_token\n        if: github.ref == 'refs/heads/main'\n"
+)]
+#[case::check_command_changed(
+    "run: echo \"available=${{ secrets.CS_ACCESS_TOKEN != '' }}\"",
+    "run: echo \"available=true\""
+)]
+#[case::check_renamed("id: codescene_token", "id: other")]
 fn a_weakened_upload_guard_is_refused(
     #[case] from: &str,
     #[case] to: &str,
@@ -186,16 +216,54 @@ fn a_weakened_upload_guard_is_refused(
 }
 
 #[test]
-fn a_token_moved_off_the_upload_step_is_refused() -> Result<(), WorkflowError> {
-    // The guard reads the token, so the move silently stops the upload: the
-    // rule must refuse both halves, the step that gained it and the upload
-    // step that lost it.
-    let holder = "        env: {CS_ACCESS_TOKEN: '${{ secrets.CS_ACCESS_TOKEN }}'}\n";
-    let steps = format!(
-        "      - run: make\n{holder}{}",
-        UPLOAD.replacen(holder, "", 1)
+fn the_retired_env_shape_is_refused() -> Result<(), WorkflowError> {
+    // The token bound in the upload step's `env`, the guard reading it there,
+    // and the input reading it back: the composite uploader's nested steps
+    // inherit that `env`, so every one of them held the token.
+    let workflows = set("", RETIRED_UPLOAD)?;
+    assert_eq!(token_faults(&workflows).len(), 1);
+    assert_eq!(guard_faults(&workflows).len(), 1);
+    Ok(())
+}
+
+#[rstest]
+#[case::upload_step(
+    "      - name: Upload\n",
+    "      - name: Upload\n        env: {CS_ACCESS_TOKEN: '${{ secrets.CS_ACCESS_TOKEN }}'}\n"
+)]
+#[case::check_step(
+    "        id: codescene_token\n",
+    "        id: codescene_token\n        env: {T: '${{ secrets.cs_access_token }}'}\n"
+)]
+#[case::build_step(
+    "      - name: Check\n",
+    "      - run: make\n        env: {T: '${{ secrets.CS_ACCESS_TOKEN }}'}\n      - name: Check\n"
+)]
+#[case::name_only(
+    "      - name: Upload\n",
+    "      - name: Upload\n        env: {CS_ACCESS_TOKEN: '${{ env.OTHER }}'}\n"
+)]
+fn a_token_in_any_step_env_is_refused(
+    #[case] from: &str,
+    #[case] to: &str,
+) -> Result<(), WorkflowError> {
+    assert_eq!(
+        token_faults(&set("", &UPLOAD.replacen(from, to, 1))?).len(),
+        1
     );
-    assert_eq!(token_faults(&set("", &steps)?).len(), 2);
+    Ok(())
+}
+
+#[test]
+fn a_token_moved_off_the_upload_input_is_refused() -> Result<(), WorkflowError> {
+    // Deleting the token satisfies every prohibition while the upload has
+    // nothing to send: the rule must refuse the upload that lost it.
+    let steps = UPLOAD.replacen(
+        "access-token: '${{ secrets.CS_ACCESS_TOKEN }}'",
+        "access-token: x",
+        1,
+    );
+    assert_eq!(token_faults(&set("", &steps)?).len(), 1);
     Ok(())
 }
 
