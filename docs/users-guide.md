@@ -81,6 +81,25 @@ Outdated review threads are hidden by default. Include them with
 vk pr 191 --show-outdated
 ```
 
+## Inspect an issue
+
+Show an issue from the configured repository by number:
+
+```bash
+vk issue 42
+```
+
+You can also provide a full GitHub issue URL:
+
+```bash
+vk issue https://github.com/leynos/vk/issues/42
+```
+
+If the repository or issue does not exist, `vk issue` reports
+`issue #N not found`, where `N` is the requested number. Issue numbers must fit
+GraphQL's signed 32-bit `Int` range; an out-of-range number is rejected before
+the request is sent.
+
 ## Focus on one discussion
 
 Pass a GitHub discussion fragment to show one review thread:
@@ -109,6 +128,11 @@ resolving:
 vk resolve https://github.com/leynos/vk/pull/191#discussion_r123456789 \
   --message "Addressed in the latest commit."
 ```
+
+To find the thread, the resolver queries the pull request's `reviewThreads`
+connection and scans the first 100 comments in each thread for the requested
+`fullDatabaseId`. A comment beyond the first 100 comments of a thread is not
+found.
 
 `--http-timeout SECS` sets the total deadline for the REST reply request,
 including connection, request, and response handling; its default is 10 seconds.

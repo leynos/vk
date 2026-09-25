@@ -1,52 +1,84 @@
 //! GraphQL helpers for resolving review comment threads.
+//!
+//! The thread lookup pages through `repository.pullRequest.reviewThreads`,
+//! scanning each thread's first 100 comments for the requested comment's
+//! database id (`fullDatabaseId`; the plain `databaseId` field is deprecated
+//! in the schema). An earlier revision paged a flat
+//! `PullRequest.reviewComments` connection, but that field does not exist in
+//! GitHub's published GraphQL schema — it only ever worked against mocked
+//! responses — so the query was redesigned onto the real schema when the
+//! operations moved to `graphql_client` codegen.
+//!
+//! Accepted limitation: a comment beyond the first 100 comments of a single
+//! thread will not be found (the per-thread `comments(first: 100)` cap). This
+//! is the same class of cap as the old flat query's `first: 100` page size;
+//! review threads of that depth are not a practical concern for `vk resolve`.
 
 use super::CommentRef;
+// `graphql_client` resolves the `BigInt` scalar (`fullDatabaseId`) to a type
+// of the same name in scope of the derive; the shared alias supplies it.
+use crate::api::scalars::BigInt;
+use crate::api::{CursorHistory, page_limit_error, page_limit_exceeded};
 use crate::{VkError, api::GraphQLClient};
-use serde::Deserialize;
-use serde_json::json;
+use graphql_client::GraphQLQuery;
 
-/// GraphQL mutation used to mark a review thread as resolved.
-const RESOLVE_THREAD_MUTATION: &str = r"
-    mutation($id: ID!) {
-      resolveReviewThread(input: {threadId: $id}) { clientMutationId }
-    }
-";
+/// Typed `ThreadForCommentQuery` operation: pages review threads (with their
+/// first 100 comments) so [`get_thread_id`] can locate the thread owning a
+/// comment database id.
+///
+/// Uses the generated `ResponseData` directly: the fetcher trait below is the
+/// only consumer, its unit tests construct the generated types via [`tests`]
+/// helpers, and the integration stubs supply every selected field.
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/schema.docs.graphql",
+    query_path = "graphql/resolve.graphql",
+    response_derives = "Debug, Clone, PartialEq"
+)]
+pub(crate) struct ThreadForCommentQuery;
 
-/// GraphQL query used to fetch one page of review comments.
-const REVIEW_COMMENTS_PAGE: &str = r"
-    query($owner: String!, $name: String!, $number: Int!, $after: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          reviewComments(first: 100, after: $after) {
-            pageInfo { endCursor hasNextPage }
-            nodes { databaseId pullRequestReviewThread { id } }
-          }
-        }
-      }
-    }
-";
+/// Typed `ResolveReviewThreadMutation`: marks a review thread resolved.
+///
+/// Uses the generated `ResponseData` directly ([`GraphQLClient::run_operation`])
+/// since nothing beyond a successful deserialization is consumed.
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "graphql/schema.docs.graphql",
+    query_path = "graphql/resolve.graphql",
+    response_derives = "Debug, Clone, PartialEq"
+)]
+pub(crate) struct ResolveReviewThreadMutation;
+
+/// One page of thread-for-comment data as returned by the API.
+pub(crate) type ThreadPage = thread_for_comment_query::ResponseData;
+/// Generated review-thread connection used during thread lookup.
+type ReviewThreads =
+    thread_for_comment_query::ThreadForCommentQueryRepositoryPullRequestReviewThreads;
+/// Generated pagination metadata for a review-thread connection.
+type ReviewThreadsPageInfo =
+    thread_for_comment_query::ThreadForCommentQueryRepositoryPullRequestReviewThreadsPageInfo;
 
 #[cfg(test)]
 use mockall::automock;
 
+/// Parameters for one review-thread page request.
 #[derive(Debug)]
-/// Variables for a paginated review-comment query.
 pub(crate) struct ReviewCommentsQuery<'a> {
     /// Repository owner login.
     pub owner: &'a str,
     /// Repository name.
     pub name: &'a str,
-    /// Pull-request number.
+    /// Pull request number.
     pub number: u64,
-    /// Cursor returned by the preceding page, if any.
+    /// Cursor after which to fetch the next page.
     pub after: Option<String>,
 }
 
+/// Fetches codegen response pages for review-comment thread lookup.
 #[cfg_attr(test, automock)]
 #[allow(clippy::ref_option, reason = "automock generates &Option")]
-/// Fetches pages of review comments for a pull request.
 pub(crate) trait ReviewCommentsFetcher {
-    /// Fetch one page of review comments.
+    /// Fetch one page of review threads and their initial comments.
     #[expect(
         clippy::elidable_lifetime_names,
         reason = "automock requires explicit lifetime for query struct"
@@ -54,7 +86,7 @@ pub(crate) trait ReviewCommentsFetcher {
     async fn fetch_review_comments<'a>(
         &self,
         query: ReviewCommentsQuery<'a>,
-    ) -> Result<ReviewCommentsPage, VkError>;
+    ) -> Result<ThreadPage, VkError>;
 }
 
 impl ReviewCommentsFetcher for GraphQLClient {
@@ -65,103 +97,102 @@ impl ReviewCommentsFetcher for GraphQLClient {
     async fn fetch_review_comments<'a>(
         &self,
         query: ReviewCommentsQuery<'a>,
-    ) -> Result<ReviewCommentsPage, VkError> {
-        self.run_query(
-            REVIEW_COMMENTS_PAGE,
-            json!({
-                "owner": query.owner,
-                "name": query.name,
-                "number": query.number,
-                "after": query.after,
-            }),
-        )
-        .await
+    ) -> Result<ThreadPage, VkError> {
+        // GraphQL `Int` is signed 32-bit, so validate that range before
+        // widening to the `i64` representation generated by graphql_client.
+        let number = i64::from(i32::try_from(query.number).map_err(|_| VkError::InvalidNumber)?);
+        let variables = thread_for_comment_query::Variables {
+            owner: query.owner.to_string(),
+            name: query.name.to_string(),
+            number,
+            after: query.after,
+        };
+        self.run_operation::<ThreadForCommentQuery>(variables).await
     }
 }
 
-#[derive(Clone, Deserialize)]
-/// GraphQL response containing one page of review comments.
-pub(crate) struct ReviewCommentsPage {
-    /// Repository data, when the repository exists.
-    repository: Option<Repository>,
+/// Scan one page of review threads for the comment with `target` database id,
+/// returning the owning thread's id when found.
+fn find_thread_in_page(
+    threads: Vec<
+        Option<
+            thread_for_comment_query::ThreadForCommentQueryRepositoryPullRequestReviewThreadsNodes,
+        >,
+    >,
+    target: &str,
+) -> (Option<String>, bool) {
+    let mut comments_truncated = false;
+    for thread in threads.into_iter().flatten() {
+        let hit = thread
+            .comments
+            .nodes
+            .iter()
+            .flatten()
+            .flatten()
+            .any(|comment| comment.full_database_id.as_deref() == Some(target));
+        if hit {
+            return (Some(thread.id), comments_truncated);
+        }
+        comments_truncated |= thread.comments.page_info.has_next_page;
+    }
+    (None, comments_truncated)
 }
 
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Repository portion of a review-comment response.
-pub(crate) struct Repository {
-    /// Pull request data, when the pull request exists.
-    pull_request: Option<PullRequest>,
+/// Extract review threads from a GraphQL response page.
+fn review_threads_from_page(data: ThreadPage) -> Result<ReviewThreads, VkError> {
+    data.repository
+        .and_then(|repository| repository.pull_request)
+        .map(|pull_request| pull_request.review_threads)
+        .ok_or_else(|| VkError::BadResponse("missing review threads".into()))
 }
 
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Pull-request portion of a review-comment response.
-pub(crate) struct PullRequest {
-    /// Review comments connection, when available.
-    review_comments: Option<ReviewComments>,
+/// Return the cursor for the next review-thread page, if one exists.
+fn next_thread_cursor(
+    page_info: &ReviewThreadsPageInfo,
+    cursor_history: &mut CursorHistory,
+) -> Result<Option<String>, VkError> {
+    if !page_info.has_next_page {
+        return Ok(None);
+    }
+    let next = page_info
+        .end_cursor
+        .clone()
+        .ok_or_else(|| VkError::BadResponse("missing endCursor with hasNextPage".into()))?;
+    cursor_history.record_next(&next)?;
+    Ok(Some(next))
 }
 
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Review-comment connection and pagination information.
-pub(crate) struct ReviewComments {
-    /// Pagination metadata.
-    page_info: PageInfo,
-    /// Comments in this page.
-    nodes: Vec<CommentNode>,
+/// Return the terminal error after the review-thread traversal finishes.
+fn thread_lookup_error(comment_id: u64, comments_truncated: bool) -> VkError {
+    if comments_truncated {
+        return VkError::BadResponse(
+            format!(
+                "comment {comment_id} was not found in the fetched first 100 comments of a review thread"
+            )
+            .into(),
+        );
+    }
+    VkError::CommentNotFound { comment_id }
 }
 
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Cursor metadata for a review-comment page.
-pub(crate) struct PageInfo {
-    /// Cursor for the next page, when present.
-    end_cursor: Option<String>,
-    /// Whether another page is available.
-    has_next_page: bool,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Review-comment node carrying its database and thread identifiers.
-pub(crate) struct CommentNode {
-    /// GitHub database identifier for the comment.
-    database_id: u64,
-    /// Thread associated with the comment.
-    pull_request_review_thread: ReviewThread,
-}
-
-#[derive(Clone, Deserialize)]
-/// GraphQL representation of a review thread.
-pub(crate) struct ReviewThread {
-    /// Global GraphQL identifier for the thread.
-    id: String,
-}
-
-#[derive(Clone, Deserialize)]
-/// Response returned by the resolve-thread mutation.
-pub(crate) struct ResolveThreadResponse {
-    #[serde(rename = "resolveReviewThread")]
-    /// Mutation payload, when GitHub returns one.
-    _resolve_review_thread: Option<ResolveThreadInner>,
-}
-
-#[derive(Clone, Deserialize)]
-/// Payload returned by the resolve-thread mutation.
-pub(crate) struct ResolveThreadInner {
-    #[serde(rename = "clientMutationId")]
-    /// Client mutation identifier returned by GitHub.
-    _client_mutation_id: Option<String>,
-}
-
-/// Find the GraphQL thread identifier for a review comment.
+/// Find the review thread that owns the referenced discussion comment.
 pub(crate) async fn get_thread_id(
     gql: &impl ReviewCommentsFetcher,
     reference: CommentRef<'_>,
 ) -> Result<String, VkError> {
+    // Comment ids come from `#discussion_r<ID>` permalinks; `fullDatabaseId`
+    // is a `BigInt` scalar carried as a decimal string, so the id is matched
+    // by its canonical string form.
+    let target = reference.comment_id.to_string();
     let mut cursor: Option<String> = None;
+    let mut cursor_history = CursorHistory::new(cursor.as_deref());
+    let mut comments_truncated = false;
+    let mut pages_seen = 0usize;
     loop {
+        pages_seen += 1;
+        if page_limit_exceeded(pages_seen) {
+            return Err(page_limit_error());
+        }
         let data = gql
             .fetch_review_comments(ReviewCommentsQuery {
                 owner: &reference.repo.owner,
@@ -170,116 +201,36 @@ pub(crate) async fn get_thread_id(
                 after: cursor.clone(),
             })
             .await?;
-        let comments = data
-            .repository
-            .and_then(|r| r.pull_request)
-            .and_then(|p| p.review_comments)
-            .ok_or_else(|| VkError::BadResponse("missing review comments".into()))?;
-        if let Some(node) = comments
-            .nodes
-            .iter()
-            .find(|n| n.database_id == reference.comment_id)
-        {
-            return Ok(node.pull_request_review_thread.id.clone());
+        let threads = review_threads_from_page(data)?;
+        if let Some(nodes) = threads.nodes {
+            let (id, page_truncated) = find_thread_in_page(nodes, &target);
+            if let Some(id) = id {
+                return Ok(id);
+            }
+            comments_truncated |= page_truncated;
         }
-        if !comments.page_info.has_next_page {
+        let Some(next) = next_thread_cursor(&threads.page_info, &mut cursor_history)? else {
             break;
-        }
-        let next = comments.page_info.end_cursor.clone();
-        if next.is_none() {
-            return Err(VkError::BadResponse(
-                "missing endCursor with hasNextPage".into(),
-            ));
-        }
-        if next == cursor {
-            return Err(VkError::BadResponse(
-                "non-progressing pagination (repeated endCursor)".into(),
-            ));
-        }
-        cursor = next;
+        };
+        cursor = Some(next);
     }
-    Err(VkError::CommentNotFound {
-        comment_id: reference.comment_id,
-    })
+    Err(thread_lookup_error(
+        reference.comment_id,
+        comments_truncated,
+    ))
 }
 
-/// Mark a GraphQL review thread as resolved.
+/// Mark a review thread as resolved through the typed mutation.
 pub(crate) async fn resolve_thread(gql: &GraphQLClient, thread_id: &str) -> Result<(), VkError> {
-    let _: ResolveThreadResponse = gql
-        .run_query(RESOLVE_THREAD_MUTATION, json!({ "id": thread_id }))
+    // The mutation's response is intentionally unconsumed beyond a successful
+    // deserialization, so the generated `ResponseData` is discarded.
+    let _ = gql
+        .run_operation::<ResolveReviewThreadMutation>(resolve_review_thread_mutation::Variables {
+            id: thread_id.to_string(),
+        })
         .await?;
     Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ref_parser::RepoInfo;
-    use mockall::Sequence;
-    use rstest::rstest;
-
-    fn page(nodes: Vec<u64>, end_cursor: Option<&str>, has_next: bool) -> ReviewCommentsPage {
-        ReviewCommentsPage {
-            repository: Some(Repository {
-                pull_request: Some(PullRequest {
-                    review_comments: Some(ReviewComments {
-                        page_info: PageInfo {
-                            end_cursor: end_cursor.map(ToOwned::to_owned),
-                            has_next_page: has_next,
-                        },
-                        nodes: nodes
-                            .into_iter()
-                            .map(|id| CommentNode {
-                                database_id: id,
-                                pull_request_review_thread: ReviewThread { id: "t".into() },
-                            })
-                            .collect(),
-                    }),
-                }),
-            }),
-        }
-    }
-
-    #[rstest]
-    #[case::missing_comments(vec![ReviewCommentsPage { repository: None }], VkError::BadResponse("missing review comments".into()))]
-    #[case::missing_cursor(vec![page(vec![], None, true)], VkError::BadResponse("missing endCursor with hasNextPage".into()))]
-    #[case::repeated_cursor(
-        vec![
-            page(vec![], Some("a"), true),
-            page(vec![], Some("a"), true),
-        ],
-        VkError::BadResponse("non-progressing pagination (repeated endCursor)".into()),
-    )]
-    #[case::not_found(
-        vec![
-            page(vec![1], Some("a"), true),
-            page(vec![2], None, false),
-        ],
-        VkError::CommentNotFound { comment_id: 42 },
-    )]
-    #[tokio::test]
-    async fn pagination_errors(#[case] pages: Vec<ReviewCommentsPage>, #[case] expected: VkError) {
-        let mut mock = MockReviewCommentsFetcher::new();
-        let mut seq = Sequence::new();
-        for page in pages {
-            let p = page.clone();
-            mock.expect_fetch_review_comments()
-                .times(1)
-                .in_sequence(&mut seq)
-                .returning(move |_| Ok(p.clone()));
-        }
-        let repo = RepoInfo {
-            owner: "o".into(),
-            name: "r".into(),
-        };
-        let reference = CommentRef {
-            repo: &repo,
-            pull_number: 1,
-            comment_id: 42,
-        };
-        let err = get_thread_id(&mock, reference)
-            .await
-            .expect_err("expected error");
-        assert_eq!(format!("{err:?}"), format!("{expected:?}"));
-    }
-}
+mod tests;

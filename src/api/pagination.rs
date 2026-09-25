@@ -1,60 +1,64 @@
 //! Pagination helpers for cursor-based GraphQL connections.
 
 use crate::VkError;
+use crate::boxed::BoxedStr;
+use std::collections::HashSet;
 
-/// Retrieve all pages from a cursor-based connection.
+/// Maximum number of pages fetched by one pagination traversal.
+pub(crate) const MAX_PAGES: usize = 1000;
+
+/// Cursor history shared by the crate's GraphQL pagination traversals.
 ///
-/// The `fetch` closure is called repeatedly with the current cursor until the
-/// [`PageInfo`] object indicates no further pages remain.
-///
-/// If the `fetch` closure yields an error, the function returns an [`Err`]
-/// containing only that error. Any items fetched before the failure are
-/// discarded and are not available in the error result.
-///
-/// # Examples
-/// ```
-/// use std::cell::Cell;
-/// use vk::{api::paginate, PageInfo};
-///
-/// # tokio::runtime::Runtime::new().expect("runtime").block_on(async {
-/// let calls = Cell::new(0);
-/// let items = paginate(|_cursor| {
-///     calls.set(calls.get() + 1);
-///     let current = calls.get();
-///     async move {
-///         let (has_next_page, end_cursor) = if current == 1 {
-///             (true, Some("next".to_string()))
-///         } else {
-///             (false, None)
-///         };
-///         Ok((vec![current], PageInfo { has_next_page, end_cursor }))
-///     }
-/// }).await.expect("pagination");
-/// assert_eq!(items, vec![1, 2]);
-/// assert_eq!(calls.get(), 2);
-/// # });
-/// ```
-///
-/// # Errors
-///
-/// Propagates any [`VkError`] returned by the `fetch` closure.
-pub async fn paginate<T, F, Fut>(mut fetch: F) -> Result<Vec<T>, VkError>
-where
-    F: FnMut(Option<String>) -> Fut,
-    Fut: std::future::Future<Output = Result<(Vec<T>, crate::PageInfo), VkError>>,
-{
-    let mut items = Vec::new();
-    let mut cursor = None;
-    loop {
-        let (mut page, info) = fetch(cursor.clone()).await?;
-        items.append(&mut page);
-        if let Some(next) = info.next_cursor()? {
-            cursor = Some(next.into());
-        } else {
-            break;
+/// It owns the cycle-detection invariant for paginators that advance through
+/// opaque cursors. Callers seed it with an optional initial cursor and record
+/// each cursor returned by the server before making the next request.
+pub(crate) struct CursorHistory {
+    /// Cursors that have already been used or returned by this traversal.
+    seen: HashSet<String>,
+}
+
+impl CursorHistory {
+    /// Create a history seeded with the cursor used for the first request.
+    pub(crate) fn new(initial_cursor: Option<&str>) -> Self {
+        Self {
+            seen: initial_cursor.into_iter().map(ToOwned::to_owned).collect(),
         }
     }
-    Ok(items)
+
+    /// Record a returned cursor, rejecting a cursor that would form a cycle.
+    pub(crate) fn record_next(&mut self, cursor: &str) -> Result<(), VkError> {
+        if self.seen.insert(cursor.to_string()) {
+            Ok(())
+        } else {
+            Err(VkError::BadResponse(
+                "non-progressing pagination (repeated endCursor)".boxed(),
+            ))
+        }
+    }
+}
+
+/// Return whether a one-based page count has exceeded the traversal bound.
+pub(crate) const fn page_limit_exceeded(pages_seen: usize) -> bool {
+    pages_seen > MAX_PAGES
+}
+
+/// Build the shared error returned when a pagination traversal exceeds its cap.
+pub(crate) fn page_limit_error() -> VkError {
+    VkError::BadResponse(format!("pagination exceeded max pages {MAX_PAGES}").boxed())
+}
+
+/// Set the pagination cursor on a generated `Variables` struct.
+///
+/// `graphql_client` renders each operation's variables as a typed struct, so
+/// cursor injection cannot mutate an untyped JSON map. Paginated operations
+/// implement this trait so [`super::GraphQLClient::paginate_operation_as`] can
+/// advance the cursor between pages without knowing the concrete variables
+/// type.
+///
+/// Passing `None` clears the cursor, requesting the first page.
+pub(crate) trait CursorVariables {
+    /// Replace the `after`/`cursor` variable with `cursor`.
+    fn set_cursor(&mut self, cursor: Option<String>);
 }
 
 #[cfg(test)]
