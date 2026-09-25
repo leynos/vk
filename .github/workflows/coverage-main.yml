@@ -40,6 +40,10 @@ permissions:
 jobs:
   coverage-upload:
     runs-on: ubicloud-standard-2
+    # The CodeScene token lives in this environment, whose deployment policy
+    # admits `main` alone; the codescene environment contract holds it to
+    # this job.
+    environment: codescene
     timeout-minutes: 20
     env:
       CARGO_TERM_COLOR: always
