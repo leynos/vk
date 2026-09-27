@@ -104,11 +104,13 @@ async fn transport_posts_graphql_contract_to_the_endpoint_override() {
         loopback_retry(Duration::from_secs(1)),
     )
     .expect("build GraphQL client");
+    let payload = json!({
+        "query": "query RequestContract($id: ID!) { viewer { login } }",
+        "variables": {"id": "42"},
+        "operationName": "RequestContract",
+    });
     let result: Value = client
-        .run_query(
-            "query RequestContract($id: ID!) { viewer { login } }",
-            json!({"id": "42"}),
-        )
+        .run_payload(&payload, "RequestContract")
         .await
         .expect("execute GraphQL query");
     let captured = capture_receiver.await.expect("receive capture");

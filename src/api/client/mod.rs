@@ -13,8 +13,7 @@ use backon::Retryable;
 // submodule, which would otherwise shadow it.
 use ::http::header::HeaderMap;
 use serde::de::DeserializeOwned;
-use serde_json::{Value, json};
-use std::borrow::Cow;
+use std::sync::Arc;
 use tokio::time::sleep;
 use tracing::warn;
 
@@ -23,15 +22,15 @@ use crate::boxed::BoxedStr;
 use vk::environment;
 
 use self::helpers::{
-    BODY_SNIPPET_LEN, VALUE_SNIPPET_LEN, build_headers, handle_graphql_errors, operation_name,
-    snippet,
+    BODY_SNIPPET_LEN, VALUE_SNIPPET_LEN, build_headers, handle_graphql_errors, snippet,
 };
 use self::http::HttpResponse;
+use self::metrics::record_retry;
 use self::transport::{PostJsonRequest, Transport};
 use self::types::GraphQLResponse;
 use super::retry::{RetryConfig, build_retry_builder, should_retry};
 
-pub use self::types::{Endpoint, Query, Token};
+pub use self::types::{Endpoint, Token};
 
 #[cfg(test)]
 mod client_response_tests;
@@ -48,7 +47,7 @@ pub struct GraphQLClient {
     /// GraphQL endpoint targeted by this client.
     endpoint: Endpoint,
     /// Optional writer for request and response transcripts.
-    transcript: Option<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>,
+    transcript: Option<Arc<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>>,
     /// Retry and timeout settings for requests.
     retry: RetryConfig,
     /// Pooled direct HTTP transport for GraphQL requests.
@@ -110,7 +109,7 @@ impl GraphQLClient {
         let transcript = transcript
             .map(|p| {
                 std::fs::File::create(p)
-                    .map(|file| std::sync::Mutex::new(std::io::BufWriter::new(file)))
+                    .map(|file| Arc::new(std::sync::Mutex::new(std::io::BufWriter::new(file))))
             })
             .transpose()
             .map_err(|e| VkError::Io(Box::new(e)))?;
@@ -141,10 +140,11 @@ impl GraphQLClient {
                 endpoint: &self.endpoint,
                 headers: &self.headers,
                 payload,
+                operation,
                 timeout: self.retry.request_timeout,
             })
             .await?;
-        self.log_transcript(payload, operation, &resp);
+        self.log_transcript(payload, operation, &resp).await;
         if !(200..300).contains(&resp.status) {
             // The transport surfaces every completed HTTP response, so a
             // non-2xx status is classified here. reqwest gave this a
@@ -204,8 +204,8 @@ impl GraphQLClient {
                 let snippet = match serde_json::to_string_pretty(&value) {
                     Ok(json) => snippet(&json, VALUE_SNIPPET_LEN),
                     Err(e) => {
-                        warn!("Failed to serialise error snippet: {e}");
-                        "<failed to serialise error snippet>".to_string()
+                        warn!("Failed to serialize error snippet: {e}");
+                        "<failed to serialize error snippet>".to_string()
                     }
                 };
                 let path = e.path().to_string();
@@ -219,88 +219,114 @@ impl GraphQLClient {
         }
     }
 
-    /// Execute a GraphQL query using this client.
+    /// Send `payload` for `operation`, applying the shared retry loop and
+    /// deserializing the successful response into `T`.
+    ///
+    /// This is the common core behind [`run_operation`](Self::run_operation)
+    /// and [`run_operation_as`](Self::run_operation_as): both build the request
+    /// envelope via `graphql_client` codegen and then delegate the POST,
+    /// jittered-backoff retry, transcript logging, and `serde_path_to_error`
+    /// diagnostics to this helper so the machinery is defined once.
     ///
     /// # Errors
     ///
     /// Returns a [`VkError`] if the request fails or the response cannot be
     /// deserialized.
-    pub async fn run_query<V, T>(&self, query: impl Into<Query>, variables: V) -> Result<T, VkError>
+    async fn run_payload<T>(
+        &self,
+        payload: &serde_json::Value,
+        operation: &str,
+    ) -> Result<T, VkError>
     where
-        V: serde::Serialize,
         T: DeserializeOwned,
     {
-        let query = query.into();
-        let op_name = operation_name(query.as_ref());
-        let operation = op_name.map_or_else(|| snippet(query.as_ref(), 64), str::to_string);
-        let mut payload = json!({ "query": query.as_ref(), "variables": &variables });
-        if let (Some(_), Some(obj)) = (op_name, payload.as_object_mut()) {
-            obj.insert("operationName".into(), json!(operation.clone()));
-        }
         let builder = build_retry_builder(self.retry);
+        let operation_name = operation.to_owned();
         (|| async {
-            let resp = self.execute_single_request(&payload, &operation).await?;
-            Self::process_graphql_response::<T>(&resp, &operation)
+            let resp = self.execute_single_request(payload, operation).await?;
+            Self::process_graphql_response::<T>(&resp, operation)
         })
         .retry(builder)
         .sleep(sleep)
         .when(should_retry)
-        .notify(|err: &VkError, dur| warn!("retrying GraphQL query after {dur:?}: {err}"))
+        .notify(move |err: &VkError, dur| {
+            record_retry();
+            warn!(
+                operation = %operation_name,
+                delay_ms = dur.as_millis(),
+                error = %err,
+                "retrying GraphQL query"
+            );
+        })
         .await
     }
 
-    /// Execute a GraphQL query and merge an optional cursor into the variables.
+    /// Execute a `graphql_client` codegen'd GraphQL operation using this client.
     ///
-    /// This wraps [`run_query`], injecting the `cursor` field when provided so
-    /// callers need only supply the base variables for paginated queries. If the
-    /// `variables` already contain a `cursor` key it will be overwritten.
+    /// The operation's `QueryBody` serializes to the standard
+    /// `{"query", "variables", "operationName"}` envelope, and the request is
+    /// dispatched through the shared POST, retry, transcript, and
+    /// deserialization core ([`run_payload`](Self::run_payload)), so behaviour
+    /// (retries, error text, transcript shape) matches the retired string-based
+    /// path exactly.
     ///
     /// # Errors
     ///
-    /// Returns [`VkError::BadResponse`] if `variables` serialize to a non-object
-    /// value, or propagates any error from the underlying request.
+    /// Returns a [`VkError`] if the variables cannot be serialized, the request
+    /// fails, or the response cannot be deserialized.
     ///
     /// # Examples
     /// ```no_run
-    /// use serde_json::{Map, Value, json};
+    /// use graphql_client::GraphQLQuery;
     /// use vk::api::GraphQLClient;
-    /// # async fn run(client: GraphQLClient) -> Result<(), vk::VkError> {
-    /// let mut vars = Map::new();
-    /// vars.insert("id".to_string(), json!(1));
-    /// let data: Value = client.fetch_page("query", None, vars).await?;
-    /// # Ok(())
+    ///
+    /// # async fn run<Q: GraphQLQuery>(
+    /// #     client: GraphQLClient,
+    /// #     variables: Q::Variables,
+    /// # ) -> Result<Q::ResponseData, vk::VkError> {
+    /// let data = client.run_operation::<Q>(variables).await?;
+    /// # Ok(data)
     /// # }
     /// ```
-    /// ```no_run
-    /// use serde_json::json;
-    /// use vk::api::GraphQLClient;
-    /// # async fn run(client: GraphQLClient) {
-    ///     let err = client
-    ///         .fetch_page::<serde_json::Value, _>("query", None, json!(null))
-    ///         .await;
-    ///     assert!(err.is_err());
-    /// # }
-    /// ```
-    pub async fn fetch_page<T, V>(
+    pub async fn run_operation<Q>(
         &self,
-        query: impl Into<Query>,
-        cursor: Option<Cow<'_, str>>,
-        variables: V,
-    ) -> Result<T, VkError>
+        variables: Q::Variables,
+    ) -> Result<Q::ResponseData, VkError>
     where
-        V: serde::Serialize,
+        Q: graphql_client::GraphQLQuery,
+    {
+        self.run_operation_as::<Q, Q::ResponseData>(variables).await
+    }
+
+    /// Execute a codegen'd operation but deserialize the response into `T`
+    /// rather than the generated `ResponseData`.
+    ///
+    /// This is the escape hatch used where the generated `ResponseData` would
+    /// be stricter than the operation's documented behaviour or than the
+    /// hand-written domain structs the tests and fixtures rely on (for example
+    /// the review-thread listing, whose `isOutdated` field carries a
+    /// client-side default, and the reviews listing, whose `state` is a GraphQL
+    /// enum that the public `String` field preserves verbatim). The query is
+    /// still built from `Q` — so `graphql_client` validates the selection
+    /// against the vendored schema at compile time — while the wire body is
+    /// decoded into `T` through the same `serde_path_to_error` machinery as
+    /// [`run_operation`](Self::run_operation), keeping error text and retry
+    /// behaviour identical.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`VkError`] if the variables cannot be serialized, the request
+    /// fails, or the response cannot be deserialized into `T`.
+    pub(crate) async fn run_operation_as<Q, T>(&self, variables: Q::Variables) -> Result<T, VkError>
+    where
+        Q: graphql_client::GraphQLQuery,
         T: DeserializeOwned,
     {
-        let query = query.into();
-        let mut variables = serde_json::to_value(variables).map_err(|e| {
-            VkError::BadResponse(format!("serialising fetch_page variables: {e}").boxed())
+        let body = Q::build_query(variables);
+        let operation = body.operation_name.to_string();
+        let payload = serde_json::to_value(&body).map_err(|e| {
+            VkError::BadResponse(format!("serializing {operation} variables: {e}").boxed())
         })?;
-        let obj = variables.as_object_mut().ok_or_else(|| {
-            VkError::BadResponse("variables for fetch_page must be a JSON object".boxed())
-        })?;
-        if let Some(c) = cursor {
-            obj.insert("cursor".into(), Value::String(c.into_owned()));
-        }
-        self.run_query(query, variables).await
+        self.run_payload::<T>(&payload, &operation).await
     }
 }

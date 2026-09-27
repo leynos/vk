@@ -1,10 +1,11 @@
 //! Response-classification tests for the GraphQL client.
 
 use super::{
-    Value, VkError,
+    VkError,
     tests::{TestClient, start_server_with_status},
 };
 use rstest::rstest;
+use serde_json::Value;
 use third_wheel::hyper::StatusCode;
 
 #[derive(Debug)]
@@ -64,7 +65,7 @@ enum Expected {
     },
 })]
 #[tokio::test]
-async fn run_query_reports_details(#[case] case: TestCase) {
+async fn run_payload_reports_details(#[case] case: TestCase) {
     let TestCase {
         responses,
         status,
@@ -72,8 +73,17 @@ async fn run_query_reports_details(#[case] case: TestCase) {
         expected,
     } = case;
     let TestClient { client, join } = start_server_with_status(responses, status);
+    let operation_name = operation
+        .split_whitespace()
+        .nth(1)
+        .expect("named query operation");
+    let payload = serde_json::json!({
+        "query": operation,
+        "variables": {},
+        "operationName": operation_name,
+    });
     let error = client
-        .run_query::<_, Value>(operation, serde_json::json!({}))
+        .run_payload::<Value>(&payload, operation_name)
         .await
         .expect_err("response should fail");
     match expected {

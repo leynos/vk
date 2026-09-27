@@ -1,0 +1,30 @@
+query ThreadForCommentQuery($owner: String!, $name: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $after) {
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+        nodes {
+          id
+          comments(first: 100) {
+            nodes {
+              fullDatabaseId
+            }
+            pageInfo {
+              endCursor
+              hasNextPage
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+mutation ResolveReviewThreadMutation($id: ID!) {
+  resolveReviewThread(input: { threadId: $id }) {
+    clientMutationId
+  }
+}

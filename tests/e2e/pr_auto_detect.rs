@@ -14,6 +14,7 @@ async fn pr_auto_detects_from_branch() {
     // PR lookup now includes headRepository for fork disambiguation
     let pr_lookup_body = serde_json::json!({
         "data": {"repository": {"pullRequests": {
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
             "nodes": [{
                 "number": 42,
                 "headRepository": {
@@ -88,6 +89,7 @@ async fn pr_fragment_only_auto_detects_pr() {
 
     let pr_lookup_body = serde_json::json!({
         "data": {"repository": {"pullRequests": {
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
             "nodes": [{
                 "number": 7,
                 "headRepository": {
@@ -175,6 +177,7 @@ async fn pr_no_reference_fails_when_no_pr_for_branch() {
 
     let pr_lookup_body = serde_json::json!({
         "data": {"repository": {"pullRequests": {
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
             "nodes": []
         }}}
     })
@@ -251,6 +254,7 @@ async fn pr_fork_disambiguation_falls_back_to_first_when_no_origin() {
     // it should fall back to the first PR.
     let pr_lookup_body = serde_json::json!({
         "data": {"repository": {"pullRequests": {
+            "pageInfo": {"hasNextPage": false, "endCursor": null},
             "nodes": [
                 {
                     "number": 100,

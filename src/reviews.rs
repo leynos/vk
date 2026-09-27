@@ -3,82 +3,13 @@
 //! The module defines GraphQL query structures and pagination helpers so callers
 //! can fetch pull-request reviews and collate the latest review from each author.
 
-use chrono::{DateTime, Utc};
-use serde::Deserialize;
-use serde_json::{Map, json};
-
-use crate::{GraphQLClient, PageInfo, User, VkError, ref_parser::RepoInfo};
+use crate::{GraphQLClient, VkError, ref_parser::RepoInfo};
 use std::collections::{HashMap, hash_map::Entry};
 
-/// A pull-request review returned by the GitHub API.
-#[derive(Debug, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct PullRequestReview {
-    /// Review body in Markdown.
-    pub body: String,
-    /// Timestamp when the review was formally submitted.
-    ///
-    /// This may be `None` when the timestamp is missing or unknown.
-    pub submitted_at: Option<DateTime<Utc>>,
-    /// GitHub review state, such as `APPROVED` or `COMMENTED`.
-    pub state: String,
-    /// Author of the review, when available.
-    pub author: Option<User>,
-}
+mod wire;
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Top-level response for the review query.
-struct ReviewData {
-    /// Repository response data.
-    repository: RepositoryReviews,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Repository response data for reviews.
-struct RepositoryReviews {
-    #[serde(rename = "pullRequest")]
-    /// Pull-request response data.
-    pull_request: PullRequestReviews,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// Pull-request response data for reviews.
-struct PullRequestReviews {
-    /// Review connection returned by GitHub.
-    reviews: ReviewConnection,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-/// A paginated connection of pull-request reviews.
-struct ReviewConnection {
-    /// Reviews returned in this page.
-    nodes: Vec<PullRequestReview>,
-    /// Pagination metadata for this page.
-    page_info: PageInfo,
-}
-
-/// GraphQL query used to retrieve pull-request reviews.
-const REVIEWS_QUERY: &str = r"
-    query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-      repository(owner: $owner, name: $name) {
-        pullRequest(number: $number) {
-          reviews(first: 100, after: $cursor) {
-            nodes {
-              body
-              state
-              submittedAt
-              author { login }
-            }
-            pageInfo { hasNextPage endCursor }
-          }
-        }
-      }
-    }
-";
+pub use wire::{PullRequestReview, ReviewsQuery};
+use wire::{ReviewData, reviews_query};
 
 /// Retrieve all reviews for a pull request by paging through the GitHub
 /// GraphQL API.
@@ -115,17 +46,25 @@ pub async fn fetch_reviews(
         i32::try_from(number).is_ok(),
         "pull-request number {number} exceeds GraphQL Int (i32) range",
     );
-    let number_i32 = i32::try_from(number).map_err(|_| VkError::InvalidNumber)?;
+    // GraphQL `Int` maps to `i64`; a pull-request number beyond `i32::MAX`
+    // cannot be valid, so range-check as `i32` before widening.
+    let number = i64::from(i32::try_from(number).map_err(|_| VkError::InvalidNumber)?);
 
-    let mut vars = Map::new();
-    vars.insert("owner".into(), json!(repo.owner.clone()));
-    vars.insert("name".into(), json!(repo.name.clone()));
-    vars.insert("number".into(), json!(number_i32));
+    let variables = reviews_query::Variables {
+        owner: repo.owner.clone(),
+        name: repo.name.clone(),
+        number,
+        cursor: None,
+    };
     client
-        .paginate_all(REVIEWS_QUERY, vars, None, |data: ReviewData| {
-            let conn = data.repository.pull_request.reviews;
-            Ok((conn.nodes, conn.page_info))
-        })
+        .paginate_operation_as::<ReviewsQuery, ReviewData, PullRequestReview, _>(
+            variables,
+            None,
+            |data: ReviewData| {
+                let conn = data.repository.pull_request.reviews;
+                Ok((conn.nodes, conn.page_info))
+            },
+        )
         .await
 }
 
@@ -217,7 +156,10 @@ mod tests {
     use crate::ref_parser::RepoInfo;
     use crate::test_utils::{TestClient, start_server};
     use crate::{GraphQLClient, User, VkError};
-    use chrono::{TimeZone, Utc};
+    // Explicit `chrono::DateTime` shadows the `scalars::DateTime` alias pulled
+    // in by `use super::*`, so the `DateTime<Utc>` case parameters below resolve
+    // to the generic chrono type.
+    use chrono::{DateTime, TimeZone, Utc};
     #[cfg(debug_assertions)]
     use futures::FutureExt;
     use rstest::rstest;
@@ -323,7 +265,12 @@ mod tests {
             }}}}
         })
         .to_string();
-        let TestClient { client, join, .. } = start_server(vec![body]);
+        let TestClient {
+            client,
+            join,
+            requests,
+            ..
+        } = start_server(vec![body]);
         let reviews = fetch_reviews(
             &client,
             &RepoInfo {
@@ -335,6 +282,30 @@ mod tests {
         .await
         .expect("should accept i32::MAX");
         assert!(reviews.is_empty());
+        {
+            let requests = requests.lock().expect("lock requests");
+            let request = requests.first().expect("one request");
+            assert_eq!(
+                request.get("operationName"),
+                Some(&serde_json::json!("ReviewsQuery"))
+            );
+            assert_eq!(
+                request.pointer("/variables/owner"),
+                Some(&serde_json::json!("o"))
+            );
+            assert_eq!(
+                request.pointer("/variables/name"),
+                Some(&serde_json::json!("n"))
+            );
+            assert_eq!(
+                request.pointer("/variables/number"),
+                Some(&serde_json::json!(i32::MAX))
+            );
+            assert_eq!(
+                request.pointer("/variables/cursor"),
+                Some(&serde_json::Value::Null)
+            );
+        }
         join.abort();
         let _ = join.await;
     }

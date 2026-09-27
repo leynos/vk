@@ -4,65 +4,51 @@
 //! branch via the GitHub GraphQL API. Supports disambiguation when multiple
 //! forks have PRs with the same branch name by filtering on the head repository
 //! owner.
+//!
+//! The GraphQL operation itself lives in the private [`wire`] submodule, which
+//! owns the `graphql_client` codegen item, the response envelopes, and the
+//! [`GraphQLClient`] call. This module owns the pagination traversal and the
+//! matching policy, and speaks only the domain shapes defined here.
 
-use serde::Deserialize;
-use serde_json::{Map, json};
-
-use crate::graphql_queries::PR_FOR_BRANCH_QUERY;
+use crate::api::{CursorHistory, page_limit_error, page_limit_exceeded};
 use crate::ref_parser::RepoInfo;
-use crate::{GraphQLClient, VkError};
+use crate::{GraphQLClient, PageInfo, VkError};
 
-/// GraphQL data returned when looking up pull requests for a branch.
-#[derive(Debug, Deserialize)]
-pub(crate) struct PrForBranchData {
-    /// Repository containing the matching pull requests.
-    repository: PrForBranchRepository,
-}
+mod wire;
 
-/// Repository portion of a branch pull-request lookup response.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PrForBranchRepository {
-    /// Pull requests matching the branch query.
-    pull_requests: PrConnection,
-}
+#[cfg(test)]
+pub(crate) use wire::MockPrForBranchFetcher;
+use wire::{PrForBranchFetcher, PrPageRequest};
 
-/// Connection containing pull requests returned by GitHub.
-#[derive(Debug, Deserialize)]
-struct PrConnection {
-    /// Pull-request nodes in the connection.
-    nodes: Vec<PrNode>,
-}
-
-/// Pull-request identity and head-repository data.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct PrNode {
+/// One candidate pull request from a page of branch lookup results.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CandidatePr {
     /// Pull-request number.
     pub(crate) number: u64,
-    /// Repository from which the pull request originates, when available.
-    pub(crate) head_repository: Option<HeadRepository>,
+    /// Login of the head repository owner, when GitHub reports one.
+    ///
+    /// This is `None` for a pull request whose head repository has been
+    /// deleted, which no owner filter can match.
+    pub(crate) head_owner: Option<String>,
 }
 
-/// Head-repository data for a pull request.
-#[derive(Debug, Deserialize)]
-pub(crate) struct HeadRepository {
-    /// Owner of the head repository.
-    pub(crate) owner: Owner,
+impl CandidatePr {
+    /// Check if this candidate's head repository owner matches `owner`,
+    /// ignoring ASCII case.
+    pub(crate) fn head_owner_matches(&self, owner: &str) -> bool {
+        self.head_owner
+            .as_deref()
+            .is_some_and(|login| login.eq_ignore_ascii_case(owner))
+    }
 }
 
-/// GitHub repository-owner information.
-#[derive(Debug, Deserialize)]
-pub(crate) struct Owner {
-    /// GitHub login for the owner.
-    pub(crate) login: String,
-}
-
-/// Check if a PR's head repository owner matches the given owner (case-insensitive).
-pub(crate) fn head_owner_matches(pr: &PrNode, owner: &str) -> bool {
-    pr.head_repository
-        .as_ref()
-        .is_some_and(|hr| hr.owner.login.eq_ignore_ascii_case(owner))
+/// One page of branch pull-request candidates and its pagination metadata.
+#[derive(Debug, Clone)]
+pub(crate) struct PrPage {
+    /// Candidates on this page, in the order GitHub returned them.
+    pub(crate) prs: Vec<CandidatePr>,
+    /// Pagination metadata for this page.
+    pub(crate) page_info: PageInfo,
 }
 
 /// Look up the pull request number for a branch via the GitHub API.
@@ -113,27 +99,52 @@ pub async fn fetch_pr_for_branch(
     branch: &str,
     head_owner: Option<&str>,
 ) -> Result<u64, VkError> {
-    let mut vars = Map::new();
-    vars.insert("owner".into(), json!(&repo.owner));
-    vars.insert("name".into(), json!(&repo.name));
-    vars.insert("headRef".into(), json!(branch));
+    find_pr_number(client, repo, branch, head_owner).await
+}
 
-    let data: PrForBranchData = client.run_query(PR_FOR_BRANCH_QUERY, vars).await?;
-
-    let prs = &data.repository.pull_requests.nodes;
-
-    // If head_owner is specified, filter PRs by head repository owner.
-    // When no head owner is provided, fall back to the first PR (backward compatible).
-    let matching_pr = head_owner.map_or_else(
-        || prs.first(),
-        |owner| prs.iter().find(|pr| head_owner_matches(pr, owner)),
-    );
-
-    matching_pr
-        .map(|pr| pr.number)
-        .ok_or_else(|| VkError::NoPrForBranch {
-            branch: branch.into(),
-        })
+/// Page through branch pull-request candidates until one matches.
+///
+/// The traversal is bounded by [`page_limit_exceeded`] and refuses a cursor
+/// that would repeat, so an uncooperative server cannot make it loop forever.
+pub(crate) async fn find_pr_number(
+    fetcher: &impl PrForBranchFetcher,
+    repo: &RepoInfo,
+    branch: &str,
+    head_owner: Option<&str>,
+) -> Result<u64, VkError> {
+    let mut after = None;
+    let mut cursor_history = CursorHistory::new(after.as_deref());
+    let mut pages_seen = 0usize;
+    loop {
+        pages_seen += 1;
+        if page_limit_exceeded(pages_seen) {
+            return Err(page_limit_error());
+        }
+        let request_cursor = after.take();
+        let page = fetcher
+            .fetch_pr_page(PrPageRequest {
+                owner: &repo.owner,
+                name: &repo.name,
+                branch,
+                after: request_cursor.clone(),
+            })
+            .await?;
+        let matching_pr = head_owner.map_or_else(
+            || page.prs.first(),
+            |owner| page.prs.iter().find(|pr| pr.head_owner_matches(owner)),
+        );
+        if let Some(pr) = matching_pr {
+            return Ok(pr.number);
+        }
+        let Some(cursor) = page.page_info.next_cursor()? else {
+            break;
+        };
+        cursor_history.record_next(cursor)?;
+        after = Some(cursor.to_owned());
+    }
+    Err(VkError::NoPrForBranch {
+        branch: branch.into(),
+    })
 }
 
 #[cfg(test)]

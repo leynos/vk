@@ -6,8 +6,9 @@
 //! [`crate::api::GraphQLClient`] without touching GitHub.
 
 use crate::api::{GraphQLClient, RetryConfig};
+use serde_json::Value;
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicUsize, Ordering},
 };
 use third_wheel::hyper::{
@@ -24,6 +25,8 @@ pub struct TestClient {
     pub join: JoinHandle<()>,
     /// Count of HTTP requests received.
     pub hits: Arc<AtomicUsize>,
+    /// JSON GraphQL requests received in order.
+    pub requests: Arc<Mutex<Vec<Value>>>,
 }
 
 /// Start a stub HTTP server returning each body in `responses` sequentially.
@@ -46,18 +49,27 @@ pub struct TestClient {
 pub fn start_server(responses: Vec<String>) -> TestClient {
     let responses = Arc::new(responses);
     let counter = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::new(Mutex::new(Vec::new()));
     let svc_counter = Arc::clone(&counter);
+    let svc_requests = Arc::clone(&requests);
     let svc = make_service_fn(move |_conn| {
         let responses = Arc::clone(&responses);
         let counter = Arc::clone(&svc_counter);
+        let requests = Arc::clone(&svc_requests);
         async move {
-            Ok::<_, std::convert::Infallible>(service_fn(move |_req: Request<Body>| {
+            Ok::<_, std::convert::Infallible>(service_fn(move |req: Request<Body>| {
                 let idx = counter.fetch_add(1, Ordering::SeqCst);
+                let requests = Arc::clone(&requests);
                 let body = responses
                     .get(idx)
                     .cloned()
                     .unwrap_or_else(|| "{}".to_string());
                 async move {
+                    let bytes = third_wheel::hyper::body::to_bytes(req.into_body())
+                        .await
+                        .expect("read GraphQL request");
+                    let request = serde_json::from_slice(&bytes).expect("parse GraphQL request");
+                    requests.lock().expect("lock requests").push(request);
                     Ok::<_, std::convert::Infallible>(
                         Response::builder()
                             .status(StatusCode::OK)
@@ -85,5 +97,6 @@ pub fn start_server(responses: Vec<String>) -> TestClient {
         client,
         join,
         hits: counter,
+        requests,
     }
 }

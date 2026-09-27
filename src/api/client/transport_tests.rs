@@ -79,8 +79,9 @@ async fn run_concurrent_query(
     operation: &'static str,
 ) -> (&'static str, Value) {
     let query = format!("query {operation} {{ viewer {{ login }} }}");
+    let payload = json!({"query": query, "variables": {}, "operationName": operation});
     let response = client
-        .run_query(query.as_str(), json!({}))
+        .run_payload(&payload, operation)
         .await
         .expect("execute concurrent query");
     (operation, response)
@@ -129,8 +130,9 @@ async fn transport_maps_refused_loopback_connections_to_request_context() {
         loopback_retry(Duration::from_millis(100)),
     )
     .expect("build GraphQL client");
+    let payload = json!({"query": "query RefusedConnection { viewer { login } }", "variables": {}, "operationName": "RefusedConnection"});
     let error = client
-        .run_query::<_, Value>("query RefusedConnection { viewer { login } }", json!({}))
+        .run_payload::<Value>(&payload, "RefusedConnection")
         .await
         .expect_err("refused connection fails");
     assert_request_context(&error, &[]);
@@ -153,8 +155,9 @@ async fn transport_preserves_non_success_status_and_body_snippet() {
     )
     .expect("build GraphQL client");
 
+    let payload = json!({"query": "query NonSuccess { viewer { login } }", "variables": {}, "operationName": "NonSuccess"});
     let error = client
-        .run_query::<_, Value>("query NonSuccess { viewer { login } }", json!({}))
+        .run_payload::<Value>(&payload, "NonSuccess")
         .await
         .expect_err("non-success response fails");
     stop_loopback_server(server_task).await;
@@ -175,8 +178,9 @@ async fn transport_times_out_before_receiving_response_headers() {
     )
     .expect("build GraphQL client");
 
+    let payload = json!({"query": "query HeaderTimeout { viewer { login } }", "variables": {}, "operationName": "HeaderTimeout"});
     let error = client
-        .run_query::<_, Value>("query HeaderTimeout { viewer { login } }", json!({}))
+        .run_payload::<Value>(&payload, "HeaderTimeout")
         .await
         .expect_err("header wait times out");
     stop_loopback_server(server_task).await;
@@ -205,8 +209,9 @@ async fn transport_rejects_response_bodies_over_the_limit() {
     )
     .expect("build GraphQL client");
 
+    let payload = json!({"query": "query OversizedBody { viewer { login } }", "variables": {}, "operationName": "OversizedBody"});
     let error = client
-        .run_query::<_, Value>("query OversizedBody { viewer { login } }", json!({}))
+        .run_payload::<Value>(&payload, "OversizedBody")
         .await
         .expect_err("oversized response fails");
     stop_loopback_server(server_task).await;
@@ -265,8 +270,9 @@ async fn transport_reports_non_timeout_response_body_read_failures() {
     )
     .expect("build GraphQL client");
 
+    let payload = json!({"query": "query BrokenBody { viewer { login } }", "variables": {}, "operationName": "BrokenBody"});
     let error = client
-        .run_query::<_, Value>("query BrokenBody { viewer { login } }", json!({}))
+        .run_payload::<Value>(&payload, "BrokenBody")
         .await
         .expect_err("body read failure fails the request");
     sender_task_receiver

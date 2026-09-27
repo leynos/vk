@@ -60,6 +60,8 @@ pub(super) struct PostJsonRequest<'a> {
     pub(super) headers: &'a HeaderMap,
     /// JSON payload serialized into the request body.
     pub(super) payload: &'a Value,
+    /// Stable operation name included in the request envelope.
+    pub(super) operation: &'a str,
     /// Deadline covering request submission and body collection.
     pub(super) timeout: Duration,
 }
@@ -141,6 +143,7 @@ impl Transport {
         name = "vk.graphql_transport_attempt",
         skip_all,
         fields(
+            operation = %request.operation,
             outcome = tracing::field::Empty,
             status_class = tracing::field::Empty,
             failure_category = tracing::field::Empty,
@@ -154,6 +157,7 @@ impl Transport {
             endpoint,
             headers,
             payload,
+            operation: _,
             timeout,
         } = request;
         let context = RequestErrorContext::from_payload(payload);
