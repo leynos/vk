@@ -1,9 +1,15 @@
 //! Integration-style unit tests for branch pull-request lookup.
+//!
+//! These drive the real path end to end: the scripted stub server answers the
+//! actual `PrForBranchQuery` document, so the operation name, request
+//! variables, cursor advancement, and cycle rejection are all asserted against
+//! genuine HTTP traffic. The injected-fetcher boundary is covered separately
+//! by [`super::fetcher_tests`].
 
 use super::*;
 use crate::api::RetryConfig;
 use rstest::{fixture, rstest};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
@@ -27,28 +33,6 @@ struct MockServer {
 impl MockServer {
     fn client(&self) -> &GraphQLClient {
         &self.client
-    }
-
-    /// Get the captured GraphQL variables from the final request.
-    fn captured_variables(&self) -> Option<Value> {
-        self.captured
-            .lock()
-            .expect("lock")
-            .requests
-            .last()
-            .and_then(|request| request.get("variables"))
-            .cloned()
-    }
-
-    /// Get the captured GraphQL operation name from the final request.
-    fn operation_name(&self) -> Option<Value> {
-        self.captured
-            .lock()
-            .expect("lock")
-            .requests
-            .last()
-            .and_then(|request| request.get("operationName"))
-            .cloned()
     }
 
     /// Get every captured GraphQL request in arrival order.
@@ -173,8 +157,6 @@ fn build_pr_lookup_response(
     has_next_page: bool,
     end_cursor: Option<&str>,
 ) -> String {
-    use serde_json::Value;
-
     let nodes_json: Vec<Value> = nodes
         .iter()
         .map(|pr| {
@@ -217,12 +199,17 @@ async fn returns_pr_number_on_success(basic_repo: RepoInfo) {
     assert_eq!(result.expect("success"), 42);
 
     // Verify request variables
-    let vars = server.captured_variables().expect("captured variables");
+    let requests = server.requests();
+    let request = requests.first().expect("one request");
+    assert_eq!(
+        request.get("operationName"),
+        Some(&json!("PrForBranchQuery"))
+    );
+    let vars = request.get("variables").expect("captured variables");
     assert_eq!(vars.get("owner"), Some(&json!("owner")));
     assert_eq!(vars.get("name"), Some(&json!("repo")));
     assert_eq!(vars.get("headRef"), Some(&json!("feature")));
     assert_eq!(vars.get("after"), Some(&Value::Null));
-    assert_eq!(server.operation_name(), Some(json!("PrForBranchQuery")));
 }
 
 #[rstest]

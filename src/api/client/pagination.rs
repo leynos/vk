@@ -32,15 +32,14 @@ impl GraphQLClient {
     /// review-thread listing, per-thread comment paging, and the reviews
     /// listing).
     ///
-    /// Pagination stops after 1000 pages to avoid infinite loops when cursors
-    /// repeat or the API misbehaves. As with
-    /// this method, any items fetched before an error are discarded.
+    /// Pagination rejects any repeated cursor and stops after 1000 pages if
+    /// the API misbehaves. Any items fetched before an error are discarded.
     ///
     /// # Errors
     ///
     /// Propagates any [`VkError`] returned by the underlying request or the
-    /// `map` closure, and returns [`VkError::BadResponse`] if the page cap is
-    /// exceeded.
+    /// `map` closure, and returns [`VkError::BadResponse`] if a cursor repeats
+    /// or the page cap is exceeded.
     pub(crate) async fn paginate_operation_as<Q, T, Item, Mapper>(
         &self,
         variables: Q::Variables,

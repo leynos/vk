@@ -147,19 +147,27 @@ fields.
 ### Typed GraphQL operations
 
 Each GraphQL operation is a named document under [`graphql/`](../graphql/). The
-consumer module derives `graphql_client::GraphQLQuery` with the vendored
-`graphql/schema.docs.graphql` schema and its operation document. Code
-generation checks the selection and variables against that schema at compile
-time and produces the operation's variables and response types.
+`wire` submodule of the consumer feature derives `graphql_client::GraphQLQuery`
+with the vendored `graphql/schema.docs.graphql` schema and its operation
+document. Code generation checks the selection and variables against that
+schema at compile time and produces the operation's variables and response
+types.
 
-The generated types remain private to the consumer modules. `GraphQLClient`
-exposes `run_operation` for operations whose generated response type matches
-the required data. Consumers that need the established hand-written domain
-shape use the internal `run_operation_as` boundary: codegen still builds and
-checks the query, while `serde_path_to_error` deserializes the response into
-the chosen target. This preserves documented leniency, such as missing
-`isOutdated` fields being treated as current and review states retaining their
-wire value.
+Keep the derive and everything downstream of it in that private submodule, not
+in the consumer module itself: the operation marker, generated-variable
+construction, response envelopes, and the `GraphQLClient` call all belong
+there. The submodule's job is to flatten each response into the domain shapes
+the parent module already defines, so that no generated type and no wire
+envelope escapes the boundary. `src/issues/` and
+[`src/branch_pr/`](../src/branch_pr/) are the worked examples.
+
+The generated types remain private to that submodule. `GraphQLClient` exposes
+`run_operation` for operations whose generated response type matches the
+required data. Consumers that need the established hand-written domain shape
+use the internal `run_operation_as` boundary: codegen still builds and checks
+the query, while `serde_path_to_error` deserializes the response into the
+chosen target. This preserves documented leniency, such as missing `isOutdated`
+fields being treated as current and review states retaining their wire value.
 
 Paginated operations implement the internal `CursorVariables` trait for their
 generated variables and use `paginate_operation_as`. The helper clones the base
@@ -169,6 +177,15 @@ fails. It caps a traversal at 1,000 pages. The crate-visible `CursorHistory` is
 the single owner of cursor cycle detection: typed GraphQL paginators seed it
 with the request's initial cursor and record each returned cursor before a
 follow-up request. Only typed GraphQL paginators may use this history.
+
+A traversal that a test needs to drive page by page is generic over a narrow
+fetcher trait defined in the same `wire` submodule. The trait's method takes
+domain-shaped request parameters and returns a domain-shaped page; the
+`GraphQLClient` implementation is the only production one, and `automock`
+supplies the test double. Never put generated variables or response types in
+that trait's signature, or the mock would reintroduce exactly the coupling the
+submodule exists to remove. `src/branch_pr/wire.rs`'s `PrForBranchFetcher` is
+the worked example.
 
 Hand-written wire envelopes that model GraphQL connection `nodes` use the
 internal `api::deserialize::nullable_nodes` deserializer. It is limited to

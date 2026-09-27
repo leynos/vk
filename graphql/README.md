@@ -11,7 +11,8 @@ that `graphql_client` codegen validates against it at compile time (see
   not edit it by hand.
 - `*.graphql` — one document per operation group. Each document is named
   after the operation(s) it contains and is referenced by a
-  `#[derive(GraphQLQuery)]` item in `src/`.
+  `#[derive(GraphQLQuery)]` item in the consumer feature's private `wire`
+  submodule (for example `src/issues/wire.rs`).
 
 ## Refreshing the schema
 

@@ -226,6 +226,21 @@ escalation, not workarounds.
   headers, and status handling, and reconciled the documentation findings.
 - [x] (2026-08-03) Documentation review follow-up corrected the dependency
   record, documentation index, Oxford spelling, and REST ownership guidance.
+- [x] (2026-09-27) Adapter-boundary refactor on PR 196: `src/issues/` and
+  `src/branch_pr/` now each own a private `wire` submodule holding the
+  `#[derive(GraphQLQuery)]` item, generated-variable construction, and the wire
+  envelopes, so no generated type crosses a domain-facing interface. The branch
+  lookup traversal is generic over the narrow `PrForBranchFetcher` trait (takes
+  `PrPageRequest`, returns `PrPage`), injected in tests via `automock`.
+  `src/issues.rs` and `src/branch_pr/tests.rs` became directories. Both
+  remaining review findings verified still-valid and fixed: the
+  `paginate_operation_as` rustdoc no longer credits the 1000-page cap with
+  rejecting repeated cursors (that is `CursorHistory::record_next`, which fires
+  first) and its `# Errors` section now names both `VkError::BadResponse`
+  sources; `tests/resolve.rs` split 436 to 286 lines with the GraphQL
+  pagination fixtures moved to `tests/resolve/pagination.rs` (169 lines). All
+  five gates green; 516 tests passed with `resolve` running 13 feature-gated
+  cases, including the relocated `pagination::resolve_flows`.
 - [x] (2026-08-27) GraphQL transport hardening added loopback request-contract,
   connection, status, header-timeout, body-timeout, response-limit, and
   concurrent-transcript coverage; bounded metrics and property tests cover
