@@ -44,7 +44,7 @@ jobs:
           fi
           echo "Release tag $tag matches Cargo.toml version."
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@95e90ba9e33eaeb3c8b4bf6ed1dbe1d7184ee710
+        uses: leynos/shared-actions/.github/actions/setup-rust@774cc5a01e457714aede66e14a97b3e257812fc2
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
       - name: Install AArch64 linker
