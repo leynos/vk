@@ -32,12 +32,8 @@ pub(crate) struct Step {
     pub(crate) uses: Option<String>,
     /// The shell the step runs, when it runs one.
     pub(crate) run: Option<String>,
-    /// The step's `if` condition, when it declares one.
-    pub(crate) condition: Option<String>,
     /// The inputs the step passes, flattened to text.
     pub(crate) with: Vec<Pair>,
-    /// The environment the step declares, flattened to text.
-    pub(crate) env: Vec<Pair>,
     /// The step as written.
     pub(crate) raw: Value,
 }
@@ -46,11 +42,6 @@ impl Step {
     /// Return one input's value, when the step passes it.
     pub(crate) fn input(&self, key: &str) -> Option<&str> {
         value_of(&self.with, key)
-    }
-
-    /// Return one environment variable's value, when the step declares it.
-    pub(crate) fn env_value(&self, key: &str) -> Option<&str> {
-        value_of(&self.env, key)
     }
 
     /// Return every key path within the step that references `secret`.
@@ -81,15 +72,8 @@ pub(crate) struct Job {
     pub(crate) runs_on: RunnerSelection,
     /// The declared ceiling, or `None` when the job inherits GitHub's default.
     pub(crate) timeout_minutes: Option<u64>,
-    /// The environment the job exports into every one of its steps.
-    pub(crate) env: Vec<Pair>,
     /// The reusable workflow the job calls, when it calls one.
     pub(crate) calls: Option<String>,
-    /// Whether the job hands every secret it can read to the workflow it
-    /// calls, through `secrets: inherit`.
-    pub(crate) inherits_secrets: bool,
-    /// Whether a newer run of the job's concurrency group cancels this one.
-    pub(crate) cancels_in_progress: bool,
     /// Every step the job declares.
     pub(crate) steps: Vec<Step>,
     /// The job as written.
@@ -112,11 +96,6 @@ impl Job {
         self.name.as_deref().unwrap_or(&self.id)
     }
 
-    /// Return whether the job exports an environment variable named `key`.
-    pub(crate) fn declares_env(&self, key: &str) -> bool {
-        value_of(&self.env, key).is_some()
-    }
-
     /// Return every key path outside the job's steps that references `secret`.
     ///
     /// The steps are left to [`Step::secret_sites`], so a site is reported
@@ -133,15 +112,8 @@ pub(crate) struct Workflow {
     pub(crate) file: String,
     /// The events the workflow answers.
     pub(crate) events: BTreeSet<String>,
-    /// The environment declared at workflow level.
-    ///
-    /// GitHub exports it into every step of every job, so a secret here has
-    /// the widest reach a workflow can give it.
-    pub(crate) env: Vec<Pair>,
     /// The branches a `push` trigger is filtered to, when it names any.
     pub(crate) push_branches: BTreeSet<String>,
-    /// The tags a `push` trigger is filtered to, when it names any.
-    pub(crate) push_tags: BTreeSet<String>,
     /// Whether a newer run of the workflow's concurrency group cancels this
     /// one.
     pub(crate) cancels_in_progress: bool,
@@ -170,12 +142,6 @@ impl Workflow {
     /// Return whether this workflow answers a push.
     pub(crate) fn serves_pushes(&self) -> bool {
         self.events.contains("push")
-    }
-
-    /// Return whether the workflow exports an environment variable named
-    /// `key` into every job.
-    pub(crate) fn declares_env(&self, key: &str) -> bool {
-        value_of(&self.env, key).is_some()
     }
 
     /// Return every key path outside the workflow's jobs that references

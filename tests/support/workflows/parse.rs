@@ -44,9 +44,7 @@ pub(crate) fn parse_workflow(file: &str, text: &str) -> Result<Workflow, Workflo
     Ok(Workflow {
         file: file.to_owned(),
         events: names_of(triggers_of(&document)),
-        env: pairs_of(document.get("env")),
         push_branches: names_of(push.and_then(|filter| filter.get("branches"))),
-        push_tags: names_of(push.and_then(|filter| filter.get("tags"))),
         cancels_in_progress: cancels_in_progress(document.get("concurrency")),
         jobs: jobs_of(file, &document)?,
         raw: document,
@@ -143,9 +141,7 @@ fn steps_of(job: &Value) -> Vec<Step> {
             name: text_at(step.get("name")),
             uses: text_at(step.get("uses")),
             run: text_at(step.get("run")),
-            condition: text_at(step.get("if")),
             with: pairs_of(step.get("with")),
-            env: pairs_of(step.get("env")),
             raw: step.clone(),
         })
         .collect()
@@ -167,10 +163,7 @@ fn job_of(file: &str, (id, job): (&Value, &Value)) -> Option<Result<Job, Workflo
         name: text_at(job.get("name")),
         runs_on,
         timeout_minutes: job.get("timeout-minutes").and_then(Value::as_u64),
-        env: pairs_of(job.get("env")),
         calls: text_at(job.get("uses")),
-        inherits_secrets: job.get("secrets").and_then(Value::as_str) == Some("inherit"),
-        cancels_in_progress: cancels_in_progress(job.get("concurrency")),
         steps: steps_of(job),
         raw: job.clone(),
     }))

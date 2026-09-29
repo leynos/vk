@@ -11,11 +11,13 @@ use cap_std::ambient_authority;
 use cap_std::fs_utf8::Dir;
 use rstest::rstest;
 
-use crate::codescene::TOKEN_SECRET;
 use crate::reader::{
     Condition, Scope, Secret, WorkflowError, load, local_call_target, parse_workflow,
     pull_request_closure,
 };
+
+/// The secret whose spellings the `secrets` context cases below read.
+const TOKEN_SECRET: Secret = Secret("CS_ACCESS_TOKEN");
 
 /// Return a set of names, for comparing against a parsed one.
 fn names(items: &[&str]) -> BTreeSet<String> {

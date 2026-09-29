@@ -105,3 +105,13 @@ beside the main-ref guard, and the upload takes
 longer acceptable, since it could take the token only through `env` or its
 script. `tests/workflow_contracts.rs` enforces the new shape, and the
 [developers' guide](developers-guide.md) describes it.
+
+## Addendum, 2026-09-29: the contract moved to a shared library
+
+The contract that enforces this decision no longer lives in this repository.
+`make test-workflow-contracts` runs `cv005-contracts check`, the shared
+contract library in `leynos/shared-actions` (`packages/cv005-contracts`), from
+a full commit pinned in the Makefile, and `.github/cv005.toml` holds this
+repository's parameters. The clauses are unchanged, and the library's own suite
+proves each one. The paragraphs above name the repository-local copy this
+replaces.

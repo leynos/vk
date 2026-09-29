@@ -40,6 +40,10 @@ jobs:
         with:
           version: "0.6.0"
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@f5548c55522a1db0af3c84f2af3d058bc9bc2de2
+      - name: Check the CV-005 contracts
+        run: make test-workflow-contracts
       - name: Format
         run: make check-fmt
 
@@ -55,12 +59,13 @@ jobs:
       - name: Lint
         run: make lint
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@95e90ba9e33eaeb3c8b4bf6ed1dbe1d7184ee710
+        uses: leynos/shared-actions/.github/actions/generate-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
         with:
           output-path: lcov.info
           format: lcov
           use-cargo-nextest: 'false'
           with-ratchet: 'true'
+          publish-artefact: 'false'
       # Nothing contacts CodeScene here. This lane generates coverage for
       # its own ratchet check and stops; `coverage-main.yml` owns every
       # persistent coverage output, the upload included. See "Coverage:
