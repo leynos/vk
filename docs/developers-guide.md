@@ -213,164 +213,40 @@ to `main`, generates ratcheted coverage and uploads it to CodeScene.
 check, and contacts CodeScene not at all. The decision and its alternatives are
 recorded in [ADR 002](adr-002-main-owns-coverage-publication.md).
 
-The contracts holding all of it live in one test binary,
-`tests/workflow_contracts.rs`, with its modules under
-`tests/workflow_contracts/` and the shared reader under
-`tests/support/workflows/`. They derive what they assert from each workflow's
+`make test-workflow-contracts` holds the coverage split by running
+`cv005-contracts check`, the shared contract library in `leynos/shared-actions`
+(`packages/cv005-contracts`), from a full commit named by `CV005_CONTRACTS_REF`
+in the Makefile; CI runs it in a "Check the CV-005 contracts" step. A fix to
+the rules is therefore a pin bump. The target needs `uv`, which fetches the
+Python 3.13 the library runs under. The repository's only parameter is
+`repository` in `.github/cv005.toml`. The library's own suite proves each rule
+refuses the shape it exists to refuse, so this repository keeps no copy of the
+readers or the refusal cases.
+
+What the library holds: no workflow a pull request can reach, directly or
+through local reusable workflows, names CodeScene, its token or its uploader;
+the push-to-`main` publisher is the one place that uploads, behind a check step
+whose sole command reports whether the token is set and an upload condition
+that also requires `github.ref == 'refs/heads/main'`; the token reaches the
+upload only as its `access-token` input, never through an `env`; the
+publisher's checkouts set `persist-credentials: false` and its permissions are
+`contents: read`; the concurrency group is keyed on the ref and never cancels;
+and the coverage steps of the pull-request lane and the publisher measure one
+selection at one commit of the shared actions, the lane publishing no artefact.
+The retired `installer-checksum` input, the `CODESCENE_CLI_SHA256` variable and
+the `get-codescene-sha` dispatch stay retired for the same reason. Workflows
+are read strictly, so a duplicate key, or a workflow declaring both a quoted
+and an unquoted `on` key, is refused rather than silently resolved, and a
+reading failure exits 2 rather than passing.
+
+The contracts that remain in `tests/workflow_contracts.rs` are the ones about
+where each lane runs and what it may bill, how Markdown is linted, and which
+runs a newer push cancels. They derive what they assert from each workflow's
 own triggers and calls rather than from a list of file names, so adding a
 workflow asks the question again instead of slipping past a contract keyed on
 names. One binary rather than one per contract means the reader is compiled
 once, and every item in it is used by the binary that compiles it, so no
 `dead_code` allowance is needed.
-
-### Why a pull request never reaches CodeScene
-
-Two reasons, and neither is a preference. CodeScene accepts
-`cs-coverage upload` only for branches it analyses, so an upload from a
-pull-request head is refused outright. And a pull-request lane that contacts
-CodeScene puts a third-party network call, and the token that authenticates it,
-on the fork-facing side of the repository.
-
-`no_pull_request_lane_contacts_codescene` refuses three routes to CodeScene:
-the CodeScene action, a `cs-coverage` command, and any other mention of
-CodeScene's host, such as a `curl`. It also refuses the token in any scope,
-read under any name, and forwarding it with `secrets: inherit`.
-
-The rule runs over the pull-request *closure*, not over the workflows whose own
-triggers name a pull request. A reusable workflow declaring only
-`workflow_call` runs on behalf of every lane that calls it, and
-`secrets: inherit` hands it every secret the caller holds, so a contract
-enumerating workflows by trigger alone would never look inside it. A local call
-is recognized by shape: strip a leading `./`, then ask whether the rest is a
-path under `.github/workflows/`. A call naming a workflow that does not exist
-is an error rather than a dead end.
-
-What replaces the changed-line gate is the ratchet.
-`every_pull_request_workflow_ratchets_its_own_coverage` requires
-`with-ratchet: 'true'` on every generator in the closure, because a lane
-generating coverage without it measures nothing it can fail on. The baseline it
-compares against is the one `coverage-main.yml` writes: caches saved on `main`
-are readable by every pull-request run.
-
-It judges each lane separately rather than pooling every generator into one
-list, since pooling lets a second lane's ratcheting generator stand in for a
-lane whose own does not ratchet. A coverage lane is derived as a workflow that
-generates coverage, not named: requiring every pull-request workflow to
-generate coverage would refuse `dependabot-automerge.yml`, which answers
-`pull_request_target` and rightly generates none.
-
-### The publisher is derived, not named
-
-`only_the_publisher_uploads_coverage` asks four things of a workflow before it
-may reach CodeScene: that it answers a push, that it serves no pull request,
-that its push trigger is filtered to exactly `main`, and that it names no tag
-filter.
-
-The second condition is what makes the rule applicable. A repository whose
-single workflow declares both triggers would otherwise be required to upload
-and forbidden from uploading at the same time, and the contract would have no
-consistent reading.
-
-The third and fourth are what make it mean anything. The branch set must *equal*
-`{main}`: `branches: [main, release]` contains `main` and publishes from
-`release`. `release.yml` answers a push of tags and serves no pull request, so
-without the filter conditions it would qualify as the publisher and could carry
-a CodeScene upload with no contract objecting.
-
-`the_publisher_uploads_rather_than_checks` classifies every CodeScene step in
-the publisher by operation. The action must say `mode: upload` explicitly
-rather than leave the default in force, and a `cs-coverage` command must run
-`upload`; `check`, an unstated mode, or a bare request to the host are all
-refused, and a script that uploads cannot hide a check beside it.
-
-### The upload is guarded on its token and on `main`
-
-`the_upload_runs_only_on_main_with_its_token` requires the upload step's `if`
-to carry two conjuncts, `steps.codescene_token.outputs.available == 'true'` and
-`github.ref == 'refs/heads/main'`, and the action's `access-token` input to read
-`${{ secrets.CS_ACCESS_TOKEN }}`. The first conjunct reads the output of a
-`Check CodeScene token availability` step (id `codescene_token`) that must run
-earlier in the same job, with no `if` and no `env`, and whose one command is
-exactly
-`echo "available=${{ secrets.CS_ACCESS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"`.
-GitHub evaluates that expression before it sends the command to the runner, so
-the shell receives only a literal `true` or `false`: the token is in neither
-the check's command nor its environment. A missing, conditional or renamed
-check leaves the upload skipping forever, so each is refused. The ref guard is
-needed as well as the trigger's branch filter because the publisher also answers
-`workflow_dispatch`, which runs against whichever branch the dispatcher picks.
-That dispatch is also how a merge made by the Dependabot automerge workflow's
-`GITHUB_TOKEN` gets measured, since such a merge fires no push event; it is a
-known exception (see
-[shared-actions issue 518](https://github.com/leynos/shared-actions/issues/518)).
-
-The condition is split on `&&` outside quoted strings, and an unquoted `||` is
-refused outright. A substring test for the ref guard passes
-`... && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'`,
-which makes every conjunct optional and uploads a dispatch from any branch.
-
-`the_publisher_queues_rather_than_cancels` refuses `cancel-in-progress` on the
-publisher at workflow and job level, and `coverage-main.yml` declares a
-concurrency group that queues. A cancelled publisher abandons both its upload
-and the ratchet baseline it writes; a queued one publishes after the run ahead
-of it. Anything but an absent or literally false value counts as cancelling, an
-expression included, since a contract cannot promise what an expression will
-decide at run time. Cancelling superseded runs remains right for pull-request
-lanes.
-
-### The token belongs to the upload's input, and to nothing else
-
-A secret declared at job level is exported into the environment of every step
-the job runs, this repository's own build among them, so a compromised build
-dependency can read it. At workflow level it reaches every step of every job,
-which is wider still. Declared on the upload step it is narrower, but not
-narrow: the uploader is a composite action, and a composite action's nested
-steps inherit the calling step's `env`, so every step inside the action held
-it. The token is therefore in no `env` at all. The upload takes it as its
-`access-token` input, and the availability check names it only inside an
-expression GitHub evaluates before the shell starts.
-
-`the_codescene_token_reaches_the_upload_input_and_nothing_else` makes four
-claims rather than one: the upload reads the token at `with.access-token` and
-the availability check at `run`, each nowhere else; no other step reads it; no
-step binds `CS_ACCESS_TOKEN` in its `env`, whatever the value; and no wider
-scope reads or forwards it. The first claim is not redundant. Deleting the
-token satisfies every prohibition while the upload's guard goes false, so a
-contract asking only "no env has it" would stay green while the publish
-silently stopped happening. A shell upload is refused outright, since it could
-take the token only through `env` or its script.
-
-"Reads" means any text value that mentions the secret, found by walking the
-whole node rather than the keys a field was written for: an `env` value under
-another name, an input, a script, a condition, or a named `secrets:` entry.
-GitHub resolves context properties case-insensitively and accepts dotted and
-indexed spellings, so `secrets.cs_access_token` and
-`secrets['CS_ACCESS_TOKEN']` count, as does `toJSON(secrets)`, which serializes
-every secret at once.
-
-### The coverage workflows' token reads contents only
-
-Both coverage workflows declare `permissions: contents: read` at workflow
-level. No step in them writes to GitHub, and the shared actions hand
-`github.token` to the installers they run, so a wider default would be exposed
-to them for no use. `every_coverage_workflow_reads_contents_only` holds every
-workflow that generates coverage to exactly that block, and refuses a job-level
-`permissions`, which replaces the workflow's rather than narrowing it.
-
-### The uploader is pinned, and its retired input stays retired
-
-`tests/workflow_contracts/uploader.rs` holds the shared CodeScene uploader to
-one approved revision. It reads every step's `uses` for the uploader action,
-and every job's reusable-workflow call for a shared workflow whose name
-mentions CodeScene, each with its own matcher: the action's path never matches
-a job-level call, so one matcher over both would let a stale workflow pin pass
-while the action kept the collection non-empty. It also keeps three retired
-things from returning: the `installer-checksum` input, which the uploader now
-rejects when non-empty; the `CODESCENE_CLI_SHA256` variable that fed it; and the
-`get-codescene-sha` dispatch that wrote the variable. The two names are
-searched for in each workflow's text, comments included, because a
-commented-out reference is what a later reader would take as evidence that the
-name is still wanted.
 
 ### Reading the workflows
 
@@ -426,8 +302,8 @@ repository. `tests/workflow_contracts/placement.rs` holds all of it, deriving
 what it asserts from each workflow's own triggers rather than from a list of
 job names, so adding a lane asks the placement question again instead of
 slipping past a contract keyed on names. It is a module of the same
-`tests/workflow_contracts.rs` binary as the coverage contracts and reads the
-workflows through the same fallible reader; the actionlint registry is read
+`tests/workflow_contracts.rs` binary as the other workflow contracts and reads
+the workflows through the same fallible reader; the actionlint registry is read
 through a capability for `.github` opened in its own fixture.
 
 ### The fork fallback

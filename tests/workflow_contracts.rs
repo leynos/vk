@@ -1,11 +1,12 @@
 //! Contracts over this repository's own workflow files.
 //!
-//! Who may contact CodeScene, who owns the coverage upload, where each lane
-//! runs and what it may bill, and how Markdown is linted. None of these is
-//! visible in a green run: a pull-request lane that reaches CodeScene, a token
-//! exported into a whole job, a lane moved back to a runner nobody pays for,
-//! or a linter taken from the runner image all pass CI while breaking the
-//! rule.
+//! Where each lane runs and what it may bill, how Markdown is linted, and
+//! which runs a newer push cancels. None of these is visible in a green run: a
+//! lane moved back to a runner nobody pays for, or a linter taken from the
+//! runner image, passes CI while breaking the rule.
+//!
+//! The CV-005 `CodeScene` contract is not here: `make test-workflow-contracts`
+//! runs it from the shared `cv005-contracts` library.
 //!
 //! Every contract derives its subject from the workflows' own triggers and
 //! calls rather than from a list of file names. A contract keyed on names
@@ -15,34 +16,20 @@
 //! One test binary rather than one per contract, so the reader they share is
 //! compiled once and every item in it is used by the binary that compiles it.
 
-#[path = "workflow_contracts/codescene.rs"]
-mod codescene;
 #[path = "workflow_contracts/markdown_lint.rs"]
 mod markdown_lint;
 #[path = "workflow_contracts/placement.rs"]
 mod placement;
 #[path = "workflow_contracts/placement_tests.rs"]
 mod placement_tests;
-#[path = "workflow_contracts/properties.rs"]
-mod properties;
-#[path = "workflow_contracts/publisher.rs"]
-mod publisher;
-#[path = "workflow_contracts/publisher_properties.rs"]
-mod publisher_properties;
 #[path = "workflow_contracts/pull_request_concurrency.rs"]
 mod pull_request_concurrency;
-#[path = "workflow_contracts/pull_request_lanes.rs"]
-mod pull_request_lanes;
 #[path = "support/workflows/mod.rs"]
 mod reader;
 #[path = "workflow_contracts/reader_tests.rs"]
 mod reader_tests;
 #[path = "workflow_contracts/registry.rs"]
 mod registry;
-#[path = "workflow_contracts/rule_tests.rs"]
-mod rule_tests;
-#[path = "workflow_contracts/uploader.rs"]
-mod uploader;
 
 use cap_std::ambient_authority;
 use cap_std::fs_utf8::Dir;
