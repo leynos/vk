@@ -32,16 +32,16 @@ jobs:
         with:
           fetch-depth: 0
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@95e90ba9e33eaeb3c8b4bf6ed1dbe1d7184ee710
+        uses: leynos/shared-actions/.github/actions/setup-rust@32741eab2df11defd36eb06eaf2ac047ac8729ba
       - name: Install mdtablefix
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@c5a54701c8603a0fa756a6b34c49bc2af75a6c11
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@32741eab2df11defd36eb06eaf2ac047ac8729ba
         with:
           version: "0.6.0"
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@f5548c55522a1db0af3c84f2af3d058bc9bc2de2
+        uses: astral-sh/setup-uv@bcf05803b55ef01a5ec6368521ee1b42f97bc438
       - name: Check the CV-005 contracts
         run: make test-workflow-contracts
       - name: Format
@@ -59,7 +59,7 @@ jobs:
       - name: Lint
         run: make lint
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@a5765019912a8ab6882b12db049c7cde635f3a85
+        uses: leynos/shared-actions/.github/actions/generate-coverage@32741eab2df11defd36eb06eaf2ac047ac8729ba
         with:
           output-path: lcov.info
           format: lcov
@@ -81,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@95e90ba9e33eaeb3c8b4bf6ed1dbe1d7184ee710
+        uses: leynos/shared-actions/.github/actions/setup-rust@32741eab2df11defd36eb06eaf2ac047ac8729ba
       - name: Install OpenSSL
         run: sudo apt-get update && sudo apt-get install -y openssl ca-certificates
       - name: Lint (feature-gated)
