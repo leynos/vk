@@ -248,6 +248,21 @@ names. One binary rather than one per contract means the reader is compiled
 once, and every item in it is used by the binary that compiles it, so no
 `dead_code` allowance is needed.
 
+A pull request runs each test once. The coverage step in `coverage.yml` runs
+the suite. The `unstable-rest-resolve` job lints the feature and runs
+`make test-unstable-rest-resolve`, whose recipe runs only the tests that exist
+with the feature: the `resolve` integration test, which is compiled out without
+it, and the `resolve::rest` unit tests. It once ran `make test`, which repeated
+every default-feature test beside the coverage step. `--list` under each
+feature set shows the difference is exactly those tests, so a new feature-gated
+test outside `tests/resolve.rs` and `resolve::rest` must be added to the recipe.
+`tests/workflow_contracts/suite_once.rs` reads each pull-request step by the
+command it runs, through `suite_shell.rs`, which splits a command the way the
+shell does, and holds the split: no step runs the suite, the coverage step runs
+unconditionally, the feature job runs its target and lints the feature, and the
+target's recipe enables the feature and is not widened with `--all-targets`,
+`--all-features` or `--workspace`.
+
 ### Reading the workflows
 
 The reader parses with `serde_norway`, the maintained fork of `serde_yaml` that

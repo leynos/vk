@@ -1,4 +1,4 @@
-.PHONY: help all clean test typecheck build release lint fmt check-fmt markdownlint nixie test-workflow-contracts
+.PHONY: help all clean test test-unstable-rest-resolve typecheck build release lint fmt check-fmt markdownlint nixie test-workflow-contracts
 
 APP ?= vk
 CARGO ?= cargo
@@ -39,6 +39,14 @@ clean: ## Remove build artifacts
 
 test: ## Run tests with warnings treated as errors
 	RUSTFLAGS="-D warnings" $(CARGO) test --all-targets --all-features $(BUILD_JOBS)
+
+# The tests that exist only with `unstable-rest-resolve`: the `resolve`
+# integration test, which is compiled out without the feature, and the unit
+# tests under `resolve::rest`. Every other test is feature-independent and is
+# run by the coverage step, so running `make test` here repeated them.
+test-unstable-rest-resolve: ## Run only the tests the unstable-rest-resolve feature adds
+	RUSTFLAGS="-D warnings" $(CARGO) test --features unstable-rest-resolve --test resolve $(BUILD_JOBS)
+	RUSTFLAGS="-D warnings" $(CARGO) test --features unstable-rest-resolve --bin $(APP) resolve::rest $(BUILD_JOBS)
 
 typecheck: ## Check all targets and features
 	$(CARGO) check --all-targets --all-features $(BUILD_JOBS)
