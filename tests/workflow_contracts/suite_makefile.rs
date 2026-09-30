@@ -137,17 +137,38 @@ impl<'a> Line<'a> {
             .any(|flag| self.has(flag))
     }
 
-    /// Returns `true` if the line runs the `resolve` integration test alone.
-    fn is_integration_run(&self) -> bool {
-        let test_targets = self.0.iter().filter(|word| **word == "--test").count();
-        test_targets == 1
-            && self.0.windows(2).any(|pair| pair == ["--test", "resolve"])
-            && !self.has("--bin")
+    /// Returns the words after `$(CARGO) test`, less the trailing
+    /// `$(BUILD_JOBS)` variable the recipe may carry.
+    fn arguments(&self) -> Vec<&str> {
+        let start = self
+            .0
+            .windows(2)
+            .position(|pair| pair == ["$(CARGO)", "test"])
+            .map_or(self.0.len(), |at| at + 2);
+        self.0
+            .iter()
+            .skip(start)
+            .copied()
+            .filter(|word| *word != "$(BUILD_JOBS)")
+            .collect()
     }
 
-    /// Returns `true` if the line runs the `resolve::rest` unit tests alone.
+    /// Returns `true` if the line's arguments are exactly `expected`, so an
+    /// extra filter, flag or target narrows nothing unnoticed.
+    fn arguments_are(&self, expected: &[&str]) -> bool {
+        self.arguments() == expected
+    }
+
+    /// Returns `true` if the line runs the `resolve` integration test alone,
+    /// with no filter after it.
+    fn is_integration_run(&self) -> bool {
+        self.arguments_are(&["--features", FEATURE, "--test", "resolve"])
+    }
+
+    /// Returns `true` if the line runs the `resolve::rest` unit tests alone,
+    /// with no further filter.
     fn is_unit_run(&self) -> bool {
-        self.has("--bin") && self.has("resolve::rest") && !self.has("--test")
+        self.arguments_are(&["--features", FEATURE, "--bin", "$(APP)", "resolve::rest"])
     }
 
     /// Returns the group the line runs, or `None` for a line that is not a

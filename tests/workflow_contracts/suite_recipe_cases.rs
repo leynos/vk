@@ -21,6 +21,41 @@ fn deployed_recipe() -> Recipe {
     ])
 }
 
+/// A filter or flag after either group narrows what it runs, and is refused.
+#[rstest]
+#[case::filter_after_the_integration_test(
+    "--test resolve $(BUILD_JOBS)",
+    "--test resolve some_test $(BUILD_JOBS)"
+)]
+#[case::filter_after_the_unit_tests(
+    "resolve::rest $(BUILD_JOBS)",
+    "resolve::rest --exact one_test $(BUILD_JOBS)"
+)]
+#[case::skip_flag_after_the_integration_test(
+    "--test resolve $(BUILD_JOBS)",
+    "--test resolve -- --skip slow $(BUILD_JOBS)"
+)]
+#[case::ignored_flag(
+    "--test resolve $(BUILD_JOBS)",
+    "--test resolve -- --ignored $(BUILD_JOBS)"
+)]
+fn a_narrowed_group_is_refused(#[case] from: &str, #[case] to: &str) {
+    let recipe = Recipe(
+        deployed_recipe()
+            .0
+            .iter()
+            .map(|line| line.replacen(from, to, 1))
+            .collect(),
+    );
+    let found = recipe.faults();
+    assert!(
+        found
+            .iter()
+            .any(|fault| fault.contains("is not a `$(CARGO) test` run")),
+        "{found:?}"
+    );
+}
+
 #[test]
 fn the_deployed_recipe_reports_no_fault() {
     assert_eq!(deployed_recipe().faults(), Vec::<String>::new());
