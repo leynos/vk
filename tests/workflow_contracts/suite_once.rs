@@ -28,12 +28,14 @@ use rstest::rstest;
 
 use crate::reader::{Step, Workflow, WorkflowError, parse_workflow};
 use crate::repository;
-use makefile::{DefaultGoal, Makefile, Recipe};
+use makefile::{DefaultGoal, FEATURE, Makefile};
 
 #[path = "suite_makefile.rs"]
 mod makefile;
 #[path = "suite_reader_cases.rs"]
 mod reader_cases;
+#[path = "suite_recipe_cases.rs"]
+mod recipe_cases;
 #[path = "suite_shell.rs"]
 mod shell;
 #[path = "suite_tokenizer.rs"]
@@ -46,9 +48,6 @@ const COVERAGE_ACTION: &str = "leynos/shared-actions/.github/actions/generate-co
 /// tests.
 const FEATURE_TARGET: &str = "test-unstable-rest-resolve";
 
-/// The feature whose tests the target runs.
-const FEATURE: &str = "unstable-rest-resolve";
-
 /// Return the text of this repository's Makefile.
 fn repository_makefile() -> Result<String, WorkflowError> {
     let directory = Dir::open_ambient_dir(env!("CARGO_MANIFEST_DIR"), ambient_authority())
@@ -59,44 +58,6 @@ fn repository_makefile() -> Result<String, WorkflowError> {
             file: "Makefile".to_owned(),
             source,
         })
-}
-
-/// Return every way the feature target's recipe strays from the feature's own
-/// tests: a run that drops the feature, one that widens to every target or
-/// every feature and so repeats the suite, or a missing half.
-fn recipe_faults(recipe: &Recipe) -> Vec<String> {
-    let flag = format!("--features {FEATURE}");
-    let mut faults: Vec<String> = recipe
-        .0
-        .iter()
-        .flat_map(|line| {
-            let mut found = Vec::new();
-            if !line.contains(&flag) {
-                found.push(format!("`{line}` does not enable {FEATURE}"));
-            }
-            for widening in ["--all-targets", "--all-features", "--workspace"] {
-                if line.contains(widening) {
-                    found.push(format!("`{line}` widens the run with {widening}"));
-                }
-            }
-            found
-        })
-        .collect();
-    let runs_integration_test = |line: &String| {
-        let words: Vec<&str> = line.split_whitespace().collect();
-        words.windows(2).any(|pair| pair == ["--test", "resolve"])
-    };
-    if !recipe.0.iter().any(runs_integration_test) {
-        faults.push("no line runs the `resolve` integration test".to_owned());
-    }
-    if !recipe
-        .0
-        .iter()
-        .any(|line| line.contains("--bin") && line.contains(" resolve::rest"))
-    {
-        faults.push("no line runs the `resolve::rest` unit tests".to_owned());
-    }
-    faults
 }
 
 /// Return every step of one workflow.
@@ -241,7 +202,7 @@ fn the_feature_target_runs_only_the_features_own_tests() -> Result<(), WorkflowE
         !recipe.0.is_empty(),
         "the Makefile has no `{FEATURE_TARGET}` recipe"
     );
-    assert_eq!(recipe_faults(&recipe), Vec::<String>::new());
+    assert_eq!(recipe.faults(), Vec::<String>::new());
     Ok(())
 }
 
@@ -362,78 +323,4 @@ fn a_bare_make_is_a_suite_run_where_the_default_goal_runs_the_suite() -> Result<
         "{found:?}"
     );
     Ok(())
-}
-
-/// The recipe this repository deploys.
-fn deployed_recipe() -> Recipe {
-    Recipe(vec![
-        format!(
-            "RUSTFLAGS=\"-D warnings\" $(CARGO) test --features {FEATURE} --test resolve $(BUILD_JOBS)"
-        ),
-        format!(
-            "RUSTFLAGS=\"-D warnings\" $(CARGO) test --features {FEATURE} --bin $(APP) resolve::rest $(BUILD_JOBS)"
-        ),
-    ])
-}
-
-#[test]
-fn the_deployed_recipe_reports_no_fault() {
-    assert_eq!(recipe_faults(&deployed_recipe()), Vec::<String>::new());
-}
-
-#[rstest]
-#[case::all_targets(
-    "--features unstable-rest-resolve --test resolve",
-    "--features unstable-rest-resolve --all-targets --test resolve",
-    "widens the run with --all-targets"
-)]
-#[case::all_features(
-    "--features unstable-rest-resolve --test resolve",
-    "--all-features --test resolve",
-    "widens the run with --all-features"
-)]
-#[case::workspace(
-    "--features unstable-rest-resolve --test resolve",
-    "--features unstable-rest-resolve --workspace --test resolve",
-    "widens the run with --workspace"
-)]
-#[case::feature_dropped("--features unstable-rest-resolve --bin", "--bin", "does not enable")]
-#[case::integration_test_dropped(
-    "--test resolve",
-    "--test other",
-    "no line runs the `resolve` integration test"
-)]
-#[case::unit_tests_dropped(
-    " resolve::rest",
-    " other",
-    "no line runs the `resolve::rest` unit tests"
-)]
-fn a_recipe_that_strays_from_the_features_tests_is_rejected(
-    #[case] from: &str,
-    #[case] to: &str,
-    #[case] fragment: &str,
-) {
-    let recipe = Recipe(
-        deployed_recipe()
-            .0
-            .iter()
-            .map(|line| line.replacen(from, to, 1))
-            .collect(),
-    );
-    let found = recipe_faults(&recipe);
-    assert!(
-        found.iter().any(|fault| fault.contains(fragment)),
-        "expected {fragment:?}, got {found:?}"
-    );
-}
-
-#[test]
-fn a_recipe_is_read_from_its_target_to_the_next_rule() {
-    let makefile = "a:\n\tone\n\ttwo\n\nb:\n\tthree\n";
-    assert_eq!(
-        Makefile(makefile).recipe("a").0,
-        vec!["one".to_owned(), "two".to_owned()]
-    );
-    assert_eq!(Makefile(makefile).recipe("b").0, vec!["three".to_owned()]);
-    assert!(Makefile(makefile).recipe("c").0.is_empty());
 }

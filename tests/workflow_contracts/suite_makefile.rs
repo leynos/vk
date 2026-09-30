@@ -4,6 +4,9 @@
 //! Kept apart from `suite_once.rs` so each file stays under the repository's
 //! 400-line limit. Only that contract and its reader cases use it.
 
+/// The feature whose tests the feature target runs.
+pub(crate) const FEATURE: &str = "unstable-rest-resolve";
+
 /// A Makefile's text.
 #[derive(Clone, Copy)]
 pub(crate) struct Makefile<'a>(pub(crate) &'a str);
@@ -97,4 +100,109 @@ fn first_goal(line: &str) -> Option<String> {
         return None;
     }
     names.split_whitespace().next().map(str::to_owned)
+}
+
+/// Which of the feature's two test groups a recipe line runs.
+#[derive(PartialEq)]
+enum Group {
+    /// The `resolve` integration test.
+    Integration,
+    /// The `resolve::rest` unit tests.
+    Unit,
+}
+
+/// The words of one recipe line.
+struct Line<'a>(Vec<&'a str>);
+
+impl<'a> Line<'a> {
+    /// Splits a recipe line into words.
+    fn new(line: &'a str) -> Self {
+        Self(line.split_whitespace().collect())
+    }
+
+    /// Returns `true` if the line has `flag` as a word.
+    fn has(&self, flag: &str) -> bool {
+        self.0.contains(&flag)
+    }
+
+    /// Returns `true` if the line runs `$(CARGO) test`.
+    fn runs_cargo_test(&self) -> bool {
+        self.0.windows(2).any(|pair| pair == ["$(CARGO)", "test"])
+    }
+
+    /// Returns `true` if the line selects a scope other than one named target.
+    fn selects_another_scope(&self) -> bool {
+        ["--lib", "--doc", "--tests", "--bins"]
+            .iter()
+            .any(|flag| self.has(flag))
+    }
+
+    /// Returns `true` if the line runs the `resolve` integration test alone.
+    fn is_integration_run(&self) -> bool {
+        let test_targets = self.0.iter().filter(|word| **word == "--test").count();
+        test_targets == 1
+            && self.0.windows(2).any(|pair| pair == ["--test", "resolve"])
+            && !self.has("--bin")
+    }
+
+    /// Returns `true` if the line runs the `resolve::rest` unit tests alone.
+    fn is_unit_run(&self) -> bool {
+        self.has("--bin") && self.has("resolve::rest") && !self.has("--test")
+    }
+
+    /// Returns the group the line runs, or `None` for a line that is not a
+    /// `$(CARGO) test` run of exactly one of them.
+    fn group(&self) -> Option<Group> {
+        if !self.runs_cargo_test() || self.selects_another_scope() {
+            return None;
+        }
+        match (self.is_integration_run(), self.is_unit_run()) {
+            (true, false) => Some(Group::Integration),
+            (false, true) => Some(Group::Unit),
+            _ => None,
+        }
+    }
+}
+
+impl Recipe {
+    /// Returns every way the recipe strays from the feature's own tests: a
+    /// line that is not a `cargo test` run of exactly one of the two groups,
+    /// one that drops the feature, one that widens to every target or
+    /// feature and so repeats the suite, or a missing group.
+    pub(crate) fn faults(&self) -> Vec<String> {
+        let flag = format!("--features {FEATURE}");
+        let mut faults: Vec<String> = self
+            .0
+            .iter()
+            .flat_map(|line| {
+                let mut found = Vec::new();
+                if !line.contains(&flag) {
+                    found.push(format!("`{line}` does not enable {FEATURE}"));
+                }
+                for widening in ["--all-targets", "--all-features", "--workspace"] {
+                    if line.contains(widening) {
+                        found.push(format!("`{line}` widens the run with {widening}"));
+                    }
+                }
+                if Line::new(line).group().is_none() {
+                    found.push(format!(
+                        "`{line}` is not a `$(CARGO) test` run of one of the feature's two test groups"
+                    ));
+                }
+                found
+            })
+            .collect();
+        let groups: Vec<Group> = self
+            .0
+            .iter()
+            .filter_map(|line| Line::new(line).group())
+            .collect();
+        if !groups.contains(&Group::Integration) {
+            faults.push("no line runs the `resolve` integration test".to_owned());
+        }
+        if !groups.contains(&Group::Unit) {
+            faults.push("no line runs the `resolve::rest` unit tests".to_owned());
+        }
+        faults
+    }
 }
