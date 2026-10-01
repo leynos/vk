@@ -30,6 +30,8 @@ mod reader;
 mod reader_tests;
 #[path = "workflow_contracts/registry.rs"]
 mod registry;
+#[path = "workflow_contracts/suite_once.rs"]
+mod suite_once;
 
 use cap_std::ambient_authority;
 use cap_std::fs_utf8::Dir;
