@@ -78,7 +78,7 @@ jobs:
         # picks, and CodeScene refuses coverage for a branch it does not
         # analyse.
         if: steps.codescene_token.outputs.available == 'true' && github.ref == 'refs/heads/main'
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@32741eab2df11defd36eb06eaf2ac047ac8729ba
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@b9a3bff63b1e19b3a48d433668184e24e1abd3ba
         with:
           format: lcov
           # Explicit rather than left to the action's default, so the mode
