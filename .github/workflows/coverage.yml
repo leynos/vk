@@ -41,7 +41,7 @@ jobs:
           version: "0.6.1"
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@b3c9b5fc56ebc90760c43b1ac9552c0d1705d3ca
+        uses: astral-sh/setup-uv@c97f06e356bcca1b426f396ef93ec35ce149ce7b
       - name: Check the CV-005 contracts
         run: make test-workflow-contracts
       - name: Format
