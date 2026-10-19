@@ -16,8 +16,11 @@ use crate::reader::{Job, RunnerSelection, Workflow, WorkflowError, arms_of, pars
 use crate::registry::labels_in_use;
 
 /// The fork fallback every pull-request lane carries.
-const FALLBACK: &str =
-    "${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubicloud-standard-2' }}";
+const FALLBACK: &str = concat!(
+    "${{ (github.event.pull_request.head.repo.fork ",
+    "|| github.event.pull_request.user.login == 'dependabot[bot]') ",
+    "&& 'ubuntu-latest' || 'ubicloud-standard-2' }}"
+);
 
 /// Return a workflow answering `on` whose one job, `id`, declares `body`.
 fn workflow(on: &str, id: &str, body: &str) -> Result<Workflow, WorkflowError> {
@@ -74,7 +77,23 @@ fn a_paid_label_in_a_sequence_is_in_use() -> Result<(), WorkflowError> {
     false
 )]
 #[case::wrong_arm(
-    "${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'other' }}",
+    concat!(
+        "${{ (github.event.pull_request.head.repo.fork ",
+        "|| github.event.pull_request.user.login == 'dependabot[bot]') ",
+        "&& 'ubuntu-latest' || 'other' }}"
+    ),
+    false
+)]
+#[case::dependabot_arm_missing(
+    "${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubicloud-standard-2' }}",
+    false
+)]
+#[case::actor_instead_of_author(
+    concat!(
+        "${{ (github.event.pull_request.head.repo.fork ",
+        "|| github.actor == 'dependabot[bot]') ",
+        "&& 'ubuntu-latest' || 'ubicloud-standard-2' }}"
+    ),
     false
 )]
 fn a_pull_request_lane_must_fall_back_for_a_fork(

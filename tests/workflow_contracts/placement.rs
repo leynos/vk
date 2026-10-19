@@ -98,6 +98,15 @@ fn lanes(workflows: &[Workflow], select: fn(&Workflow) -> bool) -> Vec<&Job> {
         .collect()
 }
 
+/// The condition under which a pull request takes the hosted arm: a fork, or
+/// one Dependabot opened.
+///
+/// The author is tested, not `github.actor`: the actor is whoever triggered the
+/// run, so a person pushing to a Dependabot branch would flip the runner.
+/// Hosted minutes cost nothing on a public repository.
+const HOSTED_GUARD: &str = "(github.event.pull_request.head.repo.fork \
+     || github.event.pull_request.user.login == 'dependabot[bot]')";
+
 /// Return why one pull-request lane's selection is wrong, if it is.
 pub(crate) fn fork_fallback_fault(job: &Job) -> Option<String> {
     let RunnerSelection::Expression { raw, arms } = &job.runs_on else {
@@ -107,9 +116,10 @@ pub(crate) fn fork_fallback_fault(job: &Job) -> Option<String> {
             job.runs_on.raw()
         ));
     };
-    if !raw.contains("github.event.pull_request.head.repo.fork") {
+    if !raw.contains(HOSTED_GUARD) {
         return Some(format!(
-            "{} chooses its runner on something other than the fork field: {raw}",
+            "{} chooses its runner on something other than the fork field or \
+             the Dependabot author: {raw}",
             job.coordinate()
         ));
     }

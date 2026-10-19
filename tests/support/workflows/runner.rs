@@ -69,6 +69,10 @@ impl RunnerSelection {
     }
 }
 
+/// The login the pull request's author is compared against. It appears in a
+/// `runs-on` expression as a quoted literal but names no runner.
+const DEPENDABOT_LOGIN: &str = "dependabot[bot]";
+
 /// Return the expression arms a `runs-on` can evaluate to.
 ///
 /// The arms are the single-quoted literals in the expression. Reading them
@@ -103,6 +107,9 @@ pub(crate) fn arms_of(raw: &str) -> Vec<String> {
         .filter(|pair| pair.len() == 2)
         .filter_map(|pair| pair.first())
         .map(|arm| (*arm).to_owned())
+        // The Dependabot author test compares against this literal; it is an
+        // operand of the condition, not a runner label.
+        .filter(|arm| arm != DEPENDABOT_LOGIN)
         .collect()
 }
 
