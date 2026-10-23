@@ -84,6 +84,14 @@ fn a_paid_label_in_a_sequence_is_in_use() -> Result<(), WorkflowError> {
     ),
     false
 )]
+#[case::tight_spacing_in_the_guard(
+    concat!(
+        "${{ (github.event.pull_request.head.repo.fork||",
+        "github.event.pull_request.user.login=='dependabot[bot]') ",
+        "&& 'ubuntu-latest' || 'ubicloud-standard-2' }}"
+    ),
+    true
+)]
 #[case::dependabot_arm_missing(
     "${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubicloud-standard-2' }}",
     false
