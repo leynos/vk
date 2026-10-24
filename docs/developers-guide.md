@@ -325,11 +325,17 @@ through a capability for `.github` opened in its own fixture.
 
 A pull request from a fork cannot obtain a paid runner, so a pull-request lane
 naming one outright would leave every fork contributor's pull request with no
-runner at all. Both lanes in `coverage.yml` therefore choose:
+runner at all. A pull request Dependabot opened takes the hosted arm too:
+hosted minutes cost nothing on a public repository, and Dependabot opens many
+pull requests, which therefore build cold. The guard tests the pull request's
+author, not `github.actor`, because the actor is whoever triggered the run, so
+a person pushing to a Dependabot branch would flip the runner. Both lanes in
+`coverage.yml` therefore choose:
 
 ```yaml
     runs-on: >-
-      ${{ github.event.pull_request.head.repo.fork
+      ${{ (github.event.pull_request.head.repo.fork
+      || github.event.pull_request.user.login == 'dependabot[bot]')
       && 'ubuntu-latest' || 'ubicloud-standard-2' }}
 ```
 
@@ -342,10 +348,11 @@ break, which is the only way to tell the two apart.
 
 `every_pull_request_lane_falls_back_for_a_fork` checks three separate things:
 that the lane chooses rather than naming a label outright, that it chooses on
-the fork field rather than on some other field that happens to read similarly,
-and that the two arms are exactly the hosted label and the paid one. Reading
-the arms rather than matching the whole expression against a pattern means a
-lane that is correctly placed but merely wrapped differently still passes.
+the fork field or the Dependabot author rather than on some other field that
+happens to read similarly (`github.actor` included), and that the two arms are
+exactly the hosted label and the paid one. Reading the arms rather than
+matching the whole expression against a pattern means a lane that is correctly
+placed but merely wrapped differently still passes.
 
 ### Ceilings
 

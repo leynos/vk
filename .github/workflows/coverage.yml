@@ -21,8 +21,12 @@ permissions:
 
 jobs:
   build-test:
+    # Dependabot pull requests run on the hosted pool too (free on a public
+    # repository). The author is tested, not the actor, which changes when
+    # someone else pushes to the branch.
     runs-on: >-
-      ${{ github.event.pull_request.head.repo.fork
+      ${{ (github.event.pull_request.head.repo.fork
+      || github.event.pull_request.user.login == 'dependabot[bot]')
       && 'ubuntu-latest' || 'ubicloud-standard-2' }}
     timeout-minutes: 25
     env:
@@ -78,7 +82,8 @@ jobs:
   # the split.
   unstable-rest-resolve:
     runs-on: >-
-      ${{ github.event.pull_request.head.repo.fork
+      ${{ (github.event.pull_request.head.repo.fork
+      || github.event.pull_request.user.login == 'dependabot[bot]')
       && 'ubuntu-latest' || 'ubicloud-standard-2' }}
     timeout-minutes: 25
     steps:
