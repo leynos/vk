@@ -221,10 +221,18 @@ pub(crate) static UTF8_RE: LazyLock<Option<Regex>> =
 /// expansion panics when the runtime cannot be built; a failure is reported as
 /// an ordinary `VkError` instead.
 fn main() -> Result<(), VkError> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
-    runtime.block_on(run())
+    run_on(
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build(),
+    )
+}
+
+/// Run the program on `runtime`, or report that it could not be built.
+///
+/// The build result is a parameter so tests can supply a failure.
+fn run_on(runtime: std::io::Result<tokio::runtime::Runtime>) -> Result<(), VkError> {
+    runtime?.block_on(run())
 }
 
 /// Parse the command line, run the selected subcommand and exit with the code

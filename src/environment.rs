@@ -79,6 +79,21 @@ mod tests {
 
     #[test]
     #[serial]
+    fn a_poisoned_lock_is_recovered() {
+        let outcome = std::panic::catch_unwind(|| with_lock(|| panic!("poison the lock")));
+        assert!(
+            outcome.is_err(),
+            "the closure must panic while holding the lock"
+        );
+
+        let key = "VK_ENV_POISON_TEST";
+        set_var(key, "after-poison");
+        assert_eq!(var(key).as_deref(), Ok("after-poison"));
+        remove_var(key);
+    }
+
+    #[test]
+    #[serial]
     fn set_var_round_trip() {
         let key = "VK_ENV_HELPER_TEST";
         let old = var(key).ok();

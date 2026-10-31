@@ -348,13 +348,18 @@ pub async fn run_resolve(
     }
 }
 
+/// Return whether `value` names a UTF-8 locale according to `pattern`.
+///
+/// `None` stands for a pattern that failed to compile, which matches nothing.
+fn is_utf8_locale(pattern: Option<&regex::Regex>, value: &str) -> bool {
+    pattern.is_some_and(|re| re.is_match(value))
+}
+
 /// Return whether the first configured locale variable is UTF-8.
 fn locale_is_utf8() -> bool {
     for key in ["LC_ALL", "LC_CTYPE", "LANG"] {
         if let Ok(value) = environment::var(key) {
-            return crate::UTF8_RE
-                .as_ref()
-                .is_some_and(|re| re.is_match(&value));
+            return is_utf8_locale(crate::UTF8_RE.as_ref(), &value);
         }
     }
     false

@@ -1,6 +1,7 @@
 //! Tests for command helper utilities.
 
 use super::handle_banner;
+use super::is_utf8_locale;
 use super::locale_is_utf8;
 use crate::test_utils::{apply_optional_env, restore_optional_env};
 use rstest::{fixture, rstest};
@@ -213,4 +214,15 @@ mod resolve_branch_and_repo_tests {
             "head owner still derived from origin"
         );
     }
+}
+
+#[test]
+fn an_unavailable_locale_pattern_matches_nothing() {
+    assert!(!is_utf8_locale(None, "en_GB.UTF-8"));
+}
+
+#[test]
+fn a_compiled_locale_pattern_recognises_utf8() {
+    assert!(is_utf8_locale(crate::UTF8_RE.as_ref(), "en_GB.UTF-8"));
+    assert!(!is_utf8_locale(crate::UTF8_RE.as_ref(), "en_GB.ISO-8859-1"));
 }

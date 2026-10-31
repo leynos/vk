@@ -336,23 +336,26 @@ to resolve the PR context.
 sequenceDiagram
     participant User as User/CLI
     participant Cmd as commands.rs
+    participant Branch as commands/branch.rs
     participant RefParse as ref_parser.rs
     participant BranchPR as branch_pr.rs
     participant Git as Git Repo
     participant API as GitHub GraphQL API
 
     User->>Cmd: vk pr (no reference arg)
-    Cmd->>RefParse: resolve_pr_reference(None, ...)
-    RefParse->>Git: current_branch()
+    Cmd->>Branch: resolve_branch_and_repo(default_repo)
+    Branch->>RefParse: current_branch()
+    RefParse->>Git: symbolic-ref HEAD
     Git-->>RefParse: branch name
-    RefParse->>RefParse: resolve_branch_and_repo()
-    RefParse->>Git: git_root(), repo info
+    Branch->>RefParse: repo_from_fetch_head(), repo_from_origin()
+    RefParse->>Git: FETCH_HEAD, origin URL
     Git-->>RefParse: repo context
-    RefParse->>BranchPR: fetch_pr_for_branch(client, repo, branch)
+    RefParse-->>Branch: branch and repository
+    Branch-->>Cmd: BranchContext (repo, branch, head owner)
+    Cmd->>BranchPR: fetch_pr_for_branch(client, repo, branch)
     BranchPR->>API: GraphQL PR_FOR_BRANCH_QUERY
     API-->>BranchPR: PR nodes
-    BranchPR-->>RefParse: PR number
-    RefParse-->>Cmd: PrContext (repo, number)
+    BranchPR-->>Cmd: PR number
     Cmd->>API: Fetch PR details, reviews
     API-->>Cmd: PR data
     Cmd-->>User: Output PR information
@@ -360,9 +363,9 @@ sequenceDiagram
 
 ### Repository resolution order
 
-Both `resolve_branch_and_repo` (in `commands.rs`) and `parse_reference` (in
-`ref_parser/parse.rs`) consult the same three sources, in this priority order,
-when they have to map a bare PR or issue number to a GitHub repository:
+Both `resolve_branch_and_repo` (in `commands/branch.rs`) and `parse_reference`
+(in `ref_parser/parse.rs`) consult the same three sources, in this priority
+order, when they have to map a bare PR or issue number to a GitHub repository:
 
 1. **`--repo` flag or `VK_REPO`** — the configured default, parsed via
    `parse_repo_str`. Highest precedence because the user has stated it

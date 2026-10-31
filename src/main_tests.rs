@@ -257,3 +257,12 @@ fn review_body_collapses_details() {
 fn utf8_re_compiles() {
     assert!(UTF8_RE.is_some(), "the UTF-8 locale pattern must compile");
 }
+
+#[test]
+fn a_failed_runtime_build_is_reported_as_an_io_error() {
+    let failure = Err(std::io::Error::other("cannot build the runtime"));
+
+    let result = run_on(failure);
+
+    assert!(matches!(result, Err(VkError::Io(_))), "got {result:?}");
+}
