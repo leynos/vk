@@ -74,6 +74,9 @@ fn handle_banner_logs_and_returns_false_on_other_errors() {
 }
 
 mod resolve_branch_and_repo_tests {
+
+    //! Tests for branch and repository auto-detection.
+
     use super::super::resolve_branch_and_repo;
     use crate::test_utils::{CwdGuard, GitRepoFixture};
     use rstest::{fixture, rstest};

@@ -134,6 +134,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    //! Tests for configuration loading.
+
     use super::{
         EXPLICIT_CONFIG_PATH_ENV, load_global_args_without_cli_overrides_from_process_args,
     };

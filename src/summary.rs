@@ -194,6 +194,8 @@ pub fn print_end_banner() -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for the file summary output.
+
     use super::*;
     use crate::review_threads::{CommentConnection, ReviewComment, ReviewThread};
     use rstest::*;

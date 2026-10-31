@@ -230,6 +230,8 @@ impl Drop for CwdGuard {
 
 #[cfg(test)]
 mod cwd_guard_tests {
+    //! Tests for the working-directory guard.
+
     use super::{CwdGuard, EnvSandbox};
     use serial_test::serial;
     use std::io;

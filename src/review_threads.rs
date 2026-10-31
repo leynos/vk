@@ -341,3 +341,5 @@ pub fn thread_for_comment(threads: Vec<ReviewThread>, comment_id: u64) -> Option
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_options;

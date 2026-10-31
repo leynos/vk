@@ -54,6 +54,8 @@ impl BoxedStr for Box<str> {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for the boxed error conversions.
+
     use super::BoxedStr;
     use rstest::rstest;
     use std::borrow::Cow;

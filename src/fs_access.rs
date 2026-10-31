@@ -129,7 +129,9 @@ mod tests {
     fn a_directory_cannot_be_created_as_a_file() {
         let dir = tempfile::tempdir().expect("temporary directory");
         let target = dir.path().join("sub");
-        std::fs::create_dir(&target).expect("directory");
+        cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority())
+            .and_then(|root| root.create_dir("sub"))
+            .expect("directory");
 
         assert!(create_file(&target).is_err());
     }

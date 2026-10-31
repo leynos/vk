@@ -155,6 +155,8 @@ fn format_diff_with(
 
 #[cfg(test)]
 mod tests {
+    //! Tests for diff hunk formatting.
+
     use super::*;
     use std::fmt::Write;
 
