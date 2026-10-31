@@ -96,7 +96,10 @@ fn ci_installs_whitaker_before_the_main_lint_step() -> Result<(), String> {
     let lint = workflow
         .find("run: make lint\n")
         .ok_or("CI has no `make lint` step")?;
-    assert!(before.len() < lint, "Whitaker must be installed before `make lint`");
+    assert!(
+        before.len() < lint,
+        "Whitaker must be installed before `make lint`"
+    );
     Ok(())
 }
 
