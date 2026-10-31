@@ -91,11 +91,13 @@ fn build_cases_from_data(data: &SubcommandCaseData) -> Vec<MergeCase> {
 ///
 /// Panics if the pair is not defined in `SUBCOMMAND_CASE_DATA`.
 pub fn case(subcommand: MergeSubcommand, scenario: MergeScenario) -> MergeCase {
-    all_cases()
+    let Some(found) = all_cases()
         .iter()
         .find(|case| case.subcommand == subcommand && case.scenario == scenario)
-        .cloned()
-        .unwrap_or_else(|| panic!("missing merge case for {subcommand:?} and {scenario:?}"))
+    else {
+        panic!("missing merge case for {subcommand:?} and {scenario:?}");
+    };
+    found.clone()
 }
 
 const SUBCOMMAND_CASE_DATA: [SubcommandCaseData; 3] = [

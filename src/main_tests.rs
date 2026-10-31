@@ -252,3 +252,8 @@ fn review_body_collapses_details() {
     assert!(out.contains("\u{25B6} hello"));
     assert!(!out.contains("bye"));
 }
+
+#[test]
+fn utf8_re_compiles() {
+    assert!(UTF8_RE.is_some(), "the UTF-8 locale pattern must compile");
+}
