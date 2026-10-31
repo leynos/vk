@@ -8,12 +8,15 @@
 //! proxy serves canned responses from `tests/fixtures` so the suite runs in a
 //! fully hermetic and deterministic manner.
 
+use cap_std::ambient_authority;
+use cap_std::fs::Dir;
 use rstest::fixture;
 use serde_json::Value;
-use std::fs;
 use std::path::Path;
 use tempfile::{TempDir, tempdir};
 
+#[path = "../support/capfs.rs"]
+mod capfs;
 #[path = "../utils/mod.rs"]
 pub mod utils;
 
@@ -111,7 +114,7 @@ impl GitRepoWithFetchHead {
         let dir = tempdir().expect("tempdir");
         init_git_repo(dir.path(), head_content);
         let git_dir = dir.path().join(".git");
-        fs::write(git_dir.join("FETCH_HEAD"), fetch_head_content).expect("write FETCH_HEAD");
+        capfs::write_file(&git_dir.join("FETCH_HEAD"), fetch_head_content);
         Self { dir }
     }
 
@@ -139,7 +142,15 @@ pub fn git_repo_with_fetch_head(
 }
 
 pub fn load_transcript(path: &str) -> Vec<String> {
-    let data = fs::read_to_string(path).expect("read transcript");
+    let transcript = Path::new(path);
+    let parent = transcript
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let data = Dir::open_ambient_dir(parent, ambient_authority())
+        .expect("open transcript directory")
+        .read_to_string(transcript.file_name().expect("transcript file name"))
+        .expect("read transcript");
     data.lines()
         .map(|line| {
             let v: Value = serde_json::from_str(line).expect("valid json line");

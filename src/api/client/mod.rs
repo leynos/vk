@@ -47,7 +47,7 @@ pub struct GraphQLClient {
     /// GraphQL endpoint targeted by this client.
     endpoint: Endpoint,
     /// Optional writer for request and response transcripts.
-    transcript: Option<Arc<std::sync::Mutex<std::io::BufWriter<std::fs::File>>>>,
+    transcript: Option<Arc<std::sync::Mutex<std::io::BufWriter<cap_std::fs::File>>>>,
     /// Retry and timeout settings for requests.
     retry: RetryConfig,
     /// Pooled direct HTTP transport for GraphQL requests.
@@ -108,7 +108,7 @@ impl GraphQLClient {
         let endpoint = endpoint.into();
         let transcript = transcript
             .map(|p| {
-                std::fs::File::create(p)
+                crate::fs_access::create_file(&p)
                     .map(|file| Arc::new(std::sync::Mutex::new(std::io::BufWriter::new(file))))
             })
             .transpose()
