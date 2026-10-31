@@ -82,24 +82,21 @@ fn lint_whitaker_uses_the_wrapper_with_clean_inputs_and_warnings_denied() -> Res
 #[test]
 fn ci_installs_whitaker_before_the_main_lint_step() -> Result<(), String> {
     let workflow = read(".github/workflows/coverage.yml")?;
-    let install = workflow
-        .find("leynos/shared-actions/.github/actions/install-whitaker@")
+    let (before, after) = workflow
+        .split_once("leynos/shared-actions/.github/actions/install-whitaker@")
         .ok_or("CI does not install Whitaker")?;
-    let revision = workflow[install..]
-        .split_once('@')
-        .map(|(_, rest)| rest)
-        .unwrap_or_default();
+    let pin: String = after.chars().take(40).collect();
+    let next = after.chars().nth(40);
     assert!(
-        revision.chars().take(40).all(|c| c.is_ascii_hexdigit()) && revision.len() >= 40,
-        "install-whitaker is not pinned to a full commit SHA"
+        pin.len() == 40
+            && pin.chars().all(|c| c.is_ascii_hexdigit())
+            && next.is_none_or(|c| !c.is_ascii_hexdigit()),
+        "install-whitaker is not pinned to a full commit SHA: {pin}"
     );
     let lint = workflow
         .find("run: make lint\n")
         .ok_or("CI has no `make lint` step")?;
-    assert!(
-        install < lint,
-        "Whitaker must be installed before `make lint`"
-    );
+    assert!(before.len() < lint, "Whitaker must be installed before `make lint`");
     Ok(())
 }
 
