@@ -13,6 +13,8 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, timeout};
 
+#[path = "support/capfs.rs"]
+mod capfs;
 mod utils;
 use utils::start_mitm;
 
@@ -135,7 +137,7 @@ where
 
     let config_dir = tempfile::tempdir().expect("create temp dir");
     let config_path = config_dir.path().join("config.toml");
-    std::fs::write(&config_path, config_contents).expect("write config");
+    capfs::write_file(&config_path, config_contents);
 
     let addr_str = format!("http://{addr}");
     let task = tokio::task::spawn_blocking(move || {
@@ -258,7 +260,7 @@ async fn issue_warns_without_token() {
 fn resolve_requires_token() {
     let config_dir = tempfile::tempdir().expect("create temp dir");
     let config_path = config_dir.path().join("config.toml");
-    std::fs::write(&config_path, "").expect("write empty config");
+    capfs::write_file(&config_path, "");
 
     let mut cmd = Command::cargo_bin("vk").expect("binary");
     cmd.env_remove("GITHUB_TOKEN")

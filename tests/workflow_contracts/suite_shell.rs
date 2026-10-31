@@ -44,8 +44,7 @@ const MAKE_INERT_OPTIONS: [&str; 8] = [
     "-h",
 ];
 
-/// Short make options that also run no goal (`-n`, `-q`), as they may be
-/// clustered with others, as in `-ns`.
+/// Short make options that run no goal (`-n`, `-q`), alone or clustered (`-ns`).
 const MAKE_INERT_LETTERS: [char; 2] = ['n', 'q'];
 
 /// Short make options that take a value, which ends a cluster of letters.
@@ -54,8 +53,7 @@ const MAKE_VALUE_LETTERS: [char; 7] = ['C', 'f', 'I', 'o', 'W', 'j', 'l'];
 /// Cargo subcommands that run the suite.
 const SUITE_SUBCOMMANDS: [&str; 4] = ["test", "t", "nextest", "llvm-cov"];
 
-/// Make targets that run the suite: `test`, `all` (which runs it),
-/// `coverage` (under `cargo llvm-cov`) and the fast local variants.
+/// Make targets that run the suite: `all` runs it, `coverage` does under llvm-cov.
 const SUITE_TARGETS: [&str; 5] = ["test", "all", "coverage", "dev-test", "test-fast"];
 
 /// Wrappers that run a command after their own options.
@@ -100,7 +98,7 @@ const WRAPPERS: [Wrapper; 10] = [
     ),
 ];
 
-/// Reserved words that open or continue a compound command, which follows.
+/// Reserved words that open or continue a compound command.
 const CONTROL_WORDS: [&str; 9] = [
     "if", "then", "else", "elif", "do", "while", "until", "!", "{",
 ];
@@ -110,8 +108,7 @@ const SHELLS: [&str; 2] = ["sh", "bash"];
 
 /// Returns `true` if any segment of `command` runs the suite.
 ///
-/// `default_goal` is the goal a bare `make` runs, read from the Makefile: a
-/// bare `make` runs the suite only when that goal does.
+/// `default_goal` is the Makefile goal a bare `make` runs; it runs the suite only if that does.
 pub(crate) fn runs_suite(command: &str, default_goal: &str) -> bool {
     let goal = Goal(default_goal);
     Tokenizer::default()
@@ -121,7 +118,7 @@ pub(crate) fn runs_suite(command: &str, default_goal: &str) -> bool {
 }
 
 /// Returns the targets the `make` commands within `command` name, looking
-/// through wrappers, so a contract can ask whether a step runs a given target.
+/// through wrappers.
 pub(crate) fn make_targets(command: &str) -> Vec<String> {
     Tokenizer::default()
         .read(command)
