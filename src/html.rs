@@ -121,6 +121,8 @@ fn collect_text(node: &Handle) -> String {
 
 #[cfg(test)]
 mod tests {
+    //! Property tests for the HTML rendering helpers.
+
     use super::*;
     use proptest::prelude::*;
     use std::borrow::Cow;
