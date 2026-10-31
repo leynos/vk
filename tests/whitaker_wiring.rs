@@ -68,14 +68,37 @@ fn lint_whitaker_uses_the_wrapper_with_clean_inputs_and_warnings_denied() -> Res
         !recipe.contains("cargo dylint"),
         "bare cargo dylint: {recipe}"
     );
-    let definition = makefile
-        .lines()
-        .find(|line| line.starts_with("WHITAKER_CLEAN_ENV"))
-        .ok_or("WHITAKER_CLEAN_ENV is not defined")?;
-    assert!(
-        definition.contains("env -u RUSTFLAGS"),
-        "clean env lost: {definition}"
-    );
+    // The assignment continues over backslash-ended lines; read all of them.
+    let mut definition = String::new();
+    let mut continues = false;
+    for line in makefile.lines() {
+        if line.starts_with("WHITAKER_CLEAN_ENV") || continues {
+            definition.push_str(line);
+            definition.push('\n');
+            continues = line.ends_with('\\');
+        }
+    }
+    assert!(!definition.is_empty(), "WHITAKER_CLEAN_ENV is not defined");
+    for variable in [
+        "RUSTFLAGS",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_PROFILE_DEV_CODEGEN_BACKEND",
+        "CARGO_BUILD_TARGET",
+        "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER",
+        "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
+        "CFLAGS",
+        "LDFLAGS",
+    ] {
+        let unset = format!("-u {variable}");
+        assert!(
+            definition
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .windows(2)
+                .any(|pair| { pair.join(" ") == unset }),
+            "the clean environment no longer unsets {variable}: {definition}"
+        );
+    }
     Ok(())
 }
 
