@@ -1,8 +1,7 @@
 //! Utilities for generating and printing review summaries and banners.
 //!
-//! Functions in this module collate review comments by file path and render a
-//! human-readable summary to any writer or directly to stdout. Banner helpers
-//! frame output with start and end markers.
+//! Functions here collate review comments by file path and render a summary to any writer
+//! or to stdout. Banner helpers frame output with start and end markers.
 
 use std::collections::BTreeMap;
 use std::io::{ErrorKind, Write};
