@@ -40,6 +40,16 @@ make test
 Run commands sequentially. The repository relies on shared Cargo caching, and
 sequential execution keeps cache use predictable.
 
+`make lint` depends on Clippy and rustdoc (`make lint-clippy`) and the Whitaker
+Dylint suite (`make lint-whitaker`), in no promised order. Install Whitaker with
+`whitaker-installer` so that `whitaker` is on `PATH`, and never call
+`cargo dylint` directly. The recipe runs the wrapper with clean driver inputs
+(it unsets the inherited Rust flags, backend and linker variables) and
+`DYLINT_RUSTFLAGS="-D warnings"`, so findings fail the gate. CI installs it
+through the shared `install-whitaker` action, pinned to a revision concordat
+QG-002 approves, in the `build-test` job. The feature-gated job runs
+`make lint-clippy` alone, so the suite runs once per pull request.
+
 Use `make fmt` after documentation changes. It formats Rust and Markdown
 sources. Review Markdown formatter diffs before committing so footnotes, links,
 tables, and code fences still carry the intended meaning.
@@ -275,13 +285,14 @@ once, and every item in it is used by the binary that compiles it, so no
 `dead_code` allowance is needed.
 
 A pull request runs each test once. The coverage step in `coverage.yml` runs
-the suite. The `unstable-rest-resolve` job lints the feature and runs
-`make test-unstable-rest-resolve`, whose recipe runs only the tests that exist
-with the feature: the `resolve` integration test, which is compiled out without
-it, and the `resolve::rest` unit tests. It once ran `make test`, which repeated
-every default-feature test beside the coverage step. `--list` under each
-feature set shows the difference is exactly those tests, so a new feature-gated
-test outside `tests/resolve.rs` and `resolve::rest` must be added to the recipe.
+the suite. The `unstable-rest-resolve` job lints the feature
+(`make lint-clippy`) and runs `make test-unstable-rest-resolve`, whose recipe
+runs only the tests that exist with the feature: the `resolve` integration
+test, which is compiled out without it, and the `resolve::rest` unit tests. It
+once ran `make test`, which repeated every default-feature test beside the
+coverage step. `--list` under each feature set shows the difference is exactly
+those tests, so a new feature-gated test outside `tests/resolve.rs` and
+`resolve::rest` must be added to the recipe.
 `tests/workflow_contracts/suite_once.rs` reads each pull-request step by the
 command it runs, through `suite_shell.rs`, which splits a command the way the
 shell does, and holds the split: no step runs the suite, the coverage step runs

@@ -147,10 +147,16 @@ project:
 
     ```sh
     cargo clippy --workspace --all-targets --all-features -- -D warnings
+    DYLINT_RUSTFLAGS="-D warnings" \
+      whitaker --all -- --all-targets --all-features
     ```
 
     linting every target with all features enabled and denying all Clippy
-    warnings.
+    warnings, and running the Whitaker Dylint suite through its `whitaker`
+    wrapper. `lint` depends on both `lint-clippy` and `lint-whitaker`, and
+    promises no order between them. Install it with
+    `whitaker-installer`; never call `cargo dylint` directly. CI installs it
+    through the shared `install-whitaker` action.
   - `make test` executes:
 
     ```sh

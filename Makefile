@@ -1,7 +1,8 @@
-.PHONY: help all clean test test-unstable-rest-resolve typecheck build release lint fmt check-fmt markdownlint nixie test-workflow-contracts
+.PHONY: help all clean test test-unstable-rest-resolve typecheck build release lint lint-clippy lint-whitaker fmt check-fmt markdownlint nixie test-workflow-contracts
 
 APP ?= vk
 CARGO ?= cargo
+WHITAKER ?= whitaker
 BUILD_JOBS ?=
 CLIPPY_FLAGS ?= --all-targets --all-features -- -D warnings
 RUSTDOC_FLAGS ?= --cfg docsrs -D warnings
@@ -54,9 +55,19 @@ typecheck: ## Check all targets and features
 target/%/$(APP): Cargo.toml ## Build binary in debug or release mode
 	$(CARGO) build $(BUILD_JOBS) $(if $(findstring release,$(@)),--release) --bin $(APP)
 
-lint: ## Run Clippy and rustdoc with warnings denied
+lint: lint-clippy lint-whitaker ## Run Clippy, rustdoc and the Whitaker suite with warnings denied
+
+lint-clippy: ## Run Clippy and rustdoc with warnings denied
 	$(CARGO) clippy $(CLIPPY_FLAGS)
 	RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" RUSTFLAGS="$${RUSTFLAGS:+$$RUSTFLAGS }-D warnings" $(CARGO) doc --no-deps
+
+WHITAKER_CLEAN_ENV = env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
+	-u CARGO_PROFILE_DEV_CODEGEN_BACKEND -u CARGO_BUILD_TARGET \
+	-u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER \
+	-u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS -u CFLAGS -u LDFLAGS
+
+lint-whitaker: ## Run the Whitaker Dylint suite with clean driver inputs and warnings denied
+	$(WHITAKER_CLEAN_ENV) DYLINT_RUSTFLAGS="-D warnings" $(WHITAKER) --all -- --all-targets --all-features
 
 fmt: ## Format Rust and Markdown sources
 	$(CARGO) fmt --all

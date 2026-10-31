@@ -136,7 +136,7 @@ fn runs_the_feature_target(workflow: &Workflow) -> bool {
 /// Return whether a workflow has a step that lints the feature.
 fn lints_the_feature(workflow: &Workflow) -> bool {
     any_run(workflow, |run| {
-        names_target(run, "lint") && run.contains(&format!("--features {FEATURE}"))
+        names_target(run, "lint-clippy") && run.contains(&format!("--features {FEATURE}"))
     })
 }
 
@@ -221,7 +221,7 @@ fn conforming(extra: &str) -> Result<Workflow, WorkflowError> {
                 "        with:\n          output-path: lcov.info\n",
                 "  unstable-rest-resolve:\n    runs-on: ubuntu-latest\n    steps:\n",
                 "      - name: Lint (feature-gated)\n",
-                "        run: make lint CLIPPY_FLAGS=\"--features unstable-rest-resolve\"\n",
+                "        run: make lint-clippy CLIPPY_FLAGS=\"--features unstable-rest-resolve\"\n",
                 "      - name: Test unstable REST resolve (feature-gated)\n",
                 "        run: CARGO=\"cargo --locked\" make test-unstable-rest-resolve\n",
                 "{extra}",
