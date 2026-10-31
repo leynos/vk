@@ -14,6 +14,14 @@
 //! is the same class of cap as the old flat query's `first: 100` page size;
 //! review threads of that depth are not a practical concern for `vk resolve`.
 
+#![cfg_attr(
+    test,
+    expect(
+        clippy::unused_async_trait_impl,
+        reason = "automock generates async trait impls that never await"
+    )
+)]
+
 use super::CommentRef;
 // `graphql_client` resolves the `BigInt` scalar (`fullDatabaseId`) to a type
 // of the same name in scope of the derive; the shared alias supplies it.

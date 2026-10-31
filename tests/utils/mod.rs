@@ -52,10 +52,6 @@ impl ShutdownHandle {
 /// # Panics
 ///
 /// Panics if the default response cannot be constructed.
-#[expect(
-    clippy::integer_division_remainder_used,
-    reason = "tokio::select! uses % internally"
-)]
 pub async fn start_mitm() -> Result<(SocketAddr, Handler, ShutdownHandle), std::io::Error> {
     let handler: Handler = Arc::new(Mutex::new(Box::new(|_req| {
         Response::builder()
@@ -117,10 +113,6 @@ pub async fn start_mitm() -> Result<(SocketAddr, Handler, ShutdownHandle), std::
 ///
 /// Panics if the default response cannot be constructed.
 #[allow(dead_code, clippy::type_complexity, reason = "used only in some tests")]
-#[expect(
-    clippy::integer_division_remainder_used,
-    reason = "tokio::select! uses % internally"
-)]
 pub async fn start_mitm_capture()
 -> Result<(SocketAddr, CaptureHandler, ShutdownHandle), std::io::Error> {
     use http_body_util::BodyExt;
