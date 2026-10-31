@@ -136,7 +136,7 @@ fn runs_the_feature_target(workflow: &Workflow) -> bool {
 /// Return whether a workflow has a step that lints the feature.
 fn lints_the_feature(workflow: &Workflow) -> bool {
     any_run(workflow, |run| {
-        names_target(run, "lint") && run.contains(&format!("--features {FEATURE}"))
+        names_target(run, "lint-clippy") && run.contains(&format!("--features {FEATURE}"))
     })
 }
 
