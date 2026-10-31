@@ -12,10 +12,13 @@ static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 /// Acquire the process-wide environment mutex.
 fn lock() -> MutexGuard<'static, ()> {
+    // The mutex guards no data, only exclusive access to the process
+    // environment, so a poisoned lock (a panic while held) leaves nothing
+    // inconsistent and the next caller may take it.
     ENV_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
-        .expect("environment lock poisoned")
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Set an environment variable while holding the global lock.
@@ -68,9 +71,26 @@ where
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for the serialised environment helpers.
+
     use super::*;
     use serial_test::serial;
     use std::env;
+
+    #[test]
+    #[serial]
+    fn a_poisoned_lock_is_recovered() {
+        let outcome = std::panic::catch_unwind(|| with_lock(|| panic!("poison the lock")));
+        assert!(
+            outcome.is_err(),
+            "the closure must panic while holding the lock"
+        );
+
+        let key = "VK_ENV_POISON_TEST";
+        set_var(key, "after-poison");
+        assert_eq!(var(key).as_deref(), Ok("after-poison"));
+        remove_var(key);
+    }
 
     #[test]
     #[serial]

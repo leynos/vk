@@ -211,11 +211,33 @@ impl From<ortho_config::OrthoError> for VkError {
 }
 
 /// Pattern that recognizes UTF-8 locale identifiers.
-pub(crate) static UTF8_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").expect("valid regex"));
+///
+/// The pattern is a literal checked by `utf8_re_compiles`; a build failure would
+/// leave `None`, which matches nothing.
+pub(crate) static UTF8_RE: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"(?i)\bUTF-?8\b").ok());
 
-#[tokio::main]
-async fn main() -> Result<(), VkError> {
+/// Build the runtime explicitly rather than through `#[tokio::main]`, whose
+/// expansion panics when the runtime cannot be built; a failure is reported as
+/// an ordinary `VkError` instead.
+fn main() -> Result<(), VkError> {
+    run_on(
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build(),
+    )
+}
+
+/// Run the program on `runtime`, or report that it could not be built.
+///
+/// The build result is a parameter so tests can supply a failure.
+fn run_on(runtime: std::io::Result<tokio::runtime::Runtime>) -> Result<(), VkError> {
+    runtime?.block_on(run())
+}
+
+/// Parse the command line, run the selected subcommand and exit with the code
+/// that classifies a failure.
+async fn run() -> Result<(), VkError> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_writer(std::io::stderr)

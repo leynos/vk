@@ -79,7 +79,13 @@ When adding a user-facing option:
 
 GitHub API behaviour belongs under [src/api/](../src/api/). Command
 orchestration belongs under [src/commands/](../src/commands/), while terminal
-rendering belongs under [src/printer/](../src/printer/). Keep changes within
+rendering belongs under [src/printer/](../src/printer/). Within `commands`,
+`commands.rs` owns the subcommand flow, `commands/branch.rs` owns branch and
+repository auto-detection for `vk pr`, and `commands/output.rs` owns printing
+review threads, reviews and banners and detecting a closed output pipe. The
+`diff`, `main` and `commands` modules hold their literal patterns as
+`Option<Regex>`, with a test that each compiles, and take the pattern as a
+parameter where a test must exercise the unavailable case. Keep changes within
 the module that owns the behaviour unless a shared abstraction has a clear
 reuse policy.
 

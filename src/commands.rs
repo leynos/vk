@@ -7,13 +7,12 @@ use crate::auth::resolve_github_token;
 use crate::branch_pr::fetch_pr_for_branch;
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs, ResolveArgs};
 use crate::environment;
-use crate::printer::{print_reviews, write_thread};
 use crate::ref_parser::{
-    RepoInfo, current_branch, is_fragment_only, parse_fragment_only, parse_issue_reference,
-    parse_pr_thread_reference, parse_repo_str, repo_from_fetch_head, repo_from_origin,
+    RepoInfo, is_fragment_only, parse_fragment_only, parse_issue_reference,
+    parse_pr_thread_reference,
 };
 use crate::review_threads::thread_for_comment;
-use crate::reviews::{PullRequestReview, fetch_reviews, latest_reviews};
+use crate::reviews::{PullRequestReview, fetch_reviews};
 use crate::summary::{
     print_comments_banner, print_end_banner, print_start_banner, print_summary, summarize_files,
 };
@@ -21,10 +20,14 @@ use crate::{
     FetchOptions, GraphQLClient, ReviewThread, VkError, fetch_issue,
     fetch_review_threads_with_options, filter_threads_by_files, resolve,
 };
-use std::any::Any;
-use std::io::{ErrorKind, Write};
+use branch::resolve_branch_and_repo;
+use output::{
+    handle_banner, handle_print_result, is_broken_pipe_kind, print_reviews_block,
+    print_threads_block,
+};
+use std::io::Write;
 use termimad::MadSkin;
-use tracing::{debug, error, warn};
+use tracing::{error, warn};
 
 #[cfg(feature = "unstable-rest-resolve")]
 use std::time::Duration;
@@ -48,13 +51,6 @@ struct PrContext {
     client: GraphQLClient,
 }
 
-/// Print a review thread to stdout.
-///
-/// This simply calls [`write_thread`] with a locked `stdout` handle.
-fn print_thread(skin: &MadSkin, thread: &ReviewThread) -> Result<(), VkError> {
-    write_thread(std::io::stdout().lock(), skin, thread).map_err(map_printer_error)
-}
-
 /// Create a [`GraphQLClient`], falling back to no transcript on failure.
 ///
 /// This attempts to initialize the client with the provided `transcript`.
@@ -73,48 +69,6 @@ fn build_graphql_client(
     }
 }
 
-/// Convert a printer error into the command error type.
-fn map_printer_error(err: anyhow::Error) -> VkError {
-    if let Some(io) = err.downcast_ref::<std::io::Error>() {
-        return VkError::Io(Box::new(std::io::Error::new(io.kind(), err)));
-    }
-    VkError::Io(Box::new(std::io::Error::other(err)))
-}
-
-/// Inspect a print `result`, returning true when a broken pipe is detected so
-/// callers stop further output, or false when normal processing should
-/// continue.
-///
-/// The `result` captures output failures and `label` provides context for
-/// logging. Broken pipe checks apply to `std::io::Error` and
-/// `termimad::Error` values.
-fn handle_print_result<E>(result: Result<(), E>, label: &str) -> bool
-where
-    E: std::fmt::Display + Any,
-{
-    let Err(err) = result else {
-        return false;
-    };
-    let any = &err as &dyn Any;
-    if any
-        .downcast_ref::<std::io::Error>()
-        .is_some_and(|io| is_broken_pipe_kind(io.kind()))
-    {
-        return true;
-    }
-    if any
-        .downcast_ref::<termimad::Error>()
-        .is_some_and(|term_err| match term_err {
-            termimad::Error::IO(io) => is_broken_pipe_kind(io.kind()),
-            termimad::Error::InsufficientWidth(_) => false,
-        })
-    {
-        return true;
-    }
-    error!("error printing {label}: {err}");
-    false
-}
-
 /// Warn when authentication or a UTF-8 terminal locale is unavailable.
 fn warn_on_missing_token_and_locale(token: &str) {
     if token.is_empty() {
@@ -123,124 +77,6 @@ fn warn_on_missing_token_and_locale(token: &str) {
     if !locale_is_utf8() {
         warn!("terminal locale is not UTF-8; emojis may not render correctly");
     }
-}
-
-/// Return whether an error chain contains a broken-pipe I/O error.
-fn caused_by_broken_pipe(err: &anyhow::Error) -> bool {
-    err.chain().any(|c| {
-        c.downcast_ref::<std::io::Error>()
-            .is_some_and(|io| is_broken_pipe_kind(io.kind()))
-    })
-}
-
-/// Return whether an I/O error kind indicates a closed output pipe.
-fn is_broken_pipe_kind(kind: ErrorKind) -> bool {
-    kind == ErrorKind::BrokenPipe
-}
-
-/// Print a banner and report whether output stopped because of a broken pipe.
-fn handle_banner<F>(print: F, label: &str) -> bool
-where
-    F: FnOnce() -> std::io::Result<()>,
-{
-    if let Err(e) = print() {
-        if is_broken_pipe_kind(e.kind()) {
-            return true;
-        }
-        error!("error printing {label} banner: {e}");
-    }
-    false
-}
-
-/// Print the latest review decisions, stopping on a broken pipe.
-fn print_reviews_block(skin: &MadSkin, reviews: Vec<PullRequestReview>) -> bool {
-    let latest = latest_reviews(reviews);
-    let stdout = std::io::stdout();
-    let mut handle = stdout.lock();
-    if let Err(e) = print_reviews(&mut handle, skin, &latest) {
-        if caused_by_broken_pipe(&e) {
-            return true;
-        }
-        error!("error printing review: {e}");
-    }
-    false
-}
-
-/// Print review threads, stopping on a broken pipe.
-fn print_threads_block(skin: &MadSkin, threads: Vec<ReviewThread>) -> bool {
-    for thread in threads {
-        if let Err(e) = print_thread(skin, &thread) {
-            if matches!(e, VkError::Io(ref inner) if is_broken_pipe_kind(inner.kind())) {
-                return true;
-            }
-            error!("error printing thread: {e}");
-        }
-    }
-    false
-}
-
-/// Context for branch-based PR auto-detection.
-struct BranchContext {
-    /// The target repository (where the PR is opened against).
-    repo: RepoInfo,
-    /// The current branch name.
-    branch: String,
-    /// The head repository owner (from origin remote), used to disambiguate
-    /// when multiple forks have PRs with the same branch name.
-    head_owner: Option<String>,
-}
-
-/// Resolve the current branch and repository for PR auto-detection.
-///
-/// Returns the target repository, the current branch name, and optionally the
-/// head repository owner (from the `origin` remote URL) for disambiguating PRs
-/// from forks.
-///
-/// The target repository is resolved from, in order: the `--repo` flag,
-/// `FETCH_HEAD`, then the `origin` remote URL. The `origin` fallback handles
-/// fresh worktrees where `git fetch` has not been run since creation, so
-/// `FETCH_HEAD` does not yet exist. `FETCH_HEAD` is consulted before `origin`
-/// because in fork workflows it points at the upstream repository (where PRs
-/// live) while `origin` points at the user's fork.
-///
-/// `repo_from_origin` is called lazily so the happy path (a usable `--repo` or
-/// `FETCH_HEAD`) only spawns git once — for the head-owner lookup. The rare
-/// `origin` fallback pays for a second invocation to keep the fast path
-/// allocation-free.
-///
-/// # Errors
-///
-/// Returns `VkError::DetachedHead` when the repository is in detached HEAD
-/// state, or `VkError::RepoNotFound` when the repository cannot be determined.
-fn resolve_branch_and_repo(default_repo: Option<&str>) -> Result<BranchContext, VkError> {
-    let branch = current_branch().ok_or(VkError::DetachedHead)?;
-    // Each `.inspect(...)` fires only when its `Option` is `Some`, so exactly
-    // one `debug!` runs and it identifies the winning source. The chain stops
-    // short-circuiting at the first match, so subsequent sources are not
-    // consulted (and not logged).
-    let repo = default_repo
-        .and_then(parse_repo_str)
-        .inspect(|r| debug!(repo = %format_repo(r), "resolved repo from --repo"))
-        .or_else(|| {
-            repo_from_fetch_head()
-                .inspect(|r| debug!(repo = %format_repo(r), "resolved repo from FETCH_HEAD"))
-        })
-        .or_else(|| {
-            repo_from_origin()
-                .inspect(|r| debug!(repo = %format_repo(r), "resolved repo from origin remote"))
-        })
-        .ok_or(VkError::RepoNotFound)?;
-    let head_owner = repo_from_origin().map(|r| r.owner);
-    Ok(BranchContext {
-        repo,
-        branch,
-        head_owner,
-    })
-}
-
-/// Format a repository as its `owner/name` path.
-fn format_repo(repo: &RepoInfo) -> String {
-    format!("{}/{}", repo.owner, repo.name)
 }
 
 /// Resolve the PR reference, detecting from branch when necessary.
@@ -512,15 +348,24 @@ pub async fn run_resolve(
     }
 }
 
+/// Return whether `value` names a UTF-8 locale according to `pattern`.
+///
+/// `None` stands for a pattern that failed to compile, which matches nothing.
+fn is_utf8_locale(pattern: Option<&regex::Regex>, value: &str) -> bool {
+    pattern.is_some_and(|re| re.is_match(value))
+}
+
 /// Return whether the first configured locale variable is UTF-8.
 fn locale_is_utf8() -> bool {
     for key in ["LC_ALL", "LC_CTYPE", "LANG"] {
         if let Ok(value) = environment::var(key) {
-            return crate::UTF8_RE.is_match(&value);
+            return is_utf8_locale(crate::UTF8_RE.as_ref(), &value);
         }
     }
     false
 }
 
+mod branch;
+mod output;
 #[cfg(test)]
 mod tests;

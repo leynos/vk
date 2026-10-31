@@ -133,6 +133,8 @@ impl Default for ResolveArgs {
 
 #[cfg(test)]
 mod tests {
+    //! Unit tests for merging command-line and configuration arguments.
+
     use super::GlobalArgs;
 
     #[test]
