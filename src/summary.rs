@@ -306,7 +306,7 @@ mod tests {
         let summary = Vec::<(String, usize)>::new();
         let mut buf = Vec::new();
         write_summary(&mut buf, &summary).expect("write summary");
-        assert!(buf.is_empty());
+        assert_eq!(buf.len(), 0);
     }
 
     #[rstest]
@@ -374,16 +374,15 @@ mod tests {
                 libc::dup2(dup_fd, stdout_fd);
                 libc::close(dup_fd);
                 libc::_exit(code);
-            } else {
-                let mut status = 0;
-                assert_eq!(
-                    libc::waitpid(pid, std::ptr::addr_of_mut!(status), 0),
-                    pid,
-                    "waitpid"
-                );
-                assert!(libc::WIFEXITED(status), "child exit");
-                assert_eq!(libc::WEXITSTATUS(status), 0, "child status");
             }
+            let mut status = 0;
+            assert_eq!(
+                libc::waitpid(pid, std::ptr::addr_of_mut!(status), 0),
+                pid,
+                "waitpid"
+            );
+            assert!(libc::WIFEXITED(status), "child exit");
+            assert_eq!(libc::WEXITSTATUS(status), 0, "child status");
         }
     }
 

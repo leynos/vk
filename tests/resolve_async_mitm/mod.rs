@@ -27,10 +27,6 @@ type AsyncHandler = Arc<
 /// # Panics
 ///
 /// Panics if the default response cannot be constructed.
-#[expect(
-    clippy::integer_division_remainder_used,
-    reason = "tokio::select! uses % internally"
-)]
 pub(super) async fn start_async_mitm()
 -> Result<(SocketAddr, AsyncHandler, ShutdownHandle), std::io::Error> {
     let handler: AsyncHandler = Arc::new(Mutex::new(Box::new(|_req| {

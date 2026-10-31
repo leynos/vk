@@ -172,5 +172,5 @@ fn a_recipe_is_read_from_its_target_to_the_next_rule() {
         vec!["one".to_owned(), "two".to_owned()]
     );
     assert_eq!(Makefile(makefile).recipe("b").0, vec!["three".to_owned()]);
-    assert!(Makefile(makefile).recipe("c").0.is_empty());
+    assert_eq!(Makefile(makefile).recipe("c").0.len(), 0);
 }

@@ -6,6 +6,14 @@
 //! Each response is flattened into the parent module's [`PrPage`] before it is
 //! returned, so no generated type and no envelope escapes this submodule.
 
+#![cfg_attr(
+    test,
+    expect(
+        clippy::unused_async_trait_impl,
+        reason = "automock generates async trait impls that never await"
+    )
+)]
+
 use crate::{GraphQLClient, PageInfo, VkError};
 use graphql_client::GraphQLQuery;
 use serde::Deserialize;

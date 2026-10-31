@@ -134,7 +134,7 @@ fn cli_requires_subcommand() {
 fn pr_subcommand_parses() {
     let args = parse_pr_args(&["vk", "pr", "123"]);
     assert_eq!(args.reference.as_deref(), Some("123"));
-    assert!(args.files.is_empty());
+    assert_eq!(args.files.len(), 0);
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn pr_subcommand_parses_files() {
 fn pr_subcommand_parses_without_reference() {
     let args = parse_pr_args(&["vk", "pr"]);
     assert!(args.reference.is_none());
-    assert!(args.files.is_empty());
+    assert_eq!(args.files.len(), 0);
 }
 
 #[test]
