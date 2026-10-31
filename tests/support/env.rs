@@ -6,11 +6,13 @@
 
 use std::env;
 use std::ffi::OsString;
-use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use vk::environment;
 use vk::test_utils::{remove_var, set_var};
+
+#[path = "capfs.rs"]
+mod capfs;
 
 /// Apply a sequence of environment assignments, removing keys with `None`.
 ///
@@ -118,7 +120,7 @@ pub fn maybe_enter_dir(should_enter: bool, path: impl AsRef<Path>) -> Option<Dir
 pub fn write_config(content: &str) -> (TempDir, PathBuf) {
     let dir = TempDir::new().expect("create config dir");
     let path = dir.path().join(".vk.toml");
-    fs::write(&path, content).expect("write config");
+    capfs::write_file(&path, content).expect("write config");
     (dir, path)
 }
 

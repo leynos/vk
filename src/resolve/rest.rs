@@ -207,6 +207,8 @@ fn handle_reply_response(
 
 #[cfg(test)]
 mod tests {
+    //! Tests for the REST comment-resolution client.
+
     use super::*;
     use crate::ref_parser::RepoInfo;
     use std::sync::atomic::Ordering;

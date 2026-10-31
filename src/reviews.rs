@@ -152,6 +152,8 @@ pub fn latest_reviews(reviews: Vec<PullRequestReview>) -> Vec<PullRequestReview>
 
 #[cfg(test)]
 mod tests {
+    //! Tests for review fetching and de-duplication.
+
     use super::*;
     use crate::ref_parser::RepoInfo;
     use crate::test_utils::{TestClient, start_server};

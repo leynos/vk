@@ -18,6 +18,9 @@ termimad = "0.35.1"
 thiserror = "2.0.16"
 url = "2.5.0"
 regex = "1.10.3"
+# File access for user-supplied paths goes through a directory capability
+# (see `src/fs_access.rs`); the crate is already in the lock file.
+cap-std = "4.0"
 diffy = "0.5.1"
 chrono = { version = "0.4.42", features = ["serde", "clock"] }
 graphql_client = "0.16"

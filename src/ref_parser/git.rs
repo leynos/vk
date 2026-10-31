@@ -4,7 +4,7 @@
 //! including current branch, origin remote URL, and `FETCH_HEAD`.
 
 use std::path::Path;
-use std::{fs, process::Command};
+use std::process::Command;
 
 use super::{RepoInfo, parse_repo_str};
 
@@ -66,7 +66,7 @@ pub(crate) fn repo_from_fetch_head_impl(dir: Option<&Path>) -> Option<RepoInfo> 
         || std::path::PathBuf::from(rel_path.trim()),
         |d| d.join(rel_path.trim()),
     );
-    let content = fs::read_to_string(full_path).ok()?;
+    let content = crate::fs_access::read_to_string(&full_path).ok()?;
     content.lines().find_map(parse_repo_str)
 }
 

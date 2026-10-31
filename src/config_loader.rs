@@ -134,6 +134,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    //! Tests for configuration loading.
+
     use super::{
         EXPLICIT_CONFIG_PATH_ENV, load_global_args_without_cli_overrides_from_process_args,
     };
@@ -171,7 +173,8 @@ mod tests {
     fn load_global_args_without_cli_overrides_honours_config_path_override() {
         let (_sandbox, global) = setup_global_args_without_cli_overrides(|sandbox| {
             let config_path = sandbox.path().join("override.toml");
-            std::fs::write(&config_path, "repo = \"from-config-path\"\n").expect("write config");
+            crate::fs_access::write_string(&config_path, "repo = \"from-config-path\"\n")
+                .expect("write config");
 
             [
                 OsString::from("vk"),
@@ -190,7 +193,7 @@ mod tests {
     fn load_global_args_without_cli_overrides_reports_broken_explicit_config() {
         let sandbox = EnvSandbox::new().expect("create config sandbox");
         let broken_path = sandbox.path().join("broken.toml");
-        std::fs::write(&broken_path, "not = [valid").expect("write broken config");
+        crate::fs_access::write_string(&broken_path, "not = [valid").expect("write broken config");
         environment::set_var(EXPLICIT_CONFIG_PATH_ENV, &broken_path);
 
         let result =

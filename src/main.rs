@@ -14,6 +14,7 @@ mod auth;
 mod branch_pr;
 mod config_loader;
 mod diff;
+mod fs_access;
 mod html;
 mod issues;
 #[cfg(test)]

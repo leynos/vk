@@ -146,6 +146,8 @@ pub(super) fn build_headers(token: &Token) -> Result<HeaderMap, VkError> {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for the GraphQL client helpers.
+
     use super::{
         GraphQLError, Token, build_headers, handle_graphql_errors, operation_name, payload_snippet,
         snippet,

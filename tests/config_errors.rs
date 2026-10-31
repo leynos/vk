@@ -7,11 +7,14 @@ use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use std::process::Command;
 
+#[path = "support/capfs.rs"]
+mod capfs;
+
 #[test]
 fn invalid_config_file_reports_configuration_error() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let path = dir.path().join(".vk.toml");
-    std::fs::write(&path, "not = [valid").expect("write broken config");
+    capfs::write_file(&path, "not = [valid").expect("write broken config");
     // Isolate HOME and XDG so the host user's vk configuration cannot rescue
     // discovery and silently drop the parse error from VK_CONFIG_PATH.
     let home = dir.path().to_path_buf();

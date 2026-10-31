@@ -48,6 +48,8 @@ pub fn resolve_github_token(cli_token: Option<&str>, config_token: Option<&str>)
 
 #[cfg(test)]
 mod tests {
+    //! Tests for token resolution.
+
     use super::resolve_github_token;
     use crate::test_utils::{apply_optional_env, restore_optional_env};
     use rstest::{fixture, rstest};

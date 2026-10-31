@@ -96,6 +96,8 @@ fn is_transient_serde_error(status: u16, snippet: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    //! Tests for the retry policy.
+
     use super::{is_transient_serde_error, should_retry};
     use crate::VkError;
     use rstest::rstest;
