@@ -40,8 +40,8 @@ make test
 Run commands sequentially. The repository relies on shared Cargo caching, and
 sequential execution keeps cache use predictable.
 
-`make lint` runs the Whitaker Dylint suite (`make lint-whitaker`) first, then
-Clippy and rustdoc (`make lint-clippy`). Install Whitaker with
+`make lint` depends on Clippy and rustdoc (`make lint-clippy`) and the Whitaker
+Dylint suite (`make lint-whitaker`), in no promised order. Install Whitaker with
 `whitaker-installer` so that `whitaker` is on `PATH`, and never call
 `cargo dylint` directly. The recipe runs the wrapper with clean driver inputs
 (it unsets the inherited Rust flags, backend and linker variables) and
