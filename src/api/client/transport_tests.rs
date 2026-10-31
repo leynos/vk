@@ -329,7 +329,7 @@ async fn pooled_transport_keeps_concurrent_responses_and_transcripts_isolated() 
             .map(|operation| run_concurrent_query(Arc::clone(&client), operation)),
     )
     .await;
-    let transcript = std::fs::read_to_string(&transcript_path).expect("read transcript");
+    let transcript = crate::fs_access::read_to_string(&transcript_path).expect("read transcript");
     stop_loopback_server(server_task).await;
 
     for (operation, response) in results {

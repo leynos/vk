@@ -93,6 +93,26 @@ Before extracting a helper, port, or abstraction, check whether one already
 exists and document the new ownership boundary in the relevant design or
 developer document.
 
+### Filesystem access
+
+Whitaker's capability-filesystem policy rejects `std::fs`, so production code
+reaches files only through `src/fs_access.rs` (`create_file` and
+`read_to_string`), whose permitted callers are the GraphQL client's transcript
+writer and the `FETCH_HEAD` reader in `ref_parser/git.rs`. Each helper opens
+the path's parent as a `cap_std::fs::Dir` and acts on the file name beneath it.
+`fs_access` is the one production module that calls `ambient_authority`,
+because the transcript path comes from the command line and Git reports where
+`FETCH_HEAD` lives; it does not confine a path to a preselected root.
+Integration tests call `ambient_authority` too, through
+`tests/support/capfs.rs`, whose helper returns `io::Result` instead of
+panicking. `cap-std` is a regular dependency (it was already a dev-dependency).
+
+`cap-std` resolves symlinks within the opened directory and refuses one whose
+target escapes it, including an absolute target, which `std::fs` would follow.
+A transcript path or `FETCH_HEAD` that is itself such a symlink therefore
+fails, and the callers handle that like any other I/O error. The restriction is
+intentional, and a test records it.
+
 ### REST resolve client
 
 REST review-comment replies use octocrab through its raw `_post` route. The

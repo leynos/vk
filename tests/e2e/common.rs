@@ -114,7 +114,8 @@ impl GitRepoWithFetchHead {
         let dir = tempdir().expect("tempdir");
         init_git_repo(dir.path(), head_content);
         let git_dir = dir.path().join(".git");
-        capfs::write_file(&git_dir.join("FETCH_HEAD"), fetch_head_content);
+        capfs::write_file(&git_dir.join("FETCH_HEAD"), fetch_head_content)
+            .expect("write FETCH_HEAD");
         Self { dir }
     }
 

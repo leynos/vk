@@ -51,6 +51,8 @@ _Figure 1: Compact repository tree for contributor orientation._
 - `src/api/`: GitHub API access, pagination, and retry behaviour.
 - `src/branch_pr/`: Pull request discovery for the current Git branch.
 - `src/commands/`: Command handlers and command-level orchestration.
+- `src/fs_access.rs`: Capability-based file access for user-supplied and
+  Git-reported paths.
 - `src/printer/`: Terminal output formatting and presentation logic.
 - `src/ref_parser/`: GitHub reference parsing and Git integration helpers.
 - `src/resolve/`: Review-thread resolution through GraphQL and optional REST

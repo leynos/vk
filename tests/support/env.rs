@@ -120,7 +120,7 @@ pub fn maybe_enter_dir(should_enter: bool, path: impl AsRef<Path>) -> Option<Dir
 pub fn write_config(content: &str) -> (TempDir, PathBuf) {
     let dir = TempDir::new().expect("create config dir");
     let path = dir.path().join(".vk.toml");
-    capfs::write_file(&path, content);
+    capfs::write_file(&path, content).expect("write config");
     (dir, path)
 }
 

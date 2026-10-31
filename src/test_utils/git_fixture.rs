@@ -6,6 +6,8 @@
 //! builders return [`io::Result`] so a broken test environment (missing
 //! `git` binary, disk full, …) surfaces a clear error rather than a panic.
 
+use cap_std::ambient_authority;
+use cap_std::fs::Dir;
 use std::io;
 use std::path::Path;
 
@@ -117,8 +119,8 @@ impl GitRepoFixture {
     ///
     /// Returns an `io::Error` when the file cannot be created or written.
     pub fn with_fetch_head(self, content: &str) -> io::Result<Self> {
-        let fetch_head = self.dir.path().join(".git").join("FETCH_HEAD");
-        std::fs::write(fetch_head, content)?;
+        let git_dir = Dir::open_ambient_dir(self.dir.path().join(".git"), ambient_authority())?;
+        git_dir.write("FETCH_HEAD", content)?;
         Ok(self)
     }
 
