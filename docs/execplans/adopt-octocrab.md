@@ -4,7 +4,7 @@ This ExecPlan (execution plan) is a living document. The sections `Constraints`,
 `Tolerances`, `Risks`, `Progress`, `Surprises & Discoveries`, `Decision Log`,
 and `Outcomes & Retrospective` must be kept up to date as work proceeds.
 
-Status: COMPLETE (awaiting review/merge of PRs #194, #195, #196)
+Status: COMPLETE (PR #196 merged; PRs #194, #195 delivered earlier)
 
 ## Purpose / big picture
 
@@ -240,7 +240,9 @@ escalation, not workarounds.
   sources; `tests/resolve.rs` split 436 to 286 lines with the GraphQL
   pagination fixtures moved to `tests/resolve/pagination.rs` (169 lines). All
   five gates green; 516 tests passed with `resolve` running 13 feature-gated
-  cases, including the relocated `pagination::resolve_flows`.
+  cases, including the relocated `pagination::resolve_flows`. Merged as squash
+  commit `59eaeae` on 2026-09-27 after CodeRabbit approved (all 35 review
+  threads resolved); all CI checks green on the merge head.
 - [x] (2026-08-27) GraphQL transport hardening added loopback request-contract,
   connection, status, header-timeout, body-timeout, response-limit, and
   concurrent-transcript coverage; bounded metrics and property tests cover
