@@ -37,6 +37,8 @@ jobs:
           fetch-depth: 0
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@872f59f53717b5bebe8e24b2f4a7496b089a939a
+        with:
+          install-mold: 'true'
       - name: Install mdtablefix
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
@@ -92,6 +94,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Setup Rust
         uses: leynos/shared-actions/.github/actions/setup-rust@872f59f53717b5bebe8e24b2f4a7496b089a939a
+        with:
+          install-mold: 'true'
       - name: Install OpenSSL
         run: sudo apt-get update && sudo apt-get install -y openssl ca-certificates
       - name: Lint (feature-gated)
