@@ -64,7 +64,7 @@ frontend flag and the Makefile restates both flags where it assigns `RUSTFLAGS`
 (`test`, `typecheck`, `lint-clippy` and the debug build), adding them to any
 `RUSTFLAGS` the caller exports (setup-rust exports one in CI). `make release`
 adds neither standard flag. The Makefile adds `mold` only when the host and the
-compilation target are Linux; a `--target` passed through `CARGO_FLAGS` is
+compilation target are Linux; a `--target` passed through `CLIPPY_FLAGS` is
 invisible to Make, so set `CARGO_BUILD_TARGET` as well when cross-compiling.
 The coverage workflow installs `mold` through setup-rust's `install-mold` input
 before the steps that run these targets. A local Linux build needs `mold` on the
