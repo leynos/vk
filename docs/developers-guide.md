@@ -67,7 +67,11 @@ adds neither standard flag. The Makefile adds `mold` only when the host and the
 compilation target are Linux; a `--target` passed through `CARGO_FLAGS` is
 invisible to Make, so set `CARGO_BUILD_TARGET` as well when cross-compiling.
 The coverage workflow installs `mold` through setup-rust's `install-mold` input
-before the steps that run these targets.
+before the steps that run these targets. A local Linux build needs `mold` on the
+`PATH` (for example `sudo apt-get install mold`, or your distribution's
+package); without it the linker flag stops a linked `cargo build`, and
+`RUSTFLAGS` set to an empty value (or `CARGO_BUILD_TARGET` naming a non-Linux
+triple) skips it.
 
 `make lint-whitaker` runs Whitaker under the toolchain its installer manages,
 with the driver inputs cleaned and an empty `RUSTFLAGS`, so it takes none of
