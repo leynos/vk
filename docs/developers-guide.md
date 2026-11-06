@@ -71,7 +71,9 @@ before the steps that run these targets. A local Linux build needs `mold` on the
 `PATH` (for example `sudo apt-get install mold`, or your distribution's
 package); without it the linker flag stops a linked `cargo build`, and
 `RUSTFLAGS` set to an empty value (or `CARGO_BUILD_TARGET` naming a non-Linux
-triple) skips it.
+triple) skips it. The `mold` flag also needs a GCC driver of 12.1 or newer;
+with an older GCC, upgrade it or select clang as the linker driver with
+`CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang`.
 
 `make lint-whitaker` runs Whitaker under the toolchain its installer manages,
 with the driver inputs cleaned and an empty `RUSTFLAGS`, so it takes none of
