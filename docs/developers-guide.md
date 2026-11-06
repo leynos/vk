@@ -54,6 +54,48 @@ Use `make fmt` after documentation changes. It formats Rust and Markdown
 sources. Review Markdown formatter diffs before committing so footnotes, links,
 tables, and code fences still carry the intended meaning.
 
+### Build standard
+
+`.cargo/config.toml` makes the parallel frontend (`-Zthreads=8`) the default
+for every build and adds the `mold` linker on Linux, so a bare `cargo build`
+takes both. Cargo applies a single `rustflags` source rather than merging them,
+and an assigned `RUSTFLAGS` replaces every source, so each source repeats the
+frontend flag and the Makefile restates both flags where it assigns `RUSTFLAGS`
+(`test`, `typecheck`, `lint-clippy` and the debug build), adding them to any
+`RUSTFLAGS` the caller exports (setup-rust exports one in CI). `make release`
+adds neither standard flag. The Makefile adds `mold` only when the host and the
+compilation target are Linux; a `--target` passed through `CLIPPY_FLAGS` is
+invisible to Make, so set `CARGO_BUILD_TARGET` as well when cross-compiling.
+The coverage workflow installs `mold` through setup-rust's `install-mold` input
+before the steps that run these targets. A local Linux build needs `mold` on the
+`PATH` (for example `sudo apt-get install mold`, or your distribution's
+package); without it the linker flag stops a linked `cargo build`, and
+`RUSTFLAGS` set to an empty value (or `CARGO_BUILD_TARGET` naming a non-Linux
+triple) skips it. The `mold` flag also needs a GCC driver of 12.1 or newer;
+with an older GCC, upgrade it or select clang as the linker driver with
+`CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang`.
+
+`make lint-whitaker` runs Whitaker under the toolchain its installer manages,
+with the driver inputs cleaned and an empty `RUSTFLAGS`, so it takes none of
+the development standard.
+
+### Cranelift backend support
+
+Exception: Cranelift is not the development-profile backend. The estate adopts
+it only where the full suite passes under it, and that has not been measured
+here. Recorded state: the pin is `nightly-2026-11-05`; no measurement has been
+taken on it, and the review is deferred to 1 April 2027, when the whole suite
+is measured under both backends.
+
+### Development build footprint
+
+The development profile sets `incremental = false` and `debug = 0` in
+`Cargo.toml`, so a dev build keeps no incremental state or debug information.
+To debug, set `CARGO_PROFILE_DEV_DEBUG=true`; to rebuild incrementally, set
+`CARGO_INCREMENTAL=1`. `.cargo/config.toml` also sets
+`[unstable] embed-metadata = false`, the native Cargo key for nightlies from
+2026-07-31.
+
 ## Test expectations
 
 Add or update tests whenever behaviour changes. Use the smallest test layer
