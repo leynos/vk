@@ -28,7 +28,10 @@ jobs:
       ${{ (github.event.pull_request.head.repo.fork
       || github.event.pull_request.user.login == 'dependabot[bot]')
       && 'ubuntu-latest' || 'ubicloud-standard-2' }}
-    timeout-minutes: 25
+    # A cold run builds every dependency twice (lint, then instrumented tests) and
+    # then compiles the trybuild fixtures, which took the whole 25 minutes the
+    # job once had; a warm run needs about ten.
+    timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
     steps:
