@@ -64,6 +64,7 @@ clean: ## Remove build artifacts
 	$(CARGO) clean
 
 test: ## Run tests with warnings treated as errors
+	$(CARGO) fetch --locked --target "$${CARGO_BUILD_TARGET:-host-tuple}"
 	$(GATE_RUSTFLAGS) $(CARGO) test --all-targets --all-features $(BUILD_JOBS)
 
 # The tests that exist only with `unstable-rest-resolve`: the `resolve`
