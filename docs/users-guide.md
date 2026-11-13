@@ -148,7 +148,7 @@ The GraphQL client sends requests directly through Hyper and rustls. It does
 not honour the `HTTP_PROXY` or `HTTPS_PROXY` environment variables, and it does
 not follow redirects. Use a directly reachable GraphQL endpoint; this
 deliberate transport boundary is recorded in
-[ADR 001](adr-001-github-api-client-modernisation.md) and explained in the
+[ADR 001](adrs/adr-0001-github-api-client-modernisation.md) and explained in the
 [GraphQL transport migration guide](graphql-transport-migration-guide.md).
 
 ## Troubleshoot terminal output
