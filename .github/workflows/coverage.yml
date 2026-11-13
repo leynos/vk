@@ -67,6 +67,10 @@ jobs:
           globs: '**/*.md'
       - name: Install Whitaker
         uses: leynos/shared-actions/.github/actions/install-whitaker@0eabb6bc07148981de5da395e30cd78d83f5c7c2
+        with:
+          # The lint suite's toolchain reads .cargo/config.toml, so it needs
+          # the Cranelift component too.
+          cranelift: 'true'
       - name: Lint
         run: make lint
       - name: Generate coverage
