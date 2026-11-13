@@ -71,6 +71,9 @@ jobs:
         run: make lint
       - name: Generate coverage
         uses: leynos/shared-actions/.github/actions/generate-coverage@0eabb6bc07148981de5da395e30cd78d83f5c7c2
+        env:
+          # Coverage instrumentation is LLVM-only (BD-007).
+          CARGO_PROFILE_DEV_CODEGEN_BACKEND: llvm
         with:
           output-path: lcov.info
           format: lcov

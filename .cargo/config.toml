@@ -1,7 +1,7 @@
 # Repository-wide Cargo defaults for the development build standard.
 #
-# Development builds stay on LLVM: Cranelift is a recorded exception (see
-# "Cranelift backend support" in docs/developers-guide.md).
+# Development builds use the Cranelift backend (see "Cranelift backend
+# support" in docs/developers-guide.md); coverage selects LLVM.
 # The parallel `rustc` frontend is the default for every build, and the `mold`
 # linker is the default on Linux. Cargo auto-discovers this file, so a bare
 # `cargo build` gets them. `make release` and coverage assign `RUSTFLAGS`,
@@ -15,10 +15,14 @@
 # assigns `RUSTFLAGS` for its development targets.
 
 [unstable]
+codegen-backend = true
 # The dev-build footprint standard (DF-003): from `nightly-2026-07-31` the
 # native key avoids duplicated metadata in the rlibs (Cargo still produces the
 # `.rmeta` files), replacing `no-embed-metadata`.
 embed-metadata = false
+
+[profile.dev]
+codegen-backend = "cranelift"
 
 [build]
 rustflags = ["-Zthreads=8"]

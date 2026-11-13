@@ -6,11 +6,7 @@ use crate::VkError;
 use crate::api::GraphQLClient;
 use crate::ref_parser::RepoInfo;
 use crate::test_utils::{TestClient, start_server};
-#[cfg(debug_assertions)]
-use futures::FutureExt;
 use rstest::{fixture, rstest};
-#[cfg(debug_assertions)]
-use std::panic::AssertUnwindSafe;
 use std::sync::atomic::Ordering;
 
 #[fixture]
@@ -65,18 +61,6 @@ async fn retries_bad_page_and_preserves_order(repo: RepoInfo, #[future] retry_cl
 async fn rejects_out_of_range_number(repo: RepoInfo) {
     let client = GraphQLClient::new("token", None).expect("client");
     let number = i32::MAX as u64 + 1;
-    if cfg!(debug_assertions) {
-        let result = AssertUnwindSafe(fetch_review_threads_with_options(
-            &client,
-            &repo,
-            number,
-            FetchOptions::unresolved_current(),
-        ))
-        .catch_unwind()
-        .await;
-        assert!(result.is_err());
-        return;
-    }
     let err = fetch_review_threads_with_options(
         &client,
         &repo,

@@ -97,10 +97,6 @@ pub async fn fetch_review_threads_with_options(
     number: u64,
     options: FetchOptions,
 ) -> Result<Vec<ReviewThread>, VkError> {
-    debug_assert!(
-        i32::try_from(number).is_ok(),
-        "pull-request number {number} exceeds GraphQL Int (i32) range",
-    );
     // GraphQL `Int` maps to `i64`; a pull-request number beyond `i32::MAX`
     // cannot be valid, so range-check as `i32` before widening.
     let number = i64::from(i32::try_from(number).map_err(|_| VkError::InvalidNumber)?);
