@@ -70,8 +70,7 @@ impl GraphQLClient {
     ) -> Result<Self, VkError> {
         let token = token.into();
         let endpoint = environment::var("GITHUB_GRAPHQL_URL")
-            .map(Endpoint::new)
-            .unwrap_or_default();
+            .map_or_else(|_| Endpoint::default(), Endpoint::new);
         Self::with_endpoint_retry(token, endpoint, transcript, RetryConfig::default())
     }
 

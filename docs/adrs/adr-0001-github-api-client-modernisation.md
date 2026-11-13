@@ -59,7 +59,8 @@ precedence, and the environment-variable endpoint overrides.
 - Minimize bespoke plumbing by delegating maintained concerns to a library
   where doing so does not compromise observability.
 - Keep TLS rustls-only; introduce no native-tls or OpenSSL dependency.
-- Remain compatible with the minimum supported Rust version (MSRV) of 1.89.
+- Build on the pinned nightly toolchain. (This ADR once required an MSRV of
+  1.89; vk no longer declares one.)
 
 ## Options considered
 
