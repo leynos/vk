@@ -147,7 +147,9 @@ project:
 
     ```sh
     cargo clippy --workspace --all-targets --all-features -- -D warnings
-    RUSTFLAGS="-D warnings" whitaker --all -- --all-targets --all-features
+    CARGO_UNSTABLE_CODEGEN_BACKEND=true \
+      CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm RUSTFLAGS="-D warnings" \
+      whitaker --all -- --all-targets --all-features
     ```
 
     linting every target with all features enabled and denying all Clippy
