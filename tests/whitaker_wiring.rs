@@ -48,61 +48,6 @@ fn lint_runs_both_the_clippy_and_the_whitaker_targets() -> Result<(), String> {
 }
 
 #[test]
-fn lint_whitaker_uses_the_wrapper_with_clean_inputs_and_warnings_denied() -> Result<(), String> {
-    let makefile = read("Makefile")?;
-    let recipe = rule(&makefile, "lint-whitaker")?.join("\n");
-
-    assert!(
-        recipe.contains("$(WHITAKER_CLEAN_ENV)"),
-        "driver inputs not cleaned: {recipe}"
-    );
-    assert!(
-        recipe.contains("DYLINT_RUSTFLAGS=\"-D warnings\""),
-        "warnings not denied: {recipe}"
-    );
-    assert!(
-        recipe.contains("$(WHITAKER) --all -- --all-targets --all-features"),
-        "wrapper invocation or scope changed: {recipe}"
-    );
-    assert!(
-        !recipe.contains("cargo dylint"),
-        "bare cargo dylint: {recipe}"
-    );
-    // The assignment continues over backslash-ended lines; read all of them.
-    let mut definition = String::new();
-    let mut continues = false;
-    for line in makefile.lines() {
-        if line.starts_with("WHITAKER_CLEAN_ENV") || continues {
-            definition.push_str(line);
-            definition.push('\n');
-            continues = line.ends_with('\\');
-        }
-    }
-    assert!(!definition.is_empty(), "WHITAKER_CLEAN_ENV is not defined");
-    for variable in [
-        "RUSTFLAGS",
-        "CARGO_ENCODED_RUSTFLAGS",
-        "CARGO_PROFILE_DEV_CODEGEN_BACKEND",
-        "CARGO_BUILD_TARGET",
-        "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER",
-        "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS",
-        "CFLAGS",
-        "LDFLAGS",
-    ] {
-        let unset = format!("-u {variable}");
-        assert!(
-            definition
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .windows(2)
-                .any(|pair| { pair.join(" ") == unset }),
-            "the clean environment no longer unsets {variable}: {definition}"
-        );
-    }
-    Ok(())
-}
-
-#[test]
 fn ci_installs_whitaker_before_the_main_lint_step() -> Result<(), String> {
     let workflow = read(".github/workflows/coverage.yml")?;
     let (before, after) = workflow

@@ -147,7 +147,8 @@ project:
 
     ```sh
     cargo clippy --workspace --all-targets --all-features -- -D warnings
-    DYLINT_RUSTFLAGS="-D warnings" \
+    CARGO_UNSTABLE_CODEGEN_BACKEND=true \
+      CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm RUSTFLAGS="-D warnings" \
       whitaker --all -- --all-targets --all-features
     ```
 

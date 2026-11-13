@@ -2,7 +2,7 @@
 
 APP ?= vk
 CARGO ?= cargo
-WHITAKER ?= whitaker
+USER_BIN_PATH := $(HOME)/.cargo/bin:$(HOME)/.local/bin
 BUILD_JOBS ?=
 # The build standard: every `rustflags` source in `.cargo/config.toml` carries
 # the parallel frontend, and the Linux source adds `mold`. Assigning `RUSTFLAGS`
@@ -87,13 +87,8 @@ lint-clippy: ## Run Clippy and rustdoc with warnings denied
 	$(GATE_RUSTFLAGS) $(CARGO) clippy $(CLIPPY_FLAGS)
 	$(GATE_RUSTFLAGS) RUSTDOCFLAGS="$(RUSTDOC_FLAGS)" $(CARGO) doc --no-deps
 
-WHITAKER_CLEAN_ENV = env -u RUSTFLAGS -u CARGO_ENCODED_RUSTFLAGS \
-	-u CARGO_PROFILE_DEV_CODEGEN_BACKEND -u CARGO_BUILD_TARGET \
-	-u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER \
-	-u CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS -u CFLAGS -u LDFLAGS
-
-lint-whitaker: ## Run the Whitaker Dylint suite with clean driver inputs and warnings denied
-	$(WHITAKER_CLEAN_ENV) RUSTFLAGS= DYLINT_RUSTFLAGS="-D warnings" $(WHITAKER) --all -- --all-targets --all-features
+lint-whitaker: ## Run the Whitaker Dylint suite on LLVM with warnings denied
+	PATH="$${XDG_BIN_HOME:-$(HOME)/.local/bin}:$(USER_BIN_PATH):$(PATH)" CARGO_UNSTABLE_CODEGEN_BACKEND=true CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm RUSTFLAGS="-D warnings" whitaker --all -- --all-targets --all-features
 
 fmt: ## Format Rust and Markdown sources
 	$(CARGO) fmt --all
