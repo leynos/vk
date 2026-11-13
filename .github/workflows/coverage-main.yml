@@ -52,9 +52,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@0eabb6bc07148981de5da395e30cd78d83f5c7c2
+        uses: leynos/shared-actions/.github/actions/setup-rust@fc0e10220207b951bf693aba2ce4f9dafc1a0206
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@0eabb6bc07148981de5da395e30cd78d83f5c7c2
+        uses: leynos/shared-actions/.github/actions/generate-coverage@fc0e10220207b951bf693aba2ce4f9dafc1a0206
         env:
           # Coverage instrumentation is LLVM-only (BD-007).
           CARGO_PROFILE_DEV_CODEGEN_BACKEND: llvm
@@ -81,7 +81,7 @@ jobs:
         # picks, and CodeScene refuses coverage for a branch it does not
         # analyse.
         if: steps.codescene_token.outputs.available == 'true' && github.ref == 'refs/heads/main'
-        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@0eabb6bc07148981de5da395e30cd78d83f5c7c2
+        uses: leynos/shared-actions/.github/actions/upload-codescene-coverage@fc0e10220207b951bf693aba2ce4f9dafc1a0206
         with:
           format: lcov
           # Explicit rather than left to the action's default, so the mode

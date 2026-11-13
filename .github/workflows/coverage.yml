@@ -39,13 +39,13 @@ jobs:
         with:
           fetch-depth: 0
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@0eabb6bc07148981de5da395e30cd78d83f5c7c2
+        uses: leynos/shared-actions/.github/actions/setup-rust@fc0e10220207b951bf693aba2ce4f9dafc1a0206
         with:
           install-mold: 'true'
       - name: Install mdtablefix
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@0eabb6bc07148981de5da395e30cd78d83f5c7c2
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@fc0e10220207b951bf693aba2ce4f9dafc1a0206
         with:
           version: "0.6.1"
 
@@ -66,7 +66,7 @@ jobs:
         with:
           globs: '**/*.md'
       - name: Install Whitaker
-        uses: leynos/shared-actions/.github/actions/install-whitaker@0eabb6bc07148981de5da395e30cd78d83f5c7c2
+        uses: leynos/shared-actions/.github/actions/install-whitaker@fc0e10220207b951bf693aba2ce4f9dafc1a0206
         with:
           # The lint suite's toolchain reads .cargo/config.toml, so it needs
           # the Cranelift component too.
@@ -74,7 +74,7 @@ jobs:
       - name: Lint
         run: make lint
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@0eabb6bc07148981de5da395e30cd78d83f5c7c2
+        uses: leynos/shared-actions/.github/actions/generate-coverage@fc0e10220207b951bf693aba2ce4f9dafc1a0206
         env:
           # Coverage instrumentation is LLVM-only (BD-007).
           CARGO_PROFILE_DEV_CODEGEN_BACKEND: llvm
@@ -103,7 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@0eabb6bc07148981de5da395e30cd78d83f5c7c2
+        uses: leynos/shared-actions/.github/actions/setup-rust@fc0e10220207b951bf693aba2ce4f9dafc1a0206
         with:
           install-mold: 'true'
       - name: Install OpenSSL
