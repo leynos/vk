@@ -185,8 +185,8 @@ escalation, not workarounds.
   `graphql_client` codegen. `graphql_client` 0.16 researched and confirmed
   transport-agnostic.
 - [x] (2026-07-09 15:30Z) Stage A: ADR
-  `docs/adr-001-github-api-client-modernisation.md` authored and linked from
-  `docs/vk-design.md` and `docs/contents.md`; octocrab `~0.54` added to
+  `docs/adrs/adr-0001-github-api-client-modernisation.md` authored and linked
+  from `docs/vk-design.md` and `docs/contents.md`; octocrab `~0.54` added to
   `Cargo.toml` (default features off; `default-client`, `jwt-rust-crypto`,
   `rustls`, `rustls-ring`, `timeout`; `retry` excluded deliberately).
 - [x] (2026-07-09 17:20Z) PR 1: octocrab REST resolve path complete.
@@ -407,9 +407,9 @@ escalation, not workarounds.
   retained — this entry corrects the record. Date/Author: 2026-07-09, PR 3
   implementation.
 - Decision: record the programme in a new ADR,
-  `docs/adr-001-github-api-client-modernisation.md`. Rationale: no ADRs exist;
-  the bespoke-client choice was never recorded. AGENTS.md requires substantive
-  decisions to be captured as ADRs following
+  `docs/adrs/adr-0001-github-api-client-modernisation.md`. Rationale: no ADRs
+  exist; the bespoke-client choice was never recorded. AGENTS.md requires
+  substantive decisions to be captured as ADRs following
   `docs/documentation-style-guide.md`. Date/Author: 2026-07-09, planning
   session (path renamed from `adr-001-adopt-octocrab.md` when the scope
   changed).
@@ -556,14 +556,14 @@ Key library facts (verified 2026-07-09):
 ## Plan of work
 
 Stage A (lands with PR 1): author
-`docs/adr-001-github-api-client-modernisation.md` following the ADR template in
-`docs/documentation-style-guide.md`. Status: Accepted. Context: two bespoke
-reqwest clients, an undocumented prior decision, and no compile-time query
-checking. Options Considered: keep bespoke; route everything through octocrab;
-the adopted three-part split; `graphql_client` plus reqwest without octocrab.
-Decision Outcome: the three-part programme, with the octocrab tilde pin and its
-rationale. Migration Plan: reference this ExecPlan. Reference the ADR from
-`docs/vk-design.md` and list it in `docs/contents.md`.
+`docs/adrs/adr-0001-github-api-client-modernisation.md` following the ADR
+template in `docs/documentation-style-guide.md`. Status: Accepted. Context: two
+bespoke reqwest clients, an undocumented prior decision, and no compile-time
+query checking. Options Considered: keep bespoke; route everything through
+octocrab; the adopted three-part split; `graphql_client` plus reqwest without
+octocrab. Decision Outcome: the three-part programme, with the octocrab tilde
+pin and its rationale. Migration Plan: reference this ExecPlan. Reference the
+ADR from `docs/vk-design.md` and list it in `docs/contents.md`.
 
 ### PR 1 — octocrab for the REST resolve path
 
@@ -875,6 +875,6 @@ GraphQL client is retained for its observability machinery and moves from
 reqwest to a direct hyper transport; `graphql_client` codegen adds compile-time
 query checking. Delivery is three pull requests. The planned ADR was renamed
 from `adr-001-adopt-octocrab.md` to
-`adr-001-github-api-client-modernisation.md`. Constraints, tolerances, risks,
+`adr-0001-github-api-client-modernisation.md`. Constraints, tolerances, risks,
 decisions, and interfaces were rewritten to match. PRs 1 and 2 are complete;
 only PR 3 remains as authorized future work.

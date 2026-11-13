@@ -75,7 +75,8 @@ upload step and read nowhere else.
 
 `tests/workflow_contracts.rs` enforces each rule over the repository's own
 workflows, and over the closure of reusable workflows that pull-request lanes
-call. The [developers' guide](developers-guide.md#coverage-what-each-lane-owns)
+call. The
+[developers' guide](../developers-guide.md#coverage-what-each-lane-owns)
 describes each contract and the hole it closes.
 
 ## Known risks and limitations
@@ -104,7 +105,7 @@ beside the main-ref guard, and the upload takes
 `access-token: ${{ secrets.CS_ACCESS_TOKEN }}` directly. A shell upload is no
 longer acceptable, since it could take the token only through `env` or its
 script. `tests/workflow_contracts.rs` enforces the new shape, and the
-[developers' guide](developers-guide.md) describes it.
+[developers' guide](../developers-guide.md) describes it.
 
 ## Addendum, 2026-09-29: the contract moved to a shared library
 

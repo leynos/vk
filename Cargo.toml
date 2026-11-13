@@ -42,7 +42,7 @@ hyper-util = { version = "0.1", features = [
 ] }
 # webpki-roots + ring matches reqwest's `rustls-tls` feature, which expands to
 # `rustls-tls-webpki-roots` (Mozilla's bundled roots) with the ring provider;
-# see docs/adr-001-github-api-client-modernisation.md. Defaults are disabled to
+# see docs/adrs/adr-0001-github-api-client-modernisation.md. Defaults are disabled to
 # keep aws-lc-rs out of the graph so ring remains the sole crypto provider.
 hyper-rustls = { version = "0.27", default-features = false, features = [
     "ring",
@@ -55,7 +55,7 @@ markup5ever_rcdom = "0.35.0"
 metrics = "0.24.6"
 # Patch updates within octocrab 0.54 are accepted; widening to 0.55 requires
 # review. The `retry` feature is deliberately excluded so the REST reply path
-# stays retry-free (see docs/adr-001-github-api-client-modernisation.md).
+# stays retry-free (see docs/adrs/adr-0001-github-api-client-modernisation.md).
 octocrab = { version = "~0.54", default-features = false, features = [
     "default-client",
     "jwt-rust-crypto",

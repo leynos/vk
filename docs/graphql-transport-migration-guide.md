@@ -13,4 +13,4 @@ overriding the default endpoint through `GITHUB_GRAPHQL_URL`.
 
 These transport boundaries are the implemented second phase of the GitHub API
 client modernization recorded in
-[ADR 001](adr-001-github-api-client-modernisation.md).
+[ADR 001](adrs/adr-0001-github-api-client-modernisation.md).

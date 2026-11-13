@@ -51,7 +51,7 @@ even when multiple comments reference the same code.
   `unstable-rest-resolve` feature and a reply message is supplied (`-m`), it
   posts a reply via the REST API before resolving. The REST reply is served
   through [octocrab](https://docs.rs/octocrab) (see
-  [ADR 001](adr-001-github-api-client-modernisation.md)), pinning
+  [ADR 001](adrs/adr-0001-github-api-client-modernisation.md)), pinning
   `x-github-api-version: 2022-11-28`; status handling stays in `vk` via
   octocrab's raw request route. If the REST reply fails the command aborts
   without calling `resolveReviewThread`, does not retry, and does not apply
@@ -94,7 +94,7 @@ even when multiple comments reference the same code.
 The modernization of `vk`'s GitHub API access — octocrab for the REST resolve
 path, hyper transport for the bespoke GraphQL client, and `graphql_client`
 codegen for typed queries — is governed by
-[ADR 001](adr-001-github-api-client-modernisation.md).
+[ADR 001](adrs/adr-0001-github-api-client-modernisation.md).
 
 The code centres on these printing helpers:
 

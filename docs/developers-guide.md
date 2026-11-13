@@ -12,7 +12,7 @@ Read these documents before changing behaviour or architecture:
   gates.
 - [Documentation contents](contents.md): index of long-lived project
   documentation.
-- [GitHub API client modernization ADR](adr-001-github-api-client-modernisation.md):
+- [GitHub API client modernization ADR](adrs/adr-0001-github-api-client-modernisation.md):
   accepted REST and GraphQL client decisions.
 - [Octocrab adoption ExecPlan](execplans/adopt-octocrab.md): implementation
   plan for the REST client migration.
@@ -289,7 +289,7 @@ Main owns every persistent coverage output. `coverage-main.yml` answers a push
 to `main`, generates ratcheted coverage and uploads it to CodeScene.
 `coverage.yml` answers a pull request, generates coverage for its own ratchet
 check, and contacts CodeScene not at all. The decision and its alternatives are
-recorded in [ADR 002](adr-002-main-owns-coverage-publication.md).
+recorded in [ADR 002](adrs/adr-0002-main-owns-coverage-publication.md).
 
 `make test-workflow-contracts` holds the coverage split by running
 `cv005-contracts check`, the shared contract library in `leynos/shared-actions`

@@ -2,7 +2,7 @@
 
 This directory holds the vendored GitHub GraphQL schema and the query documents
 that `graphql_client` codegen validates against it at compile time (see
-[ADR 001](../docs/adr-001-github-api-client-modernisation.md)).
+[ADR 001](../docs/adrs/adr-0001-github-api-client-modernisation.md)).
 
 ## Contents
 

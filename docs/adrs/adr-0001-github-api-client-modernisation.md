@@ -143,8 +143,8 @@ it.
 ## Migration plan
 
 The migration is tracked as a living document in the ExecPlan
-[`docs/execplans/adopt-octocrab.md`](execplans/adopt-octocrab.md). Its numbered
-phases correspond to the three pull requests above, and it records the
+[`docs/execplans/adopt-octocrab.md`](../execplans/adopt-octocrab.md). Its
+numbered phases correspond to the three pull requests above, and it records the
 constraints, tolerances, risks, decision log, and per-phase acceptance criteria
 in detail. This record does not duplicate that content; consult the ExecPlan
 for the authoritative migration sequence and progress.
