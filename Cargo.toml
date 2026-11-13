@@ -51,7 +51,7 @@ hyper-rustls = { version = "0.27", default-features = false, features = [
     "tls12",
 ] }
 http-body-util = "0.1"
-markup5ever_rcdom = "0.35.0"
+markup5ever_rcdom = "0.40.1"
 metrics = "0.24.6"
 # Patch updates within octocrab 0.54 are accepted; widening to 0.55 requires
 # review. The `retry` feature is deliberately excluded so the REST reply path
