@@ -43,11 +43,11 @@ sequential execution keeps cache use predictable.
 `make lint` depends on Clippy and rustdoc (`make lint-clippy`) and the Whitaker
 Dylint suite (`make lint-whitaker`), in no promised order. Install Whitaker with
 `whitaker-installer` so that `whitaker` is on `PATH`, and never call
-`cargo dylint` directly. The recipe runs the wrapper with clean driver inputs
-(it unsets the inherited Rust flags, backend and linker variables) and
-`DYLINT_RUSTFLAGS="-D warnings"`, so findings fail the gate. CI installs it
-through the shared `install-whitaker` action, pinned to a revision concordat
-QG-002 approves, in the `build-test` job. The feature-gated job runs
+`cargo dylint` directly. The recipe runs the wrapper with
+`RUSTFLAGS="-D warnings"` and the LLVM backend selected, so findings fail the
+gate. It puts the user's `~/.local/bin` (or `XDG_BIN_HOME`) first on `PATH`. CI
+installs it through the shared `install-whitaker` action, pinned to a revision
+concordat QG-002 approves, in the `build-test` job. The feature-gated job runs
 `make lint-clippy` alone, so the suite runs once per pull request.
 
 Use `make fmt` after documentation changes. It formats Rust and Markdown
@@ -76,8 +76,8 @@ with an older GCC, upgrade it or select clang as the linker driver with
 `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=clang`.
 
 `make lint-whitaker` runs Whitaker under the toolchain its installer manages,
-with the driver inputs cleaned and an empty `RUSTFLAGS`, so it takes none of
-the development standard.
+with `RUSTFLAGS="-D warnings"` and the LLVM backend, so it takes none of the
+development standard.
 
 ### Cranelift backend support
 

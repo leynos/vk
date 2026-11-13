@@ -147,8 +147,7 @@ project:
 
     ```sh
     cargo clippy --workspace --all-targets --all-features -- -D warnings
-    DYLINT_RUSTFLAGS="-D warnings" \
-      whitaker --all -- --all-targets --all-features
+    RUSTFLAGS="-D warnings" whitaker --all -- --all-targets --all-features
     ```
 
     linting every target with all features enabled and denying all Clippy
