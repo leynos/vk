@@ -42,10 +42,6 @@ pub async fn fetch_reviews(
     repo: &RepoInfo,
     number: u64,
 ) -> Result<Vec<PullRequestReview>, VkError> {
-    debug_assert!(
-        i32::try_from(number).is_ok(),
-        "pull-request number {number} exceeds GraphQL Int (i32) range",
-    );
     // GraphQL `Int` maps to `i64`; a pull-request number beyond `i32::MAX`
     // cannot be valid, so range-check as `i32` before widening.
     let number = i64::from(i32::try_from(number).map_err(|_| VkError::InvalidNumber)?);
@@ -162,11 +158,7 @@ mod tests {
     // in by `use super::*`, so the `DateTime<Utc>` case parameters below resolve
     // to the generic chrono type.
     use chrono::{DateTime, TimeZone, Utc};
-    #[cfg(debug_assertions)]
-    use futures::FutureExt;
     use rstest::rstest;
-    #[cfg(debug_assertions)]
-    use std::panic::AssertUnwindSafe;
 
     #[rstest]
     #[case(0)]
@@ -244,13 +236,6 @@ mod tests {
             name: "n".into(),
         };
         let number = i32::MAX as u64 + 1;
-        if cfg!(debug_assertions) {
-            let result = AssertUnwindSafe(fetch_reviews(&client, &repo, number))
-                .catch_unwind()
-                .await;
-            assert!(result.is_err());
-            return;
-        }
         let err = fetch_reviews(&client, &repo, number)
             .await
             .expect_err("error");

@@ -81,11 +81,14 @@ the development standard.
 
 ### Cranelift backend support
 
-Exception: Cranelift is not the development-profile backend. The estate adopts
-it only where the full suite passes under it, and that has not been measured
-here. Recorded state: the pin is `nightly-2026-11-05`; no measurement has been
-taken on it, and the review is deferred to 1 April 2027, when the whole suite
-is measured under both backends.
+The development profile uses Cranelift (`[profile.dev] codegen-backend` in
+`.cargo/config.toml`). The full suite passes under it, measured on
+`nightly-2026-11-12`. Release builds use LLVM, as the `release` profile is
+unaffected, and the coverage steps select LLVM with
+`CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm`, since `-Cinstrument-coverage` is
+LLVM-only. Cranelift does not run destructors while unwinding, so a test must
+not depend on a caught panic releasing a guard; assert on a returned error
+instead.
 
 ### Development build footprint
 
