@@ -253,9 +253,10 @@ project:
     cargo test --all-targets --all-features
     ```
 
-    running the full test suite with `-D warnings` and the build-standard flags
-    appended to any inherited `RUSTFLAGS`. It runs `cargo test` only; it does
-    not run `cargo-nextest` or doctests as separate stages.
+    running the tests of every target (`--all-targets`) with `-D warnings` and
+    the build-standard flags appended to any inherited `RUSTFLAGS`. Doctests are
+    not included: `--all-targets` excludes them, and the Makefile has no
+    doctest stage. It runs `cargo test` only, not `cargo-nextest`.
   - `make fmt` applies the fixes that the formatter checks report. It runs
     `cargo fmt --all`, `mdtablefix --in-place` with the same rules as
     `make check-fmt`, and `markdownlint-cli2 --fix` over the Markdown files.
