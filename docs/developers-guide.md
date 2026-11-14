@@ -81,14 +81,15 @@ development standard.
 
 ### Cranelift backend support
 
-The development profile uses Cranelift (`[profile.dev] codegen-backend` in
-`.cargo/config.toml`). The full suite passes under it, measured on
-`nightly-2026-11-12`. Release builds use LLVM, as the `release` profile is
-unaffected, and the coverage steps select LLVM with
+LLVM is the default backend. Cranelift is an available opt-in: uncomment the
+`[profile.dev] codegen-backend` line in `.cargo/config.toml`; the toolchain
+component stays installed. The coverage steps select LLVM with
 `CARGO_PROFILE_DEV_CODEGEN_BACKEND=llvm`, since `-Cinstrument-coverage` is
-LLVM-only. Cranelift does not run destructors while unwinding, so a test must
-not depend on a caught panic releasing a guard; assert on a returned error
-instead.
+LLVM-only, and an inherited `CARGO_PROFILE_*_CODEGEN_BACKEND` still overrides
+the default. Cranelift does not run destructors while unwinding, so under it a
+test must not depend on a caught panic. The estate standard is LLVM, with
+review due 14 May 2027; see the
+[Concordat decision record](https://github.com/leynos/concordat/blob/main/docs/adrs/adr-0004-cranelift-is-not-part-of-the-rust-build-standard.md).
 
 ### Development build footprint
 
