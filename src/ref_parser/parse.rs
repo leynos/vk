@@ -55,24 +55,31 @@ pub(super) fn parse_github_url(
     }
     let parts: Vec<_> = url.path_segments()?.collect();
     match parts.as_slice() {
-        [owner, repo_part, segment, number_str, ..] => {
-            if !resource.allowed_segments().contains(segment) {
-                return Some(Err(VkError::WrongResourceType {
-                    expected: resource.allowed_segments(),
-                    found: (*segment).into(),
-                }));
-            }
-            let Ok(number) = number_str.parse() else {
-                return Some(Err(VkError::InvalidRef));
-            };
-            let repo = RepoInfo {
-                owner: (*owner).into(),
-                name: strip_git_suffix(repo_part).into(),
-            };
-            Some(Ok((repo, number)))
-        }
+        [owner, repo_part, segment, number_str, ..] => Some(parse_url_resource(
+            [owner, repo_part, segment, number_str],
+            resource,
+        )),
         _ => Some(Err(VkError::InvalidRef)),
     }
+}
+
+/// Validate the `[owner, repo, segment, number]` path segments of a GitHub URL.
+fn parse_url_resource(
+    [owner, repo_part, segment, number_str]: [&str; 4],
+    resource: ResourceType,
+) -> Result<(RepoInfo, u64), VkError> {
+    if !resource.allowed_segments().contains(&segment) {
+        return Err(VkError::WrongResourceType {
+            expected: resource.allowed_segments(),
+            found: segment.into(),
+        });
+    }
+    let number = number_str.parse().map_err(|_| VkError::InvalidRef)?;
+    let repo = RepoInfo {
+        owner: owner.into(),
+        name: strip_git_suffix(repo_part).into(),
+    };
+    Ok((repo, number))
 }
 
 /// Parse a full URL or bare number into a repository and resource number.

@@ -80,27 +80,27 @@ impl<'a> From<&'a str> for DefaultRepo<'a> {
 /// ```
 pub fn parse_repo_str(repo: &str) -> Option<RepoInfo> {
     let re = GITHUB_RE.as_ref().ok()?;
-    if let Some(caps) = re.captures(repo) {
-        let owner = caps.name("owner")?.as_str().to_owned();
-        let name = strip_git_suffix(caps.name("repo")?.as_str()).to_owned();
-        Some(RepoInfo { owner, name })
-    } else {
-        // Accept only short-form "owner/repo" with exactly one slash
-        let slash_count = repo.chars().filter(|&c| c == '/').count();
-        if slash_count != 1 {
-            return None;
-        }
-        let mut parts = repo.splitn(2, '/');
-        match (parts.next(), parts.next()) {
-            (Some(owner), Some(name_part)) if !owner.is_empty() && !name_part.is_empty() => {
-                Some(RepoInfo {
-                    owner: owner.to_owned(),
-                    name: strip_git_suffix(name_part).to_owned(),
-                })
-            }
-            _ => None,
-        }
+    let Some(caps) = re.captures(repo) else {
+        return parse_short_repo(repo);
+    };
+    let owner = caps.name("owner")?.as_str().to_owned();
+    let name = strip_git_suffix(caps.name("repo")?.as_str()).to_owned();
+    Some(RepoInfo { owner, name })
+}
+
+/// Parse the short `owner/repo` form, which must contain exactly one slash.
+fn parse_short_repo(repo: &str) -> Option<RepoInfo> {
+    if repo.chars().filter(|&c| c == '/').count() != 1 {
+        return None;
     }
+    let (owner, name_part) = repo.split_once('/')?;
+    if owner.is_empty() || name_part.is_empty() {
+        return None;
+    }
+    Some(RepoInfo {
+        owner: owner.to_owned(),
+        name: strip_git_suffix(name_part).to_owned(),
+    })
 }
 
 /// Parse an issue reference into repository and issue number.
