@@ -91,26 +91,22 @@ pub(super) fn payload_snippet(payload: &Value) -> String {
 /// prefix or when no name is present.
 pub(super) fn operation_name(query: &str) -> Option<&str> {
     let trimmed = query.trim_start();
-    for prefix in ["query", "mutation", "subscription"] {
-        if let Some(rest) = trimmed.strip_prefix(prefix) {
-            // Require a valid delimiter after the prefix to avoid false positives like "queryX".
-            let first = rest.chars().next();
-            let is_delim =
-                matches!(first, Some(ch) if matches!(ch, '{' | '(' | ' ' | '\n' | '\t' | '\r'));
-            if !is_delim {
-                continue;
-            }
-            let rest = rest.trim_start();
-            let name = rest
-                .split(|c: char| c.is_whitespace() || c == '(' || c == '{')
-                .next()
-                .filter(|s| !s.is_empty());
-            if let Some(name) = name {
-                return Some(name);
-            }
-        }
-    }
-    None
+    ["query", "mutation", "subscription"]
+        .into_iter()
+        .find_map(|prefix| trimmed.strip_prefix(prefix).and_then(name_after_keyword))
+}
+
+/// Read the operation name that follows an operation keyword.
+///
+/// `rest` is the text after the keyword. A valid delimiter must follow the
+/// keyword to avoid false positives like `queryX`.
+fn name_after_keyword(rest: &str) -> Option<&str> {
+    let first = rest.chars().next()?;
+    matches!(first, '{' | '(' | ' ' | '\n' | '\t' | '\r').then_some(())?;
+    rest.trim_start()
+        .split(|c: char| c.is_whitespace() || c == '(' || c == '{')
+        .next()
+        .filter(|s| !s.is_empty())
 }
 
 /// Convert GraphQL errors into a single `VkError` message.
