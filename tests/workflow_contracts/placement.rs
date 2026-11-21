@@ -39,7 +39,6 @@ pub(crate) const UBICLOUD_LABEL: &str = "ubicloud-standard-2";
 /// | --- | --- | --- |
 /// | `build-test` | 2 | 237, 302, 420 |
 /// | `unstable-rest-resolve` | 2 | 238, 291, 440 |
-/// | `coverage-upload` | 3 | 184 |
 /// | `build` | 3, 2, 4 | 151, 131, 141 |
 /// | `release` | 2, 2, 4 | 10, 9, 5 |
 ///
@@ -48,13 +47,16 @@ pub(crate) const UBICLOUD_LABEL: &str = "ubicloud-standard-2";
 /// handful of times a year, so there is no distribution to size against and
 /// nothing is spent by leaving headroom, whereas a ceiling cancelling a
 /// release build is expensive in a way no other lane here is.
-pub(crate) const CEILING_BOUNDS: [(&str, u64, u64); 5] = [
+pub(crate) const CEILING_BOUNDS: [(&str, u64, u64); 4] = [
     ("build-test", 15, 45),
     ("unstable-rest-resolve", 15, 45),
-    ("coverage-upload", 10, 45),
     ("build", 8, 45),
     ("release", 5, 30),
 ];
+
+/// Trunk lanes that run on a GitHub-hosted runner by decision: a main coverage
+/// upload blocks no one's work, so it needs no paid runner.
+pub(crate) const HOSTED_TRUNK_JOBS: [&str; 1] = ["coverage-upload"];
 
 /// Return whether a workflow runs for a fork's pull request.
 ///
@@ -192,7 +194,10 @@ fn is_paid_runner_alone(labels: &[String]) -> bool {
 /// Return every trunk or tag lane, and each one that can reach another label
 /// or names no label at all.
 pub(crate) fn trunk_faults(workflows: &[Workflow]) -> (usize, Vec<String>) {
-    let trunk = lanes(workflows, is_trunk_or_tag);
+    let trunk: Vec<&Job> = lanes(workflows, is_trunk_or_tag)
+        .into_iter()
+        .filter(|job| !HOSTED_TRUNK_JOBS.contains(&job.id.as_str()))
+        .collect();
     let faults = trunk
         .iter()
         .filter(|job| !is_paid_runner_alone(&job.runs_on.labels()))
