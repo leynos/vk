@@ -35,10 +35,11 @@ pub(super) struct BranchContext {
 /// because in fork workflows it points at the upstream repository (where PRs
 /// live) while `origin` points at the user's fork.
 ///
-/// `repo_from_origin_impl` is called lazily so the happy path (a usable `--repo` or
-/// `FETCH_HEAD`) only spawns git once — for the head-owner lookup. The rare
-/// `origin` fallback pays for a second invocation to keep the fast path
-/// allocation-free.
+/// `repo_from_origin_impl` is called lazily. On the happy path, when `--repo`
+/// resolves the repository, git runs twice: once for `symbolic-ref` and once
+/// for the head-owner lookup. When `FETCH_HEAD` resolves the repository it runs
+/// three times, adding `rev-parse`. The rare `origin` fallback adds one more
+/// invocation to keep the fast path allocation-free.
 ///
 /// Git runs in `dir` when it is `Some`, otherwise in the process working
 /// directory; tests pass a fixture directory instead of changing the process.

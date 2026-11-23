@@ -387,10 +387,11 @@ order, when they have to map a bare PR or issue number to a GitHub repository:
    succeed in a fresh `git worktree add` target where `git fetch` has not yet
    been run inside the worktree, so `FETCH_HEAD` does not yet exist.
 
-`resolve_branch_and_repo` calls `repo_from_origin_impl` lazily — the happy path
-(when `--repo` or `FETCH_HEAD` already resolves the repository) only spawns
-`git` once, for the head-owner lookup used to disambiguate same-name branches
-across forks.
+`resolve_branch_and_repo` calls `repo_from_origin_impl` lazily. On the happy
+path, when `--repo` resolves the repository, it spawns `git` twice: once for
+`symbolic-ref` and once for the head-owner lookup. When `FETCH_HEAD` resolves
+the repository, it spawns `git` three times, adding `rev-parse`. The head-owner
+lookup disambiguates same-name branches across forks.
 
 ### Test fixtures for Git-aware code
 

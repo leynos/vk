@@ -214,68 +214,105 @@ fn parse_bare_in(
     )
 }
 
-#[test]
-fn parse_pr_number_falls_back_to_origin_without_fetch_head() {
-    // Mirrors a fresh worktree where `git fetch` has not yet been run inside
-    // the worktree: no FETCH_HEAD, but `origin` is configured.
-    let fixture = GitRepoFixture::on_branch("feature-branch")
+/// A fresh worktree where `git fetch` has not yet been run: no `FETCH_HEAD`,
+/// but `origin` is configured.
+fn origin_only_fixture() -> GitRepoFixture {
+    GitRepoFixture::on_branch("feature-branch")
         .and_then(|f| f.with_origin("https://github.com/leynos/chutoro.git"))
-        .expect("build origin-only fixture");
-
-    let (repo, number) = parse_bare_in(&fixture, "17", ResourceType::PullRequest)
-        .expect("origin should resolve repo for bare number");
-    assert_eq!(repo.owner, "leynos");
-    assert_eq!(repo.name, "chutoro");
-    assert_eq!(number, 17);
+        .expect("build origin-only fixture")
 }
 
-#[test]
-fn parse_pr_number_prefers_fetch_head_over_origin() {
-    let fixture = GitRepoFixture::on_branch("feature-branch")
+/// A fork workflow: `origin` is the fork and `FETCH_HEAD` names the upstream.
+fn fork_and_upstream_fixture() -> GitRepoFixture {
+    GitRepoFixture::on_branch("feature-branch")
         .and_then(|f| f.with_origin("https://github.com/fork/repo.git"))
         .and_then(|f| {
             f.with_fetch_head(
                 "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
             )
         })
-        .expect("build fork-and-upstream fixture");
-
-    let (repo, _) =
-        parse_bare_in(&fixture, "3", ResourceType::PullRequest).expect("FETCH_HEAD should win");
-    assert_eq!(repo.owner, "upstream");
-    assert_eq!(repo.name, "repo");
+        .expect("build fork-and-upstream fixture")
 }
 
 // Issue-number resolution shares the bare-number code path with PRs via
-// `parse_reference`. These tests mirror the PR coverage so a future divergence
-// between the two entry points cannot regress issue resolution unnoticed.
+// `parse_reference`, so both resource types run the same cases: a future
+// divergence between the two entry points cannot regress either unnoticed.
 
-#[test]
-fn parse_issue_number_falls_back_to_origin_without_fetch_head() {
-    let fixture = GitRepoFixture::on_branch("feature-branch")
-        .and_then(|f| f.with_origin("https://github.com/leynos/chutoro.git"))
-        .expect("build origin-only fixture");
+#[rstest]
+#[case::pull_request(ResourceType::PullRequest)]
+#[case::issue(ResourceType::Issues)]
+fn bare_number_falls_back_to_origin_without_fetch_head(#[case] resource_type: ResourceType) {
+    let fixture = origin_only_fixture();
 
-    let (repo, number) = parse_bare_in(&fixture, "17", ResourceType::Issues)
-        .expect("origin should resolve repo for bare issue number");
+    let (repo, number) = parse_bare_in(&fixture, "17", resource_type)
+        .expect("origin should resolve repo for a bare number");
     assert_eq!(repo.owner, "leynos");
     assert_eq!(repo.name, "chutoro");
     assert_eq!(number, 17);
 }
 
-#[test]
-fn parse_issue_number_prefers_fetch_head_over_origin() {
-    let fixture = GitRepoFixture::on_branch("feature-branch")
-        .and_then(|f| f.with_origin("https://github.com/fork/repo.git"))
-        .and_then(|f| {
-            f.with_fetch_head(
-                "deadbeef\tnot-for-merge\tbranch 'main' of https://github.com/upstream/repo.git",
-            )
-        })
-        .expect("build fork-and-upstream fixture");
+#[rstest]
+#[case::pull_request(ResourceType::PullRequest)]
+#[case::issue(ResourceType::Issues)]
+fn bare_number_prefers_fetch_head_over_origin(#[case] resource_type: ResourceType) {
+    let fixture = fork_and_upstream_fixture();
 
-    let (repo, _) =
-        parse_bare_in(&fixture, "3", ResourceType::Issues).expect("FETCH_HEAD should win");
+    let (repo, _) = parse_bare_in(&fixture, "3", resource_type).expect("FETCH_HEAD should win");
     assert_eq!(repo.owner, "upstream");
     assert_eq!(repo.name, "repo");
+}
+
+/// Environment variable that makes the re-executed test binary run the
+/// public-entry-point checks instead of spawning another child.
+const PUBLIC_ENTRY_POINTS_CHILD: &str = "VK_REF_PARSER_PUBLIC_ENTRY_POINTS_CHILD";
+
+/// The public entry points use the process working directory. Run them in a
+/// child process whose directory is the fixture, so this test never changes
+/// the parent's directory.
+#[rstest]
+#[case::origin_fallback(origin_only_fixture(), "leynos")]
+#[case::fetch_head_precedence(fork_and_upstream_fixture(), "upstream")]
+fn public_entry_points_use_the_process_working_directory(
+    #[case] fixture: GitRepoFixture,
+    #[case] expected_owner: &str,
+) {
+    let test_name = format!(
+        "{}::public_entry_points_child",
+        module_path!()
+            .split_once("::")
+            .map_or(module_path!(), |(_, rest)| rest)
+    );
+    let output = std::process::Command::new(std::env::current_exe().expect("test binary path"))
+        .args(["--exact", &test_name, "--nocapture", "--test-threads=1"])
+        .env(PUBLIC_ENTRY_POINTS_CHILD, expected_owner)
+        .current_dir(fixture.path())
+        .output()
+        .expect("spawn the child test process");
+    assert!(
+        output.status.success(),
+        "child failed: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("public entry points resolved"),
+        "the child did not reach its assertions (test name filter?): {stdout}",
+    );
+}
+
+/// Child half of the test above: runs only when the parent set the variable.
+#[test]
+fn public_entry_points_child() {
+    let Some(expected_owner) = std::env::var_os(PUBLIC_ENTRY_POINTS_CHILD) else {
+        return;
+    };
+    let expected_owner = expected_owner.to_string_lossy();
+    let (pr_repo, pr_number) = parse_pr_reference("5", None).expect("PR number should resolve");
+    let (issue_repo, issue_number) =
+        parse_issue_reference("5", None).expect("issue number should resolve");
+    assert_eq!(pr_repo.owner, expected_owner);
+    assert_eq!(issue_repo.owner, expected_owner);
+    assert_eq!((pr_number, issue_number), (5, 5));
+    println!("public entry points resolved");
 }
