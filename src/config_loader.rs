@@ -15,12 +15,13 @@
 
 use crate::cli_args::GlobalArgs;
 use ortho_config::{
-    OrthoJsonMergeExt,
+    EnvSource, OrthoJsonMergeExt, ProcessEnv, ScanEnvSource,
     declarative::{LayerComposition, MergeLayer, MergeProvenance},
 };
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
+use std::sync::Arc;
 
 /// Environment variable that selects an explicit configuration file.
 const EXPLICIT_CONFIG_PATH_ENV: &str = "VK_CONFIG_PATH";
@@ -28,7 +29,10 @@ const EXPLICIT_CONFIG_PATH_ENV: &str = "VK_CONFIG_PATH";
 /// Load global configuration layers without letting an empty CLI flatten group
 /// overwrite file or environment values.
 pub(crate) fn load_global_args_without_cli_overrides() -> ortho_config::OrthoResult<GlobalArgs> {
-    load_global_args_without_cli_overrides_from_process_args(std::env::args_os())
+    load_global_args_without_cli_overrides_from_process_args(
+        std::env::args_os(),
+        &Arc::new(ProcessEnv),
+    )
 }
 
 /// Validate the file referenced by `VK_CONFIG_PATH`, if any is set.
@@ -38,8 +42,8 @@ pub(crate) fn load_global_args_without_cli_overrides() -> ortho_config::OrthoRes
 /// so a misconfigured user-provided path surfaces a clear "configuration
 /// error" instead of being silently dropped by discovery's optional-layer
 /// fallback.
-fn validate_explicit_config_path() -> ortho_config::OrthoResult<()> {
-    validate_explicit_config_path_value(std::env::var_os(EXPLICIT_CONFIG_PATH_ENV).as_deref())
+fn validate_explicit_config_path(env: &dyn EnvSource) -> ortho_config::OrthoResult<()> {
+    validate_explicit_config_path_value(env.get(EXPLICIT_CONFIG_PATH_ENV).as_deref())
 }
 
 /// Validate an optional explicit configuration path value.
@@ -59,27 +63,31 @@ fn validate_explicit_config_path_value(raw: Option<&OsStr>) -> ortho_config::Ort
 
 /// Preserve generated discovery overrides from the process argv while
 /// excluding subcommand tokens that `GlobalArgs` cannot parse on its own.
-fn load_global_args_without_cli_overrides_from_process_args<I, T>(
+fn load_global_args_without_cli_overrides_from_process_args<I, T, E>(
     args: I,
+    env: &Arc<E>,
 ) -> ortho_config::OrthoResult<GlobalArgs>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
+    E: EnvSource + ScanEnvSource + 'static,
 {
-    load_global_args_without_cli_overrides_from_iter(global_discovery_args_from_iter(args))
+    load_global_args_without_cli_overrides_from_iter(global_discovery_args_from_iter(args), env)
 }
 
 /// Compose and merge global configuration layers while filtering out an empty
 /// CLI layer that would otherwise flatten grouped values to `null`.
-fn load_global_args_without_cli_overrides_from_iter<I, T>(
+fn load_global_args_without_cli_overrides_from_iter<I, T, E>(
     args: I,
+    env: &Arc<E>,
 ) -> ortho_config::OrthoResult<GlobalArgs>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
+    E: EnvSource + ScanEnvSource + 'static,
 {
-    validate_explicit_config_path()?;
-    let composition = GlobalArgs::compose_layers_from_iter(args);
+    validate_explicit_config_path(env.as_ref())?;
+    let composition = GlobalArgs::compose_layers_from_iter_with_env(args, Arc::clone(env));
     let (layers, errors) = composition.into_parts();
     let mut filtered_layers = Vec::with_capacity(layers.len() + 1);
     let default_globals = serde_json::to_value(GlobalArgs::default()).into_ortho_merge_json()?;
@@ -140,24 +148,42 @@ mod tests {
         EXPLICIT_CONFIG_PATH_ENV, load_global_args_without_cli_overrides_from_process_args,
     };
     use crate::cli_args::GlobalArgs;
-    use crate::test_utils::EnvSandbox;
-    use serial_test::serial;
+    use ortho_config::MapEnv;
     use std::ffi::OsString;
-    use vk::environment;
+    use std::path::Path;
+    use std::sync::Arc;
 
-    fn setup_global_args_without_cli_overrides<I, F>(configure: F) -> (EnvSandbox, GlobalArgs)
+    /// Build an injected environment that points every discovery root at `dir`.
+    fn sandbox_env(dir: &Path) -> MapEnv {
+        [
+            "APPDATA",
+            "LOCALAPPDATA",
+            "HOME",
+            "XDG_CONFIG_HOME",
+            "XDG_CONFIG_DIRS",
+        ]
+        .into_iter()
+        .fold(MapEnv::new().with_current_dir(dir), |env, key| {
+            env.with_var(key, dir)
+        })
+    }
+
+    fn setup_global_args_without_cli_overrides<I, F>(
+        configure: F,
+    ) -> (tempfile::TempDir, GlobalArgs)
     where
         I: IntoIterator<Item = OsString>,
-        F: FnOnce(&EnvSandbox) -> I,
+        F: FnOnce(&Path) -> I,
     {
-        let sandbox = EnvSandbox::new().expect("create config sandbox");
-        let global = load_global_args_without_cli_overrides_from_process_args(configure(&sandbox))
-            .expect("load global args");
-        (sandbox, global)
+        let dir = tempfile::tempdir().expect("create config sandbox");
+        let env = Arc::new(sandbox_env(dir.path()));
+        let global =
+            load_global_args_without_cli_overrides_from_process_args(configure(dir.path()), &env)
+                .expect("load global args");
+        (dir, global)
     }
 
     #[test]
-    #[serial]
     fn load_global_args_without_cli_overrides_defaults_cleanly() {
         let (_sandbox, global) =
             setup_global_args_without_cli_overrides(|_| [OsString::from("vk")]);
@@ -169,10 +195,9 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn load_global_args_without_cli_overrides_honours_config_path_override() {
         let (_sandbox, global) = setup_global_args_without_cli_overrides(|sandbox| {
-            let config_path = sandbox.path().join("override.toml");
+            let config_path = sandbox.join("override.toml");
             crate::fs_access::write_string(&config_path, "repo = \"from-config-path\"\n")
                 .expect("write config");
 
@@ -189,15 +214,15 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn load_global_args_without_cli_overrides_reports_broken_explicit_config() {
-        let sandbox = EnvSandbox::new().expect("create config sandbox");
+        let sandbox = tempfile::tempdir().expect("create config sandbox");
         let broken_path = sandbox.path().join("broken.toml");
         crate::fs_access::write_string(&broken_path, "not = [valid").expect("write broken config");
-        environment::set_var(EXPLICIT_CONFIG_PATH_ENV, &broken_path);
+        let env =
+            Arc::new(sandbox_env(sandbox.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, &broken_path));
 
         let result =
-            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")]);
+            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")], &env);
 
         let err = result.expect_err("broken explicit config must surface a configuration error");
         let rendered = format!("{err}");
@@ -205,7 +230,5 @@ mod tests {
             !rendered.is_empty(),
             "configuration error should describe the failure",
         );
-        // `EnvSandbox` restores VK_CONFIG_PATH on drop.
-        drop(sandbox);
     }
 }
