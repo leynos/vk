@@ -24,6 +24,10 @@ fn locale_env(lc_all: Option<&str>, lc_ctype: Option<&str>, lang: Option<&str>) 
 #[case(None, None, Some("en_GB.UTF-8"), true)]
 #[case(None, None, Some("C"), false)]
 #[case(None, None, None, false)]
+#[case::lc_all_c_beats_utf8_lc_ctype(Some("C"), Some("en_GB.UTF-8"), None, false)]
+#[case::lc_ctype_c_beats_utf8_lang(None, Some("C"), Some("en_GB.UTF-8"), false)]
+#[case::empty_lc_all_beats_utf8_lc_ctype(Some(""), Some("en_GB.UTF-8"), None, false)]
+#[case::utf8_lc_all_beats_c_lang(Some("en_GB.UTF-8"), None, Some("C"), true)]
 fn detect_utf8_locale_cases(
     #[case] lc_all: Option<&str>,
     #[case] lc_ctype: Option<&str>,
@@ -31,7 +35,12 @@ fn detect_utf8_locale_cases(
     #[case] expected: bool,
 ) {
     let env = locale_env(lc_all, lc_ctype, lang);
-    assert_eq!(locale_is_utf8(&env), expected);
+    assert_eq!(
+        locale_is_utf8(&env),
+        expected,
+        "the first set locale variable decides: LC_ALL={lc_all:?} LC_CTYPE={lc_ctype:?} \
+         LANG={lang:?}"
+    );
 }
 
 #[test]

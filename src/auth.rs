@@ -102,7 +102,9 @@ mod tests {
         let env = token_env(vk_env, github_env);
         assert_eq!(
             resolve_github_token_in(cli_token, config_token, &env),
-            expected
+            expected,
+            "precedence is CLI, VK_GITHUB_TOKEN, GITHUB_TOKEN, config: cli={cli_token:?} \
+             vk_env={vk_env:?} github_env={github_env:?} config={config_token:?}"
         );
     }
 }
