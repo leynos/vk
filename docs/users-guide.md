@@ -82,12 +82,14 @@ vk pr 191 --show-outdated
 ```
 
 The review summary shows the latest review from each author, read across every
-page GitHub returns. When no unresolved thread remains, `vk` reports that and
-returns before reading reviews, so a pull request with reviews but no
-unresolved threads shows no review summary. The summary is not the pull
-request's review decision: GitHub keeps an earlier `CHANGES_REQUESTED` in force
-until that author submits a later decisive review or the review is dismissed,
-so the newest review can be `COMMENTED` while the decision is still
+page GitHub returns. When no thread remains after the applicable selection —
+the file filters, or the single thread picked out by a `#discussion_r<ID>`
+fragment — `vk` reports the empty state and returns before reading reviews. A
+pull request whose threads are all resolved therefore shows no review summary,
+unless you name one of its discussions with a fragment. The summary is not the
+pull request's review decision: GitHub keeps an earlier `CHANGES_REQUESTED` in
+force until that author submits a later decisive review or the review is
+dismissed, so the newest review can be `COMMENTED` while the decision is still
 `CHANGES_REQUESTED`. `vk` does not fetch or display `reviewDecision`, so read
 the per-author states together rather than treating the summary as a merge
 recommendation.
