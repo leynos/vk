@@ -1,140 +1,16 @@
-//! Environment and directory guards for integration tests.
+//! Injected environments for configuration-merge integration tests.
 //!
-//! Provides helpers to capture and restore environment variables, temporarily
-//! change the working directory, and write configuration files for CLI merge
-//! tests.
+//! Builds an [`ortho_config::MapEnv`] that points `VK_CONFIG_PATH` at a
+//! temporary configuration file, so the tests never change the process
+//! environment or working directory.
 
-use std::env;
-use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use ortho_config::MapEnv;
+use std::path::PathBuf;
+use std::sync::Arc;
 use tempfile::TempDir;
-use vk::environment;
-use vk::test_utils::{remove_var, set_var};
 
 #[path = "capfs.rs"]
 mod capfs;
-
-/// Apply a sequence of environment assignments, removing keys with `None`.
-///
-/// # Examples
-/// ```rust,ignore
-/// use crate::env_support::apply_env;
-///
-/// apply_env(&[("VK_TOKEN", Some("secret")), ("VK_REPO", None)]);
-/// ```
-pub fn apply_env(pairs: &[(&str, Option<&str>)]) {
-    environment::with_lock(|| {
-        for (key, value) in pairs {
-            match value {
-                Some(val) => {
-                    // SAFETY: the environment mutex serialises access to the std env calls.
-                    #[expect(
-                        clippy::disallowed_methods,
-                        reason = "lock-guarded test helper; migrating to an injected environment"
-                    )]
-                    unsafe {
-                        env::set_var(key, val);
-                    }
-                }
-                None => {
-                    // SAFETY: the environment mutex serialises access to the std env calls.
-                    #[expect(
-                        clippy::disallowed_methods,
-                        reason = "lock-guarded test helper; migrating to an injected environment"
-                    )]
-                    unsafe {
-                        env::remove_var(key);
-                    }
-                }
-            }
-        }
-    });
-}
-
-/// RAII guard that restores captured environment variables on drop.
-pub struct EnvGuard {
-    entries: Vec<(OsString, Option<OsString>)>,
-}
-
-impl EnvGuard {
-    /// Capture `keys`, removing them from the environment for the guard's
-    /// lifetime.
-    ///
-    /// # Safety
-    /// Mutating the process environment is globally visible. `EnvGuard` acquires
-    /// the `vk::test_utils` environment lock so callers must serialise tests with
-    /// `#[serial]` and include `VK_CONFIG_PATH` when configuration helpers are
-    /// used.
-    pub fn new(keys: &[&str]) -> Self {
-        let mut entries = Vec::new();
-        for key in keys {
-            let key = OsString::from(key);
-            let previous = environment::with_lock(|| env::var_os(key.as_os_str()));
-            remove_var(&key);
-            entries.push((key, previous));
-        }
-        Self { entries }
-    }
-}
-
-impl Drop for EnvGuard {
-    fn drop(&mut self) {
-        for (key, value) in &mut self.entries {
-            let key_ref = key.as_os_str();
-            match value.take() {
-                Some(val) => set_var(key_ref, val),
-                None => remove_var(key_ref),
-            }
-        }
-    }
-}
-
-/// RAII guard restoring the working directory on drop.
-pub struct DirGuard {
-    previous: PathBuf,
-}
-
-impl DirGuard {
-    /// Enter `path`, returning a guard that restores the prior working
-    /// directory when dropped.
-    pub fn enter(path: impl AsRef<Path>) -> Self {
-        let previous = env::current_dir().expect("current dir");
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "cwd guard; migrating to an injected working directory"
-        )]
-        env::set_current_dir(path.as_ref()).expect("set dir");
-        Self { previous }
-    }
-}
-
-impl Drop for DirGuard {
-    fn drop(&mut self) {
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "cwd guard; migrating to an injected working directory"
-        )]
-        let _ = env::set_current_dir(&self.previous);
-    }
-}
-
-/// Optionally enter `path`, returning a [`DirGuard`] when requested.
-///
-/// # Examples
-/// ```rust,ignore
-/// use crate::env_support::maybe_enter_dir;
-///
-/// let temp = tempfile::tempdir().expect("create temp dir");
-/// let guard = maybe_enter_dir(true, temp.path());
-/// assert!(guard.is_some());
-/// ```
-pub fn maybe_enter_dir(should_enter: bool, path: impl AsRef<Path>) -> Option<DirGuard> {
-    if should_enter {
-        Some(DirGuard::enter(path))
-    } else {
-        None
-    }
-}
 
 /// Write `content` to a temporary `.vk.toml` and return its directory and path.
 pub fn write_config(content: &str) -> (TempDir, PathBuf) {
@@ -144,20 +20,49 @@ pub fn write_config(content: &str) -> (TempDir, PathBuf) {
     (dir, path)
 }
 
-/// Write a config file, set `VK_CONFIG_PATH`, and return the directory and path.
+/// Injected environment for one configuration-merge case.
 ///
-/// Callers must create an [`EnvGuard`] that captures `VK_CONFIG_PATH` before
-/// invoking this helper so the variable is removed once the guard drops.
-pub fn setup_env_and_config(config_content: &str) -> (TempDir, PathBuf) {
-    let (dir, path) = write_config(config_content);
-    environment::with_lock(|| {
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "lock-guarded test helper; migrating to an injected environment"
-        )]
-        unsafe {
-            env::set_var("VK_CONFIG_PATH", path.as_os_str());
+/// Owns the temporary directory holding the configuration file, so the file
+/// outlives every load made through [`MergeEnv::env`].
+pub struct MergeEnv {
+    _dir: TempDir,
+    env: Arc<MapEnv>,
+}
+
+impl MergeEnv {
+    /// Write `config`, then build an environment holding `VK_CONFIG_PATH` and
+    /// every `Some` pair in `env`. A `None` pair is simply absent.
+    ///
+    /// When `enter_config_dir` is true the environment's working directory is
+    /// the configuration directory, for path-relative merges.
+    ///
+    /// # Examples
+    /// ```rust,ignore
+    /// use crate::env_support::MergeEnv;
+    ///
+    /// let merge_env = MergeEnv::new("[cmds.pr]\nreference = \"ref\"", &[("VK_REPO", None)], true);
+    /// let merged = cli.load_and_merge_with_env(merge_env.env()).expect("merge");
+    /// ```
+    pub fn new(config: &str, env: &[(&str, Option<&str>)], enter_config_dir: bool) -> Self {
+        let (dir, config_path) = write_config(config);
+        let base = MapEnv::new().with_var("VK_CONFIG_PATH", config_path.as_os_str());
+        let base = if enter_config_dir {
+            base.with_current_dir(dir.path())
+        } else {
+            base
+        };
+        let map = env
+            .iter()
+            .filter_map(|(key, value)| value.map(|value| (*key, value)))
+            .fold(base, |map, (key, value)| map.with_var(key, value));
+        Self {
+            _dir: dir,
+            env: Arc::new(map),
         }
-    });
-    (dir, path)
+    }
+
+    /// Return a shared handle to the injected environment.
+    pub fn env(&self) -> Arc<MapEnv> {
+        Arc::clone(&self.env)
+    }
 }

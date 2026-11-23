@@ -17,7 +17,6 @@ use merge_cases::{
 };
 use merge_support::to_owned_vec;
 use rstest::rstest;
-use serial_test::serial;
 use sub_support::merge_with_sources;
 
 fn assert_merge_case(case: MergeCase) {
@@ -71,7 +70,6 @@ fn assert_merge_case(case: MergeCase) {
 #[case(MergeSubcommand::Resolve, MergeScenario::CliOverEnv)]
 #[case(MergeSubcommand::Resolve, MergeScenario::EnvOverFile)]
 #[case(MergeSubcommand::Resolve, MergeScenario::FileOverDefaults)]
-#[serial]
 fn test_configuration_precedence(
     #[case] subcommand: MergeSubcommand,
     #[case] scenario: MergeScenario,
@@ -83,7 +81,6 @@ fn test_configuration_precedence(
 #[rstest]
 #[case::env_overrides_file(MergeScenario::EnvOverFile)]
 #[case::cli_overrides_environment(MergeScenario::CliOverEnv)]
-#[serial]
 fn test_pr_load_and_merge_precedence(#[case] scenario: MergeScenario) {
     let case = merge_case(MergeSubcommand::Pr, scenario);
     assert_merge_case(case);

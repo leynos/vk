@@ -1,9 +1,7 @@
 //! Test utilities used across integration and unit tests.
 //!
-//! This module provides helpers for managing environment variables during
-//! tests and for normalising terminal output.
-
-use crate::environment;
+//! This module provides helpers for asserting on and normalising terminal
+//! output.
 
 /// Assert that the provided text does not contain three consecutive newlines.
 ///
@@ -108,19 +106,4 @@ fn skip_ansi_sequence(chars: &mut impl Iterator<Item = char>) -> bool {
         return false;
     }
     chars.any(|c| ('@'..='~').contains(&c))
-}
-
-/// Set an environment variable for testing.
-///
-/// Environment manipulation is process-wide and therefore not thread-safe.
-/// A global mutex serialises modifications so parallel tests do not race.
-pub fn set_var<K: AsRef<std::ffi::OsStr>, V: AsRef<std::ffi::OsStr>>(key: K, value: V) {
-    environment::set_var(key, value);
-}
-
-/// Remove an environment variable set during testing.
-///
-/// The global mutex serialises modifications so parallel tests do not race.
-pub fn remove_var<K: AsRef<std::ffi::OsStr>>(key: K) {
-    environment::remove_var(key);
 }
