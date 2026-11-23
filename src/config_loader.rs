@@ -157,7 +157,7 @@ mod tests {
 
     use super::{
         EXPLICIT_CONFIG_PATH_ENV, explicit_config_path,
-        load_global_args_without_cli_overrides_from_process_args,
+        load_global_args_without_cli_overrides_from_process_args, validate_explicit_config_path,
     };
     use crate::cli_args::GlobalArgs;
     use ortho_config::MapEnv;
@@ -270,11 +270,11 @@ mod tests {
         crate::fs_access::write_string(&sandbox.path().join("broken.toml"), "not = [valid")
             .expect("write broken config");
 
-        let result = load_bare_vk(
-            sandbox_env(sandbox.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, "broken.toml"),
-        );
+        let env = sandbox_env(sandbox.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, "broken.toml");
 
-        result.expect_err("the relative selector must be read from the injected directory");
+        // Validation alone: a process-relative read would find no file and pass.
+        validate_explicit_config_path(&env)
+            .expect_err("the relative selector must be read from the injected directory");
     }
 
     /// A rooted path without a drive is left unanchored, even without a working directory.
@@ -287,8 +287,16 @@ mod tests {
             .with_var(EXPLICIT_CONFIG_PATH_ENV, &rooted);
         let without_dir = NoCurrentDir(MapEnv::new().with_var(EXPLICIT_CONFIG_PATH_ENV, &rooted));
 
-        assert_eq!(explicit_config_path(&with_dir), Some(rooted.clone()));
-        assert_eq!(explicit_config_path(&without_dir), Some(rooted));
+        assert_eq!(
+            explicit_config_path(&with_dir),
+            Some(rooted.clone()),
+            "a drive-less rooted selector must not be anchored to the injected directory",
+        );
+        assert_eq!(
+            explicit_config_path(&without_dir),
+            Some(rooted),
+            "a drive-less rooted selector must survive an unreadable working directory",
+        );
     }
 
     /// An environment whose working directory cannot be read.
