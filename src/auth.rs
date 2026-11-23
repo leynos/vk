@@ -4,7 +4,7 @@
 //! `GITHUB_TOKEN`, and finally configuration file values. Empty values are
 //! ignored.
 
-use vk::environment;
+use ortho_config::{EnvSource, ProcessEnv};
 
 /// Resolve the GitHub token from CLI, environment, and configuration inputs.
 ///
@@ -24,20 +24,25 @@ use vk::environment;
 /// let token = resolve_github_token(Some("cli-token"), None);
 /// assert_eq!(token, "cli-token");
 /// ```
+#[must_use]
 pub fn resolve_github_token(cli_token: Option<&str>, config_token: Option<&str>) -> String {
+    resolve_github_token_in(cli_token, config_token, &ProcessEnv)
+}
+
+/// Resolve the GitHub token, reading environment variables from `env`.
+///
+/// This is [`resolve_github_token`] with the environment injected, so tests
+/// supply a map instead of changing the process environment.
+pub(crate) fn resolve_github_token_in(
+    cli_token: Option<&str>,
+    config_token: Option<&str>,
+    env: &dyn EnvSource,
+) -> String {
     let cli_token = cli_token.filter(|token| !token.is_empty());
     cli_token
         .map(str::to_owned)
-        .or_else(|| {
-            environment::var("VK_GITHUB_TOKEN")
-                .ok()
-                .filter(|token| !token.is_empty())
-        })
-        .or_else(|| {
-            environment::var("GITHUB_TOKEN")
-                .ok()
-                .filter(|token| !token.is_empty())
-        })
+        .or_else(|| non_empty_var(env, "VK_GITHUB_TOKEN"))
+        .or_else(|| non_empty_var(env, "GITHUB_TOKEN"))
         .or_else(|| {
             config_token
                 .filter(|token| !token.is_empty())
@@ -46,38 +51,27 @@ pub fn resolve_github_token(cli_token: Option<&str>, config_token: Option<&str>)
         .unwrap_or_default()
 }
 
+/// Read `key` from `env` as a non-empty Unicode string.
+fn non_empty_var(env: &dyn EnvSource, key: &str) -> Option<String> {
+    env.get(key)
+        .and_then(|value| value.into_string().ok())
+        .filter(|token| !token.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     //! Tests for token resolution.
 
-    use super::resolve_github_token;
-    use crate::test_utils::{apply_optional_env, restore_optional_env};
-    use rstest::{fixture, rstest};
-    use serial_test::serial;
-    use vk::environment;
+    use super::resolve_github_token_in;
+    use ortho_config::MapEnv;
+    use rstest::rstest;
 
-    struct TokenEnvGuard {
-        old_vk: Option<String>,
-        old_github: Option<String>,
-    }
-
-    impl Drop for TokenEnvGuard {
-        fn drop(&mut self) {
-            restore_optional_env("VK_GITHUB_TOKEN", self.old_vk.take());
-            restore_optional_env("GITHUB_TOKEN", self.old_github.take());
-        }
-    }
-
-    #[fixture]
-    fn token_env() -> TokenEnvGuard {
-        let old_vk = environment::var("VK_GITHUB_TOKEN").ok();
-        let old_github = environment::var("GITHUB_TOKEN").ok();
-        TokenEnvGuard { old_vk, old_github }
-    }
-
-    fn apply_token_env(vk: Option<&str>, github: Option<&str>) {
-        apply_optional_env("VK_GITHUB_TOKEN", vk);
-        apply_optional_env("GITHUB_TOKEN", github);
+    /// Build an environment holding only the token variables that are set.
+    fn token_env(vk: Option<&str>, github: Option<&str>) -> MapEnv {
+        [("VK_GITHUB_TOKEN", vk), ("GITHUB_TOKEN", github)]
+            .into_iter()
+            .filter_map(|(key, value)| value.map(|value| (key, value)))
+            .fold(MapEnv::new(), |env, (key, value)| env.with_var(key, value))
     }
 
     #[rstest]
@@ -98,18 +92,28 @@ mod tests {
     #[case(None, None, Some("github-token"), Some("config-token"), "github-token")]
     #[case(None, None, None, Some("config-token"), "config-token")]
     #[case(Some(""), Some(""), Some("github-token"), Some(""), "github-token")]
-    #[serial]
+    #[case::no_token_anywhere(None, None, None, None, "")]
+    #[case::empty_config_token_only(None, None, None, Some(""), "")]
+    #[case::empty_vk_env_falls_through_to_github_env(
+        None,
+        Some(""),
+        Some("github-token"),
+        None,
+        "github-token"
+    )]
     fn resolve_github_token_cases(
         #[case] cli_token: Option<&str>,
         #[case] vk_env: Option<&'static str>,
         #[case] github_env: Option<&'static str>,
         #[case] config_token: Option<&str>,
         #[case] expected: &str,
-        token_env: TokenEnvGuard,
     ) {
-        let _ = token_env;
-        apply_token_env(vk_env, github_env);
-        let config = config_token.map(str::to_string);
-        assert_eq!(resolve_github_token(cli_token, config.as_deref()), expected);
+        let env = token_env(vk_env, github_env);
+        assert_eq!(
+            resolve_github_token_in(cli_token, config_token, &env),
+            expected,
+            "precedence is CLI, VK_GITHUB_TOKEN, GITHUB_TOKEN, config: cli={cli_token:?} \
+             vk_env={vk_env:?} github_env={github_env:?} config={config_token:?}"
+        );
     }
 }
