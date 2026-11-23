@@ -264,6 +264,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_broken_relative_explicit_config_path_in_the_injected_directory_is_reported() {
+        let sandbox = tempfile::tempdir().expect("create config sandbox");
+        crate::fs_access::write_string(&sandbox.path().join("broken.toml"), "not = [valid")
+            .expect("write broken config");
+
+        let result = load_bare_vk(
+            sandbox_env(sandbox.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, "broken.toml"),
+        );
+
+        result.expect_err("the relative selector must be read from the injected directory");
+    }
+
+    /// A rooted path without a drive is left unanchored, even without a working directory.
+    #[cfg(windows)]
+    #[test]
+    fn a_rooted_explicit_config_path_without_a_drive_is_left_unchanged() {
+        let rooted = PathBuf::from(r"\vk.toml");
+        let with_dir = MapEnv::new()
+            .with_current_dir("C:\\injected")
+            .with_var(EXPLICIT_CONFIG_PATH_ENV, &rooted);
+        let without_dir = NoCurrentDir(MapEnv::new().with_var(EXPLICIT_CONFIG_PATH_ENV, &rooted));
+
+        assert_eq!(explicit_config_path(&with_dir), Some(rooted.clone()));
+        assert_eq!(explicit_config_path(&without_dir), Some(rooted));
+    }
+
     /// An environment whose working directory cannot be read.
     #[derive(Debug)]
     struct NoCurrentDir(MapEnv);
