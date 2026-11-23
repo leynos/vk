@@ -64,7 +64,9 @@ fn explicit_config_path(env: &dyn EnvSource) -> Option<PathBuf> {
         .get(EXPLICIT_CONFIG_PATH_ENV)
         .filter(|raw| !raw.is_empty())?;
     let path = PathBuf::from(raw);
-    if path.is_absolute() {
+    // A rooted path with no drive (`\config.toml` on Windows) names a fixed
+    // location on the current drive; discovery leaves it alone, so do we.
+    if path.is_absolute() || path.has_root() {
         return Some(path);
     }
     env.current_dir().ok().map(|dir| dir.join(path))
@@ -158,8 +160,8 @@ mod tests {
         load_global_args_without_cli_overrides_from_process_args,
     };
     use crate::cli_args::GlobalArgs;
-    use ortho_config::EnvSource;
     use ortho_config::MapEnv;
+    use ortho_config::{EnvSource, ScanEnvSource};
     use std::ffi::OsString;
     use std::path::Path;
     use std::path::PathBuf;
@@ -256,6 +258,26 @@ mod tests {
         fn current_dir(&self) -> std::io::Result<PathBuf> {
             Err(std::io::Error::from(std::io::ErrorKind::NotFound))
         }
+    }
+
+    impl ScanEnvSource for NoCurrentDir {
+        fn scan(&self) -> Vec<(OsString, OsString)> {
+            self.0.scan()
+        }
+    }
+
+    #[test]
+    fn a_relative_explicit_config_path_does_not_fail_loading_without_a_working_directory() {
+        let dir = tempfile::tempdir().expect("create config sandbox");
+        let env = Arc::new(NoCurrentDir(
+            sandbox_env(dir.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, "vk.toml"),
+        ));
+
+        let global =
+            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")], &env)
+                .expect("the selector is dropped, as in discovery");
+
+        assert!(global.repo.is_none());
     }
 
     #[test]
