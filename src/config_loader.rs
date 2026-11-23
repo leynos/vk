@@ -19,8 +19,8 @@ use ortho_config::{
     declarative::{LayerComposition, MergeLayer, MergeProvenance},
 };
 use std::borrow::Cow;
-use std::ffi::{OsStr, OsString};
-use std::path::{Path, PathBuf};
+use std::ffi::OsString;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// Environment variable that selects an explicit configuration file.
@@ -43,35 +43,31 @@ pub(crate) fn load_global_args_without_cli_overrides() -> ortho_config::OrthoRes
 /// error" instead of being silently dropped by discovery's optional-layer
 /// fallback.
 fn validate_explicit_config_path(env: &dyn EnvSource) -> ortho_config::OrthoResult<()> {
-    let anchored = env
-        .get(EXPLICIT_CONFIG_PATH_ENV)
-        .map(|raw| anchor_to_current_dir(env, raw));
-    validate_explicit_config_path_value(anchored.as_deref())
-}
-
-/// Resolve a relative path against the environment's working directory, as
-/// discovery does, so validation and discovery select the same file.
-fn anchor_to_current_dir(env: &dyn EnvSource, raw: OsString) -> OsString {
-    if Path::new(&raw).is_absolute() {
-        return raw;
-    }
-    let anchored = env.current_dir().ok().map(|dir| dir.join(&raw));
-    anchored.map_or(raw, PathBuf::into_os_string)
-}
-
-/// Validate an optional explicit configuration path value.
-fn validate_explicit_config_path_value(raw: Option<&OsStr>) -> ortho_config::OrthoResult<()> {
-    let Some(raw) = raw else {
+    let Some(path) = explicit_config_path(env) else {
         return Ok(());
     };
-    if raw.is_empty() {
-        return Ok(());
-    }
     // `load_config_file` returns `Ok(None)` when the file does not exist; we
     // tolerate that case to mirror ortho_config's existing semantics. Parse
     // failures, however, become `Err` and propagate.
-    ortho_config::file::load_config_file(Path::new(raw))?;
+    ortho_config::file::load_config_file(&path)?;
     Ok(())
+}
+
+/// Return the path discovery will use for `VK_CONFIG_PATH`, if any.
+///
+/// An unset or empty value selects nothing. A relative value is resolved
+/// against the environment's working directory, as discovery does; when that
+/// directory cannot be read discovery drops the selector, so nothing is
+/// validated rather than reading a process-relative file.
+fn explicit_config_path(env: &dyn EnvSource) -> Option<PathBuf> {
+    let raw = env
+        .get(EXPLICIT_CONFIG_PATH_ENV)
+        .filter(|raw| !raw.is_empty())?;
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        return Some(path);
+    }
+    env.current_dir().ok().map(|dir| dir.join(path))
 }
 
 /// Preserve generated discovery overrides from the process argv while
@@ -158,13 +154,15 @@ mod tests {
     //! Tests for configuration loading.
 
     use super::{
-        EXPLICIT_CONFIG_PATH_ENV, anchor_to_current_dir,
+        EXPLICIT_CONFIG_PATH_ENV, explicit_config_path,
         load_global_args_without_cli_overrides_from_process_args,
     };
     use crate::cli_args::GlobalArgs;
+    use ortho_config::EnvSource;
     use ortho_config::MapEnv;
     use std::ffi::OsString;
     use std::path::Path;
+    use std::path::PathBuf;
     use std::sync::Arc;
 
     /// Build an injected environment that points every discovery root at `dir`.
@@ -246,23 +244,79 @@ mod tests {
         );
     }
 
+    /// An environment whose working directory cannot be read.
+    #[derive(Debug)]
+    struct NoCurrentDir(MapEnv);
+
+    impl EnvSource for NoCurrentDir {
+        fn get(&self, key: &str) -> Option<OsString> {
+            self.0.get(key)
+        }
+
+        fn current_dir(&self) -> std::io::Result<PathBuf> {
+            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+        }
+    }
+
     #[test]
     fn a_relative_explicit_config_path_is_anchored_to_the_injected_directory() {
         let dir = Path::new("/injected/dir");
-        let env = MapEnv::new().with_current_dir(dir);
+        let env = MapEnv::new()
+            .with_current_dir(dir)
+            .with_var(EXPLICIT_CONFIG_PATH_ENV, "vk.toml");
 
-        let anchored = anchor_to_current_dir(&env, OsString::from("vk.toml"));
-
-        assert_eq!(Path::new(&anchored), dir.join("vk.toml"));
+        assert_eq!(explicit_config_path(&env), Some(dir.join("vk.toml")));
     }
 
     #[test]
     fn an_absolute_explicit_config_path_is_left_unchanged() {
         let absolute = std::env::temp_dir().join("vk.toml");
-        let env = MapEnv::new().with_current_dir("/injected/dir");
+        let env = MapEnv::new()
+            .with_current_dir("/injected/dir")
+            .with_var(EXPLICIT_CONFIG_PATH_ENV, &absolute);
 
-        let anchored = anchor_to_current_dir(&env, absolute.clone().into_os_string());
+        assert_eq!(explicit_config_path(&env), Some(absolute));
+    }
 
-        assert_eq!(Path::new(&anchored), absolute);
+    #[test]
+    fn an_empty_explicit_config_path_selects_nothing() {
+        let env = MapEnv::new()
+            .with_current_dir("/injected/dir")
+            .with_var(EXPLICIT_CONFIG_PATH_ENV, "");
+
+        assert_eq!(explicit_config_path(&env), None);
+    }
+
+    #[test]
+    fn a_relative_explicit_config_path_selects_nothing_without_a_working_directory() {
+        let env = NoCurrentDir(MapEnv::new().with_var(EXPLICIT_CONFIG_PATH_ENV, "vk.toml"));
+
+        assert_eq!(explicit_config_path(&env), None);
+    }
+
+    #[test]
+    fn an_empty_explicit_config_path_does_not_fail_loading() {
+        let dir = tempfile::tempdir().expect("create config sandbox");
+        let env = Arc::new(sandbox_env(dir.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, ""));
+
+        let global =
+            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")], &env)
+                .expect("an empty selector is ignored");
+
+        assert!(global.repo.is_none());
+    }
+
+    #[test]
+    fn a_relative_explicit_config_path_loads_from_the_injected_directory() {
+        let dir = tempfile::tempdir().expect("create config sandbox");
+        crate::fs_access::write_string(&dir.path().join("rel.toml"), "repo = \"from-relative\"\n")
+            .expect("write config");
+        let env = Arc::new(sandbox_env(dir.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, "rel.toml"));
+
+        let global =
+            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")], &env)
+                .expect("load global args");
+
+        assert_eq!(global.repo.as_deref(), Some("from-relative"));
     }
 }
