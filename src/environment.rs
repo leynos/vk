@@ -28,14 +28,26 @@ fn lock() -> MutexGuard<'static, ()> {
 pub fn set_var<K: AsRef<OsStr>, V: AsRef<OsStr>>(key: K, value: V) {
     let _guard = lock();
     // SAFETY: the mutex serialises access to the unsynchronised std env calls.
-    unsafe { env::set_var(key, value) };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "lock-guarded wrapper; callers migrate to an injected environment"
+    )]
+    unsafe {
+        env::set_var(key, value);
+    }
 }
 
 /// Remove an environment variable while holding the global lock.
 pub fn remove_var<K: AsRef<OsStr>>(key: K) {
     let _guard = lock();
     // SAFETY: the mutex serialises access to the unsynchronised std env calls.
-    unsafe { env::remove_var(key) };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "lock-guarded wrapper; callers migrate to an injected environment"
+    )]
+    unsafe {
+        env::remove_var(key);
+    }
 }
 
 /// Read an environment variable while holding the global lock.
@@ -97,7 +109,13 @@ mod tests {
         let (previous, snapshot) = with_lock(|| {
             let before = env::var(key).ok();
             // SAFETY: `with_lock` holds the guard for this closure.
-            unsafe { env::set_var(key, "locked") };
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "probes the lock itself; removed with the wrappers"
+            )]
+            unsafe {
+                env::set_var(key, "locked");
+            }
             let after = env::var(key).ok();
             (before, after)
         });

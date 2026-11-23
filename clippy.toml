@@ -7,3 +7,9 @@ cognitive-complexity-threshold = 12     # default is 25
 # clippy's own list rather than replacing it, so the default identifiers are
 # still recognised.
 doc-valid-idents = ["CodeScene", ".."]
+
+disallowed-methods = [
+  { path = "std::env::set_var", reason = "use an injected environment in tests" },
+  { path = "std::env::remove_var", reason = "use an injected environment in tests" },
+  { path = "std::env::set_current_dir", reason = "process-wide working directory; pass the directory in or use Command::current_dir" },
+]
