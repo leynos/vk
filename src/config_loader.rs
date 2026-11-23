@@ -20,7 +20,7 @@ use ortho_config::{
 };
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Environment variable that selects an explicit configuration file.
@@ -43,7 +43,20 @@ pub(crate) fn load_global_args_without_cli_overrides() -> ortho_config::OrthoRes
 /// error" instead of being silently dropped by discovery's optional-layer
 /// fallback.
 fn validate_explicit_config_path(env: &dyn EnvSource) -> ortho_config::OrthoResult<()> {
-    validate_explicit_config_path_value(env.get(EXPLICIT_CONFIG_PATH_ENV).as_deref())
+    let anchored = env
+        .get(EXPLICIT_CONFIG_PATH_ENV)
+        .map(|raw| anchor_to_current_dir(env, raw));
+    validate_explicit_config_path_value(anchored.as_deref())
+}
+
+/// Resolve a relative path against the environment's working directory, as
+/// discovery does, so validation and discovery select the same file.
+fn anchor_to_current_dir(env: &dyn EnvSource, raw: OsString) -> OsString {
+    if Path::new(&raw).is_absolute() {
+        return raw;
+    }
+    let anchored = env.current_dir().ok().map(|dir| dir.join(&raw));
+    anchored.map_or(raw, PathBuf::into_os_string)
 }
 
 /// Validate an optional explicit configuration path value.
@@ -145,7 +158,8 @@ mod tests {
     //! Tests for configuration loading.
 
     use super::{
-        EXPLICIT_CONFIG_PATH_ENV, load_global_args_without_cli_overrides_from_process_args,
+        EXPLICIT_CONFIG_PATH_ENV, anchor_to_current_dir,
+        load_global_args_without_cli_overrides_from_process_args,
     };
     use crate::cli_args::GlobalArgs;
     use ortho_config::MapEnv;
@@ -230,5 +244,25 @@ mod tests {
             !rendered.is_empty(),
             "configuration error should describe the failure",
         );
+    }
+
+    #[test]
+    fn a_relative_explicit_config_path_is_anchored_to_the_injected_directory() {
+        let dir = Path::new("/injected/dir");
+        let env = MapEnv::new().with_current_dir(dir);
+
+        let anchored = anchor_to_current_dir(&env, OsString::from("vk.toml"));
+
+        assert_eq!(Path::new(&anchored), dir.join("vk.toml"));
+    }
+
+    #[test]
+    fn an_absolute_explicit_config_path_is_left_unchanged() {
+        let absolute = std::env::temp_dir().join("vk.toml");
+        let env = MapEnv::new().with_current_dir("/injected/dir");
+
+        let anchored = anchor_to_current_dir(&env, absolute.clone().into_os_string());
+
+        assert_eq!(Path::new(&anchored), absolute);
     }
 }
