@@ -6,9 +6,8 @@
 //!
 //! - [`test_http`] — the [`TestClient`] HTTP stub server and [`start_server`]
 //!   helper used to drive the GraphQL client without touching GitHub.
-//! - [`sandbox`] — the [`EnvSandbox`] / [`EnvGuard`] / [`CwdGuard`] RAII
-//!   guards plus the shared mutex they all hold to serialise mutations of
-//!   process-global state (env vars and the current working directory).
+//! - [`sandbox`] — the [`EnvGuard`] RAII guard plus the shared mutex it holds
+//!   to serialise mutations of process-global environment variables.
 //! - [`git_fixture`] — [`GitRepoFixture`], a hermetic temporary Git
 //!   repository builder used by `git`-aware tests.
 //!
@@ -21,7 +20,7 @@ mod sandbox;
 mod test_http;
 
 pub use git_fixture::GitRepoFixture;
-pub use sandbox::{CwdGuard, EnvGuard, invalid_http_timeout_guard};
+pub use sandbox::{EnvGuard, invalid_http_timeout_guard};
 pub use test_http::{TestClient, start_server};
 pub use vk::test_utils::{
     apply_optional_env, assert_diff_lines_not_blank_separated, assert_no_triple_newlines,

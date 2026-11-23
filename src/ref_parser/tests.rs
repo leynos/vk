@@ -1,7 +1,7 @@
 //! Tests for `ref_parser` module.
 
 use super::*;
-use crate::test_utils::{CwdGuard, GitRepoFixture};
+use crate::test_utils::GitRepoFixture;
 use rstest::{fixture, rstest};
 
 /// rstest fixture for a repository on a feature branch.
@@ -200,25 +200,36 @@ fn repo_from_origin_returns_none_without_remote() {
     assert!(repo_from_origin_impl(Some(fixture.path())).is_none());
 }
 
+/// Resolve a bare number as `resource_type` with git run in the fixture's directory.
+fn parse_bare_in(
+    fixture: &GitRepoFixture,
+    input: &str,
+    resource_type: ResourceType,
+) -> Result<(RepoInfo, u64), VkError> {
+    parse_reference(
+        input,
+        DefaultRepo::from(None),
+        resource_type,
+        Some(fixture.path()),
+    )
+}
+
 #[test]
-#[serial_test::serial]
 fn parse_pr_number_falls_back_to_origin_without_fetch_head() {
     // Mirrors a fresh worktree where `git fetch` has not yet been run inside
     // the worktree: no FETCH_HEAD, but `origin` is configured.
     let fixture = GitRepoFixture::on_branch("feature-branch")
         .and_then(|f| f.with_origin("https://github.com/leynos/chutoro.git"))
         .expect("build origin-only fixture");
-    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
 
-    let (repo, number) =
-        parse_pr_reference("17", None).expect("origin should resolve repo for bare number");
+    let (repo, number) = parse_bare_in(&fixture, "17", ResourceType::PullRequest)
+        .expect("origin should resolve repo for bare number");
     assert_eq!(repo.owner, "leynos");
     assert_eq!(repo.name, "chutoro");
     assert_eq!(number, 17);
 }
 
 #[test]
-#[serial_test::serial]
 fn parse_pr_number_prefers_fetch_head_over_origin() {
     let fixture = GitRepoFixture::on_branch("feature-branch")
         .and_then(|f| f.with_origin("https://github.com/fork/repo.git"))
@@ -228,9 +239,9 @@ fn parse_pr_number_prefers_fetch_head_over_origin() {
             )
         })
         .expect("build fork-and-upstream fixture");
-    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
 
-    let (repo, _) = parse_pr_reference("3", None).expect("FETCH_HEAD should win");
+    let (repo, _) =
+        parse_bare_in(&fixture, "3", ResourceType::PullRequest).expect("FETCH_HEAD should win");
     assert_eq!(repo.owner, "upstream");
     assert_eq!(repo.name, "repo");
 }
@@ -240,14 +251,12 @@ fn parse_pr_number_prefers_fetch_head_over_origin() {
 // between the two entry points cannot regress issue resolution unnoticed.
 
 #[test]
-#[serial_test::serial]
 fn parse_issue_number_falls_back_to_origin_without_fetch_head() {
     let fixture = GitRepoFixture::on_branch("feature-branch")
         .and_then(|f| f.with_origin("https://github.com/leynos/chutoro.git"))
         .expect("build origin-only fixture");
-    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
 
-    let (repo, number) = parse_issue_reference("17", None)
+    let (repo, number) = parse_bare_in(&fixture, "17", ResourceType::Issues)
         .expect("origin should resolve repo for bare issue number");
     assert_eq!(repo.owner, "leynos");
     assert_eq!(repo.name, "chutoro");
@@ -255,7 +264,6 @@ fn parse_issue_number_falls_back_to_origin_without_fetch_head() {
 }
 
 #[test]
-#[serial_test::serial]
 fn parse_issue_number_prefers_fetch_head_over_origin() {
     let fixture = GitRepoFixture::on_branch("feature-branch")
         .and_then(|f| f.with_origin("https://github.com/fork/repo.git"))
@@ -265,9 +273,9 @@ fn parse_issue_number_prefers_fetch_head_over_origin() {
             )
         })
         .expect("build fork-and-upstream fixture");
-    let _cwd = CwdGuard::enter(fixture.path()).expect("enter fixture cwd");
 
-    let (repo, _) = parse_issue_reference("3", None).expect("FETCH_HEAD should win");
+    let (repo, _) =
+        parse_bare_in(&fixture, "3", ResourceType::Issues).expect("FETCH_HEAD should win");
     assert_eq!(repo.owner, "upstream");
     assert_eq!(repo.name, "repo");
 }

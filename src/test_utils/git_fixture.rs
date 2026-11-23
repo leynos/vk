@@ -45,9 +45,8 @@ fn run_git_in(dir: &Path, args: &[&str]) -> io::Result<()> {
 ///
 /// The fixture intentionally does **not** change the process working
 /// directory. Tests that exercise code paths reading from the current
-/// directory (such as the public `repo_from_fetch_head` / `repo_from_origin`
-/// helpers) should compose the fixture with [`super::CwdGuard`] and mark
-/// themselves `#[serial]`.
+/// directory pass [`GitRepoFixture::path`] to the directory-taking variants
+/// (such as `repo_from_fetch_head_impl` / `repo_from_origin_impl`).
 pub struct GitRepoFixture {
     dir: tempfile::TempDir,
 }

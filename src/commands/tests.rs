@@ -77,27 +77,26 @@ mod resolve_branch_and_repo_tests {
 
     //! Tests for branch and repository auto-detection.
 
+    use super::super::branch::BranchContext;
     use super::super::resolve_branch_and_repo;
-    use crate::test_utils::{CwdGuard, GitRepoFixture};
+    use crate::VkError;
+    use crate::test_utils::GitRepoFixture;
     use rstest::{fixture, rstest};
-    use serial_test::serial;
 
-    /// Pairs a [`GitRepoFixture`] with a [`CwdGuard`] so each test runs against
-    /// the fixture's working tree. `resolve_branch_and_repo` reads from the
-    /// current directory, so tests must hold this for their full duration and
-    /// be marked `#[serial]`.
+    /// Wraps a [`GitRepoFixture`] so each test resolves against the fixture's
+    /// working tree: `resolve_branch_and_repo` takes the directory to run git
+    /// in, so no test changes the process working directory.
     struct ResolverFixture {
-        _repo: GitRepoFixture,
-        _cwd: CwdGuard,
+        repo: GitRepoFixture,
     }
 
     impl ResolverFixture {
         fn enter(repo: GitRepoFixture) -> Self {
-            let cwd = CwdGuard::enter(repo.path()).expect("enter fixture cwd");
-            Self {
-                _repo: repo,
-                _cwd: cwd,
-            }
+            Self { repo }
+        }
+
+        fn resolve(&self, default_repo: Option<&str>) -> Result<BranchContext, VkError> {
+            resolve_branch_and_repo(default_repo, Some(self.repo.path()))
         }
     }
 
@@ -137,10 +136,8 @@ mod resolve_branch_and_repo_tests {
     }
 
     #[rstest]
-    #[serial]
     fn returns_repo_from_default_repo_when_provided(git_repo_on_feature_branch: ResolverFixture) {
-        let _fixture = git_repo_on_feature_branch;
-        let result = resolve_branch_and_repo(Some("owner/repo"));
+        let result = git_repo_on_feature_branch.resolve(Some("owner/repo"));
         let ctx = result.expect("should resolve successfully");
         assert_eq!(ctx.repo.owner, "owner", "should use provided repo owner");
         assert_eq!(ctx.repo.name, "repo", "should use provided repo name");
@@ -152,10 +149,8 @@ mod resolve_branch_and_repo_tests {
     }
 
     #[rstest]
-    #[serial]
     fn falls_back_to_fetch_head_when_no_default_repo(git_repo_on_feature_branch: ResolverFixture) {
-        let _fixture = git_repo_on_feature_branch;
-        let result = resolve_branch_and_repo(None);
+        let result = git_repo_on_feature_branch.resolve(None);
         let ctx = result.expect("should resolve successfully");
         assert_eq!(
             ctx.repo.owner, "fallback",
@@ -169,10 +164,8 @@ mod resolve_branch_and_repo_tests {
     }
 
     #[rstest]
-    #[serial]
     fn extracts_head_owner_from_origin_remote(git_repo_with_fork_origin: ResolverFixture) {
-        let _fixture = git_repo_with_fork_origin;
-        let result = resolve_branch_and_repo(Some("upstream/repo"));
+        let result = git_repo_with_fork_origin.resolve(Some("upstream/repo"));
         let ctx = result.expect("should resolve successfully");
         assert_eq!(ctx.repo.owner, "upstream", "target repo from --repo flag");
         assert_eq!(ctx.repo.name, "repo", "target repo name");
@@ -185,14 +178,14 @@ mod resolve_branch_and_repo_tests {
     }
 
     #[rstest]
-    #[serial]
     fn prefers_fetch_head_over_origin_when_both_present(
         git_repo_with_fork_origin: ResolverFixture,
     ) {
-        let _fixture = git_repo_with_fork_origin;
         // FETCH_HEAD identifies the upstream in a fork workflow, so it must
         // win over the user's `origin` remote.
-        let ctx = resolve_branch_and_repo(None).expect("should resolve successfully");
+        let ctx = git_repo_with_fork_origin
+            .resolve(None)
+            .expect("should resolve successfully");
         assert_eq!(ctx.repo.owner, "upstream", "FETCH_HEAD takes precedence");
         assert_eq!(ctx.repo.name, "repo");
         assert_eq!(
@@ -203,11 +196,10 @@ mod resolve_branch_and_repo_tests {
     }
 
     #[rstest]
-    #[serial]
     fn falls_back_to_origin_when_fetch_head_missing(git_repo_with_origin_only: ResolverFixture) {
-        let _fixture = git_repo_with_origin_only;
-        let ctx =
-            resolve_branch_and_repo(None).expect("origin must be used when FETCH_HEAD is absent");
+        let ctx = git_repo_with_origin_only
+            .resolve(None)
+            .expect("origin must be used when FETCH_HEAD is absent");
         assert_eq!(ctx.repo.owner, "leynos", "origin owner");
         assert_eq!(ctx.repo.name, "chutoro", "origin repo name");
         assert_eq!(ctx.branch, "feature-branch");
