@@ -29,7 +29,11 @@ fn preserves_anonymous_reviews(#[case] count: usize) {
         .collect();
 
     let latest = latest_reviews(reviews);
-    assert_eq!(latest.len(), count);
+    assert_eq!(
+        latest.len(),
+        count,
+        "anonymous reviews must be kept individually, got {latest:?}"
+    );
 }
 
 #[rstest]
@@ -70,12 +74,26 @@ fn keeps_latest_per_author(
         }),
     };
     let latest = latest_reviews(vec![a1, a2.clone(), b1.clone()]);
-    assert!(latest.iter().any(|r| {
-        r.author.as_ref().expect("author").login == "alice" && r.submitted_at == a2.submitted_at
-    }));
-    assert!(latest.iter().any(|r| {
-        r.author.as_ref().expect("author").login == "bob" && r.submitted_at == b1.submitted_at
-    }));
+    let alice = latest
+        .iter()
+        .find(|r| r.author.as_ref().is_some_and(|u| u.login == "alice"))
+        .expect("alice's review survives");
+    // The body distinguishes which of alice's reviews won: the timestamps are
+    // equal in one case, where only the input-order tie-break separates them.
+    assert_eq!(
+        alice.body, "second",
+        "alice's surviving review must be the later input, got {latest:?}"
+    );
+    assert_eq!(
+        alice.submitted_at, second_ts,
+        "alice's surviving review must carry the later timestamp, got {latest:?}"
+    );
+    assert!(
+        latest.iter().any(|r| {
+            r.author.as_ref().is_some_and(|u| u.login == "bob") && r.submitted_at == b1.submitted_at
+        }),
+        "bob's review must survive, got {latest:?}"
+    );
 }
 
 /// Build one page body from review nodes and the server's pagination state.
@@ -186,7 +204,10 @@ async fn rejects_out_of_range_number() {
     let err = fetch_reviews(&client, &repo, number)
         .await
         .expect_err("error");
-    assert!(matches!(err, VkError::InvalidNumber));
+    assert!(
+        matches!(err, VkError::InvalidNumber),
+        "a pull-request number above i32::MAX must be rejected"
+    );
 }
 
 #[tokio::test]
@@ -215,29 +236,37 @@ async fn accepts_max_i32_number() {
     )
     .await
     .expect("should accept i32::MAX");
-    assert!(reviews.is_empty());
+    assert!(
+        reviews.is_empty(),
+        "an empty reviews page must yield no reviews, got {reviews:?}"
+    );
     {
         let requests = requests.lock().expect("lock requests");
         let request = requests.first().expect("one request");
         assert_eq!(
             request.get("operationName"),
-            Some(&serde_json::json!("ReviewsQuery"))
+            Some(&serde_json::json!("ReviewsQuery")),
+            "the request must name the reviews operation"
         );
         assert_eq!(
             request.pointer("/variables/owner"),
-            Some(&serde_json::json!("o"))
+            Some(&serde_json::json!("o")),
+            "the owner must reach the request variables"
         );
         assert_eq!(
             request.pointer("/variables/name"),
-            Some(&serde_json::json!("n"))
+            Some(&serde_json::json!("n")),
+            "the repository name must reach the request variables"
         );
         assert_eq!(
             request.pointer("/variables/number"),
-            Some(&serde_json::json!(i32::MAX))
+            Some(&serde_json::json!(i32::MAX)),
+            "i32::MAX must be sent as the pull-request number"
         );
         assert_eq!(
             request.pointer("/variables/cursor"),
-            Some(&serde_json::Value::Null)
+            Some(&serde_json::Value::Null),
+            "the first request must start without a cursor"
         );
     }
     join.abort();
@@ -258,9 +287,19 @@ async fn deserializes_null_submitted_at() {
     )
     .await
     .expect("should accept null submittedAt");
-    assert_eq!(reviews.len(), 2);
-    assert!(reviews.iter().any(|r| r.submitted_at.is_none()));
-    assert!(reviews.iter().any(|r| r.submitted_at.is_some()));
+    assert_eq!(
+        reviews.len(),
+        2,
+        "both fixture reviews must be read, got {reviews:?}"
+    );
+    assert!(
+        reviews.iter().any(|r| r.submitted_at.is_none()),
+        "the pending review's null submittedAt must deserialise, got {reviews:?}"
+    );
+    assert!(
+        reviews.iter().any(|r| r.submitted_at.is_some()),
+        "the submitted review's timestamp must deserialise, got {reviews:?}"
+    );
     join.abort();
     let _ = join.await;
 }
@@ -287,12 +326,28 @@ fn latest_reviews_prefers_timestamp_over_none() {
 
     // Regardless of order, the one with the timestamp should win.
     let latest = latest_reviews(vec![with_ts.clone(), without_ts.clone()]);
-    assert_eq!(latest.len(), 1);
-    assert_eq!(latest.first().expect("one review").submitted_at, Some(ts));
+    assert_eq!(
+        latest.len(),
+        1,
+        "one review per author must survive, got {latest:?}"
+    );
+    assert_eq!(
+        latest.first().expect("one review").submitted_at,
+        Some(ts),
+        "the timestamped review must win when it comes first, got {latest:?}"
+    );
 
     let latest = latest_reviews(vec![without_ts, with_ts]);
-    assert_eq!(latest.len(), 1);
-    assert_eq!(latest.first().expect("one review").submitted_at, Some(ts));
+    assert_eq!(
+        latest.len(),
+        1,
+        "one review per author must survive, got {latest:?}"
+    );
+    assert_eq!(
+        latest.first().expect("one review").submitted_at,
+        Some(ts),
+        "the timestamped review must win when it comes last, got {latest:?}"
+    );
 }
 
 #[test]
@@ -314,6 +369,14 @@ fn latest_reviews_both_none_takes_later_in_input() {
         }),
     };
     let latest = latest_reviews(vec![first, second]);
-    assert_eq!(latest.len(), 1);
-    assert_eq!(latest.first().expect("one review").body, "second");
+    assert_eq!(
+        latest.len(),
+        1,
+        "one review per author must survive, got {latest:?}"
+    );
+    assert_eq!(
+        latest.first().expect("one review").body,
+        "second",
+        "the later input must win when neither review has a timestamp, got {latest:?}"
+    );
 }
