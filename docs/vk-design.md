@@ -121,17 +121,27 @@ integration tests share a single source of truth.
 <!-- mdformat on -->
 
 `run_pr` fetches the latest review from each reviewer and all unresolved
-threads. The helper `fetch_review_threads_with_options` accepts a
-`FetchOptions` struct and skips outdated threads before comment pagination
-unless `--show-outdated` is set, avoiding unnecessary requests. After printing a
-`code review` banner and a summary, the reviews are printed, followed by a
-`review comments` banner and the individual threads. If standard output is
-closed (broken pipe), the run terminates early. The comments banner is only
-emitted when threads will be printed; otherwise it is omitted. Other errors from
-`print_thread` and banner printing are surfaced via logging. Once all threads
-have been printed, a final banner reading `end of code review` confirms
-completion. Review threads missing the GraphQL `isOutdated` field are treated
-as current (client-side default) to preserve legacy fixture compatibility.
+threads. When no thread remains after the applicable selection it reports the
+empty state and returns before reading reviews, so those reviews go unshown.
+The selection is the file filters, or, when a `#discussion_r<ID>` fragment is
+present, the single thread owning that comment; because the fragment path also
+asks for resolved threads, it can select one and reach the reviews even when no
+unresolved thread exists. When reviews are read, the listing is taken to
+exhaustion, following `pageInfo` through every page, before the latest review
+per author is selected, so a review GitHub returns on a later page is never
+missed. That selection is per author; it is not the pull request's aggregate
+`reviewDecision`, which `vk` does not request. The helper
+`fetch_review_threads_with_options` accepts a `FetchOptions` struct and skips
+outdated threads before comment pagination unless `--show-outdated` is set,
+avoiding unnecessary requests. After printing a `code review` banner and a
+summary, the reviews are printed, followed by a `review comments` banner and
+the individual threads. If standard output is closed (broken pipe), the run
+terminates early. The comments banner is only emitted when threads will be
+printed; otherwise it is omitted. Other errors from `print_thread` and banner
+printing are surfaced via logging. Once all threads have been printed, a final
+banner reading `end of code review` confirms completion. Review threads missing
+the GraphQL `isOutdated` field are treated as current (client-side default) to
+preserve legacy fixture compatibility.
 
 ### CLI arguments
 
