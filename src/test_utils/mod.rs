@@ -21,7 +21,7 @@ mod sandbox;
 mod test_http;
 
 pub use git_fixture::GitRepoFixture;
-pub use sandbox::{CwdGuard, EnvGuard, EnvSandbox, invalid_http_timeout_guard};
+pub use sandbox::{CwdGuard, EnvGuard, invalid_http_timeout_guard};
 pub use test_http::{TestClient, start_server};
 pub use vk::test_utils::{
     apply_optional_env, assert_diff_lines_not_blank_separated, assert_no_triple_newlines,

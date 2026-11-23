@@ -15,12 +15,13 @@
 
 use crate::cli_args::GlobalArgs;
 use ortho_config::{
-    OrthoJsonMergeExt,
+    EnvSource, OrthoJsonMergeExt, ProcessEnv, ScanEnvSource,
     declarative::{LayerComposition, MergeLayer, MergeProvenance},
 };
 use std::borrow::Cow;
-use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::ffi::OsString;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Environment variable that selects an explicit configuration file.
 const EXPLICIT_CONFIG_PATH_ENV: &str = "VK_CONFIG_PATH";
@@ -28,7 +29,10 @@ const EXPLICIT_CONFIG_PATH_ENV: &str = "VK_CONFIG_PATH";
 /// Load global configuration layers without letting an empty CLI flatten group
 /// overwrite file or environment values.
 pub(crate) fn load_global_args_without_cli_overrides() -> ortho_config::OrthoResult<GlobalArgs> {
-    load_global_args_without_cli_overrides_from_process_args(std::env::args_os())
+    load_global_args_without_cli_overrides_from_process_args(
+        std::env::args_os(),
+        &Arc::new(ProcessEnv),
+    )
 }
 
 /// Validate the file referenced by `VK_CONFIG_PATH`, if any is set.
@@ -38,48 +42,63 @@ pub(crate) fn load_global_args_without_cli_overrides() -> ortho_config::OrthoRes
 /// so a misconfigured user-provided path surfaces a clear "configuration
 /// error" instead of being silently dropped by discovery's optional-layer
 /// fallback.
-fn validate_explicit_config_path() -> ortho_config::OrthoResult<()> {
-    validate_explicit_config_path_value(std::env::var_os(EXPLICIT_CONFIG_PATH_ENV).as_deref())
-}
-
-/// Validate an optional explicit configuration path value.
-fn validate_explicit_config_path_value(raw: Option<&OsStr>) -> ortho_config::OrthoResult<()> {
-    let Some(raw) = raw else {
+fn validate_explicit_config_path(env: &dyn EnvSource) -> ortho_config::OrthoResult<()> {
+    let Some(path) = explicit_config_path(env) else {
         return Ok(());
     };
-    if raw.is_empty() {
-        return Ok(());
-    }
     // `load_config_file` returns `Ok(None)` when the file does not exist; we
     // tolerate that case to mirror ortho_config's existing semantics. Parse
     // failures, however, become `Err` and propagate.
-    ortho_config::file::load_config_file(Path::new(raw))?;
+    ortho_config::file::load_config_file(&path)?;
     Ok(())
+}
+
+/// Return the path discovery will use for `VK_CONFIG_PATH`, if any.
+///
+/// An unset or empty value selects nothing. A relative value is resolved
+/// against the environment's working directory, as discovery does; when that
+/// directory cannot be read discovery drops the selector, so nothing is
+/// validated rather than reading a process-relative file.
+fn explicit_config_path(env: &dyn EnvSource) -> Option<PathBuf> {
+    let raw = env
+        .get(EXPLICIT_CONFIG_PATH_ENV)
+        .filter(|raw| !raw.is_empty())?;
+    let path = PathBuf::from(raw);
+    // A rooted path with no drive (`\config.toml` on Windows) names a fixed
+    // location on the current drive; discovery leaves it alone, so do we.
+    if path.is_absolute() || path.has_root() {
+        return Some(path);
+    }
+    env.current_dir().ok().map(|dir| dir.join(path))
 }
 
 /// Preserve generated discovery overrides from the process argv while
 /// excluding subcommand tokens that `GlobalArgs` cannot parse on its own.
-fn load_global_args_without_cli_overrides_from_process_args<I, T>(
+fn load_global_args_without_cli_overrides_from_process_args<I, T, E>(
     args: I,
+    env: &Arc<E>,
 ) -> ortho_config::OrthoResult<GlobalArgs>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
+    E: EnvSource + ScanEnvSource + 'static,
 {
-    load_global_args_without_cli_overrides_from_iter(global_discovery_args_from_iter(args))
+    load_global_args_without_cli_overrides_from_iter(global_discovery_args_from_iter(args), env)
 }
 
 /// Compose and merge global configuration layers while filtering out an empty
 /// CLI layer that would otherwise flatten grouped values to `null`.
-fn load_global_args_without_cli_overrides_from_iter<I, T>(
+fn load_global_args_without_cli_overrides_from_iter<I, T, E>(
     args: I,
+    env: &Arc<E>,
 ) -> ortho_config::OrthoResult<GlobalArgs>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
+    E: EnvSource + ScanEnvSource + 'static,
 {
-    validate_explicit_config_path()?;
-    let composition = GlobalArgs::compose_layers_from_iter(args);
+    validate_explicit_config_path(env.as_ref())?;
+    let composition = GlobalArgs::compose_layers_from_iter_with_env(args, Arc::clone(env));
     let (layers, errors) = composition.into_parts();
     let mut filtered_layers = Vec::with_capacity(layers.len() + 1);
     let default_globals = serde_json::to_value(GlobalArgs::default()).into_ortho_merge_json()?;
@@ -133,79 +152,4 @@ where
 }
 
 #[cfg(test)]
-mod tests {
-    //! Tests for configuration loading.
-
-    use super::{
-        EXPLICIT_CONFIG_PATH_ENV, load_global_args_without_cli_overrides_from_process_args,
-    };
-    use crate::cli_args::GlobalArgs;
-    use crate::test_utils::EnvSandbox;
-    use serial_test::serial;
-    use std::ffi::OsString;
-    use vk::environment;
-
-    fn setup_global_args_without_cli_overrides<I, F>(configure: F) -> (EnvSandbox, GlobalArgs)
-    where
-        I: IntoIterator<Item = OsString>,
-        F: FnOnce(&EnvSandbox) -> I,
-    {
-        let sandbox = EnvSandbox::new().expect("create config sandbox");
-        let global = load_global_args_without_cli_overrides_from_process_args(configure(&sandbox))
-            .expect("load global args");
-        (sandbox, global)
-    }
-
-    #[test]
-    #[serial]
-    fn load_global_args_without_cli_overrides_defaults_cleanly() {
-        let (_sandbox, global) =
-            setup_global_args_without_cli_overrides(|_| [OsString::from("vk")]);
-        assert!(global.repo.is_none());
-        assert!(global.github_token.is_none());
-        assert!(global.transcript.is_none());
-        assert!(global.http_timeout.is_none());
-        assert!(global.connect_timeout.is_none());
-    }
-
-    #[test]
-    #[serial]
-    fn load_global_args_without_cli_overrides_honours_config_path_override() {
-        let (_sandbox, global) = setup_global_args_without_cli_overrides(|sandbox| {
-            let config_path = sandbox.path().join("override.toml");
-            crate::fs_access::write_string(&config_path, "repo = \"from-config-path\"\n")
-                .expect("write config");
-
-            [
-                OsString::from("vk"),
-                OsString::from("--config-path"),
-                config_path.into_os_string(),
-                OsString::from("pr"),
-                OsString::from("1"),
-            ]
-        });
-
-        assert_eq!(global.repo.as_deref(), Some("from-config-path"));
-    }
-
-    #[test]
-    #[serial]
-    fn load_global_args_without_cli_overrides_reports_broken_explicit_config() {
-        let sandbox = EnvSandbox::new().expect("create config sandbox");
-        let broken_path = sandbox.path().join("broken.toml");
-        crate::fs_access::write_string(&broken_path, "not = [valid").expect("write broken config");
-        environment::set_var(EXPLICIT_CONFIG_PATH_ENV, &broken_path);
-
-        let result =
-            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")]);
-
-        let err = result.expect_err("broken explicit config must surface a configuration error");
-        let rendered = format!("{err}");
-        assert!(
-            !rendered.is_empty(),
-            "configuration error should describe the failure",
-        );
-        // `EnvSandbox` restores VK_CONFIG_PATH on drop.
-        drop(sandbox);
-    }
-}
+mod tests;
