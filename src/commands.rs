@@ -95,7 +95,7 @@ async fn resolve_pr_reference(
 ) -> Result<(RepoInfo, u64, Option<u64>), VkError> {
     match reference {
         None => {
-            let ctx = resolve_branch_and_repo(default_repo)?;
+            let ctx = resolve_branch_and_repo(default_repo, None)?;
             let number =
                 fetch_pr_for_branch(client, &ctx.repo, &ctx.branch, ctx.head_owner.as_deref())
                     .await?;
@@ -103,7 +103,7 @@ async fn resolve_pr_reference(
         }
         Some(input) if is_fragment_only(input) => {
             let comment_id = parse_fragment_only(input)?;
-            let ctx = resolve_branch_and_repo(default_repo)?;
+            let ctx = resolve_branch_and_repo(default_repo, None)?;
             let number =
                 fetch_pr_for_branch(client, &ctx.repo, &ctx.branch, ctx.head_owner.as_deref())
                     .await?;

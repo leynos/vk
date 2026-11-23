@@ -353,11 +353,11 @@ sequenceDiagram
     participant API as GitHub GraphQL API
 
     User->>Cmd: vk pr (no reference arg)
-    Cmd->>Branch: resolve_branch_and_repo(default_repo)
-    Branch->>RefParse: current_branch()
+    Cmd->>Branch: resolve_branch_and_repo(default_repo, None)
+    Branch->>RefParse: current_branch_impl(dir)
     RefParse->>Git: symbolic-ref HEAD
     Git-->>RefParse: branch name
-    Branch->>RefParse: repo_from_fetch_head(), repo_from_origin()
+    Branch->>RefParse: repo_from_fetch_head_impl(dir), repo_from_origin_impl(dir)
     RefParse->>Git: FETCH_HEAD, origin URL
     Git-->>RefParse: repo context
     RefParse-->>Branch: branch and repository
@@ -387,28 +387,26 @@ order, when they have to map a bare PR or issue number to a GitHub repository:
    succeed in a fresh `git worktree add` target where `git fetch` has not yet
    been run inside the worktree, so `FETCH_HEAD` does not yet exist.
 
-`resolve_branch_and_repo` calls `repo_from_origin` lazily — the happy path (when
-`--repo` or `FETCH_HEAD` already resolves the repository) only spawns `git`
-once, for the head-owner lookup used to disambiguate same-name branches across
-forks.
+`resolve_branch_and_repo` calls `repo_from_origin_impl` lazily. On the happy
+path, when `--repo` resolves the repository, it spawns `git` twice: once for
+`symbolic-ref` and once for the head-owner lookup. When `FETCH_HEAD` resolves
+the repository, it spawns `git` three times, adding `rev-parse`. The head-owner
+lookup disambiguates same-name branches across forks.
 
 ### Test fixtures for Git-aware code
 
 The `commands` and `ref_parser` test suites exercise the resolution order
-through two helpers in `src/test_utils.rs`:
+through `GitRepoFixture` in `src/test_utils/`. It builds a hermetic temporary
+Git repository via `git init` and `git symbolic-ref`, with optional
+`with_origin` and `with_fetch_head` builders. All constructors return
+`io::Result<Self>` so a broken test environment surfaces a clear error instead
+of a panic.
 
-- `GitRepoFixture` builds a hermetic temporary Git repository via `git init`
-  and `git symbolic-ref`, with optional `with_origin` and `with_fetch_head`
-  builders. All constructors return `io::Result<Self>` so a broken test
-  environment surfaces a clear error instead of a panic.
-- `CwdGuard` switches the process working directory and restores it on drop.
-  Because the cwd is process-global, `CwdGuard::enter` shares the same
-  `env_sandbox_lock` mutex that `EnvSandbox` uses and holds it for the guard's
-  lifetime. The lock is acquired with `try_lock`, so misuse — for example, a
-  single test that already holds the lock through `EnvSandbox` and then
-  constructs a `CwdGuard` — fails fast with `io::ErrorKind::WouldBlock` rather
-  than deadlocking. Tests using `CwdGuard` should still be marked
-  `#[serial_test::serial]` so they coordinate with other lock-aware guards.
+The fixture never changes the process working directory. The resolution code
+takes the directory to run `git` in
+(`resolve_branch_and_repo(default_repo, dir)` and the `*_impl` helpers in
+`ref_parser/git.rs`); production passes `None` for the process working
+directory and tests pass the fixture's path.
 
 ## Configuration and features
 

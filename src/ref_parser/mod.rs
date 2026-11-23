@@ -7,8 +7,6 @@ mod parse;
 #[cfg(test)]
 mod tests;
 
-pub use git::{current_branch, repo_from_fetch_head, repo_from_origin};
-#[cfg(test)]
 pub(crate) use git::{current_branch_impl, repo_from_fetch_head_impl, repo_from_origin_impl};
 
 use parse::{GITHUB_RE, ResourceType, parse_reference, strip_git_suffix};
@@ -138,7 +136,7 @@ pub fn parse_issue_reference<'a>(
     input: &str,
     default_repo: impl Into<DefaultRepo<'a>>,
 ) -> Result<(RepoInfo, u64), VkError> {
-    parse_reference(input, default_repo.into(), ResourceType::Issues)
+    parse_reference(input, default_repo.into(), ResourceType::Issues, None)
 }
 
 /// Parse a pull request reference into repository and PR number.
@@ -176,7 +174,7 @@ pub fn parse_pr_reference<'a>(
     input: &str,
     default_repo: impl Into<DefaultRepo<'a>>,
 ) -> Result<(RepoInfo, u64), VkError> {
-    parse_reference(input, default_repo.into(), ResourceType::PullRequest)
+    parse_reference(input, default_repo.into(), ResourceType::PullRequest, None)
 }
 
 /// Parse a discussion fragment from the input, returning the base string and optional comment ID.

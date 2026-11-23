@@ -3,6 +3,7 @@
 //! Contains helper functions and types for parsing GitHub references that are
 //! not part of the public API.
 
+use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -83,10 +84,14 @@ fn parse_url_resource(
 }
 
 /// Parse a full URL or bare number into a repository and resource number.
+///
+/// Git lookups for a bare number run in `dir` when it is `Some`, otherwise in
+/// the process working directory.
 pub(super) fn parse_reference(
     input: &str,
     default_repo: DefaultRepo,
     resource_type: ResourceType,
+    dir: Option<&Path>,
 ) -> Result<(RepoInfo, u64), VkError> {
     if let Some(res) = parse_github_url(input, resource_type) {
         return res;
@@ -109,12 +114,12 @@ pub(super) fn parse_reference(
                 tracing::debug!(repo = %format_repo(r), "resolved repo from --repo");
             })
             .or_else(|| {
-                super::repo_from_fetch_head().inspect(|r| {
+                super::repo_from_fetch_head_impl(dir).inspect(|r| {
                     tracing::debug!(repo = %format_repo(r), "resolved repo from FETCH_HEAD");
                 })
             })
             .or_else(|| {
-                super::repo_from_origin().inspect(|r| {
+                super::repo_from_origin_impl(dir).inspect(|r| {
                     tracing::debug!(repo = %format_repo(r), "resolved repo from origin remote");
                 })
             })
