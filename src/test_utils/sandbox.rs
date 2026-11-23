@@ -42,11 +42,23 @@ fn restore_env_key(key: &str, original: Option<OsString>) {
     environment::with_lock(|| match original {
         Some(value) => {
             // SAFETY: `environment::with_lock` serialises process-wide env access.
-            unsafe { env::set_var(key, value) };
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "lock-guarded test helper; migrating to an injected environment"
+            )]
+            unsafe {
+                env::set_var(key, value);
+            }
         }
         None => {
             // SAFETY: `environment::with_lock` serialises process-wide env access.
-            unsafe { env::remove_var(key) };
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "lock-guarded test helper; migrating to an injected environment"
+            )]
+            unsafe {
+                env::remove_var(key);
+            }
         }
     });
 }
@@ -71,7 +83,13 @@ pub fn invalid_http_timeout_guard() -> EnvGuard {
     let original = environment::with_lock(|| {
         let original = env::var_os("VK_HTTP_TIMEOUT");
         // SAFETY: `EnvGuard` keeps `env_sandbox_lock()` held until drop.
-        unsafe { env::set_var("VK_HTTP_TIMEOUT", "not-a-number") };
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "lock-guarded test helper; migrating to an injected environment"
+        )]
+        unsafe {
+            env::set_var("VK_HTTP_TIMEOUT", "not-a-number");
+        }
         original
     });
     EnvGuard {
@@ -119,11 +137,21 @@ impl EnvSandbox {
                 .collect::<Vec<_>>()
         });
 
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "sandbox cwd; migrating to an injected working directory"
+        )]
         env::set_current_dir(&sandbox_path)?;
         environment::with_lock(|| {
             for key in SANDBOXED_ENV_KEYS {
                 // SAFETY: `environment::with_lock` serialises process-wide env access.
-                unsafe { env::remove_var(key) };
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "lock-guarded test helper; migrating to an injected environment"
+                )]
+                unsafe {
+                    env::remove_var(key);
+                }
             }
             for key in [
                 "APPDATA",
@@ -133,7 +161,13 @@ impl EnvSandbox {
                 "XDG_CONFIG_DIRS",
             ] {
                 // SAFETY: `environment::with_lock` serialises process-wide env access.
-                unsafe { env::set_var(key, &sandbox_path) };
+                #[expect(
+                    clippy::disallowed_methods,
+                    reason = "lock-guarded test helper; migrating to an injected environment"
+                )]
+                unsafe {
+                    env::set_var(key, &sandbox_path);
+                }
             }
         });
 
@@ -157,6 +191,10 @@ impl Drop for EnvSandbox {
         for (key, value) in self.original_env.drain(..) {
             restore_env_key(key, value);
         }
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "sandbox cwd; migrating to an injected working directory"
+        )]
         let _ = env::set_current_dir(&self.current_dir);
     }
 }
@@ -212,6 +250,10 @@ impl CwdGuard {
             }
         };
         let original = env::current_dir()?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "cwd guard; migrating to an injected working directory"
+        )]
         env::set_current_dir(dir)?;
         Ok(Self {
             original,
@@ -224,6 +266,10 @@ impl Drop for CwdGuard {
     fn drop(&mut self) {
         // The lock is still held via `self._guard`, so the restore happens
         // atomically with respect to other lock-aware test helpers.
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "cwd guard; migrating to an injected working directory"
+        )]
         let _ = env::set_current_dir(&self.original);
     }
 }

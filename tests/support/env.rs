@@ -28,11 +28,23 @@ pub fn apply_env(pairs: &[(&str, Option<&str>)]) {
             match value {
                 Some(val) => {
                     // SAFETY: the environment mutex serialises access to the std env calls.
-                    unsafe { env::set_var(key, val) }
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "lock-guarded test helper; migrating to an injected environment"
+                    )]
+                    unsafe {
+                        env::set_var(key, val);
+                    }
                 }
                 None => {
                     // SAFETY: the environment mutex serialises access to the std env calls.
-                    unsafe { env::remove_var(key) }
+                    #[expect(
+                        clippy::disallowed_methods,
+                        reason = "lock-guarded test helper; migrating to an injected environment"
+                    )]
+                    unsafe {
+                        env::remove_var(key);
+                    }
                 }
             }
         }
@@ -87,6 +99,10 @@ impl DirGuard {
     /// directory when dropped.
     pub fn enter(path: impl AsRef<Path>) -> Self {
         let previous = env::current_dir().expect("current dir");
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "cwd guard; migrating to an injected working directory"
+        )]
         env::set_current_dir(path.as_ref()).expect("set dir");
         Self { previous }
     }
@@ -94,6 +110,10 @@ impl DirGuard {
 
 impl Drop for DirGuard {
     fn drop(&mut self) {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "cwd guard; migrating to an injected working directory"
+        )]
         let _ = env::set_current_dir(&self.previous);
     }
 }
@@ -130,6 +150,14 @@ pub fn write_config(content: &str) -> (TempDir, PathBuf) {
 /// invoking this helper so the variable is removed once the guard drops.
 pub fn setup_env_and_config(config_content: &str) -> (TempDir, PathBuf) {
     let (dir, path) = write_config(config_content);
-    environment::with_lock(|| unsafe { env::set_var("VK_CONFIG_PATH", path.as_os_str()) });
+    environment::with_lock(|| {
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "lock-guarded test helper; migrating to an injected environment"
+        )]
+        unsafe {
+            env::set_var("VK_CONFIG_PATH", path.as_os_str());
+        }
+    });
     (dir, path)
 }
