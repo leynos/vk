@@ -3,11 +3,9 @@
 use super::*;
 use crate::printer::{write_comment_body, write_review, write_thread};
 use crate::reviews::PullRequestReview;
-use crate::test_utils::{EnvGuard, invalid_http_timeout_guard};
 use chrono::Utc;
 use ortho_config::OrthoConfig;
 use rstest::{fixture, rstest};
-use serial_test::serial;
 use std::ffi::OsString;
 use std::sync::Arc;
 use termimad::MadSkin;
@@ -60,31 +58,24 @@ fn cli_loads_global_flags(
 
 fn assert_is_send_sync<T: Send + Sync>() {}
 
-#[fixture]
-fn invalid_http_timeout() -> EnvGuard {
-    invalid_http_timeout_guard()
-}
-
-/// Holds the invalid-timeout guard alongside the resulting configuration error.
+/// Holds the configuration error produced by an invalid `VK_HTTP_TIMEOUT`.
 struct InvalidTimeoutError {
-    _guard: EnvGuard,
     error: Arc<ortho_config::OrthoError>,
 }
 
-/// Load `GlobalArgs` while the invalid-timeout fixture keeps
-/// `VK_HTTP_TIMEOUT` invalid.
+/// Load `GlobalArgs` from an injected environment in which `VK_HTTP_TIMEOUT`
+/// is invalid.
 ///
 /// # Panics
 ///
-/// Panics if `GlobalArgs::load_from_iter` unexpectedly succeeds.
+/// Panics if `GlobalArgs::load_from_iter_with_env` unexpectedly succeeds.
 #[fixture]
-fn invalid_http_timeout_error(invalid_http_timeout: EnvGuard) -> InvalidTimeoutError {
-    let error = GlobalArgs::load_from_iter(std::iter::once(OsString::from("vk")))
-        .expect_err("invalid VK_HTTP_TIMEOUT should fail");
-    InvalidTimeoutError {
-        _guard: invalid_http_timeout,
-        error,
-    }
+fn invalid_http_timeout_error() -> InvalidTimeoutError {
+    let env = ortho_config::MapEnv::new().with_var("VK_HTTP_TIMEOUT", "not-a-number");
+    let error =
+        GlobalArgs::load_from_iter_with_env(std::iter::once(OsString::from("vk")), Arc::new(env))
+            .expect_err("invalid VK_HTTP_TIMEOUT should fail");
+    InvalidTimeoutError { error }
 }
 
 #[test]
@@ -93,7 +84,6 @@ fn vk_error_is_send_and_sync() {
 }
 
 #[rstest]
-#[serial]
 fn vk_error_config_from_arc_preserves_allocation(invalid_http_timeout_error: InvalidTimeoutError) {
     let err = invalid_http_timeout_error.error;
     let original = err.clone();
@@ -108,7 +98,6 @@ fn vk_error_config_from_arc_preserves_allocation(invalid_http_timeout_error: Inv
 }
 
 #[rstest]
-#[serial]
 fn vk_error_config_from_owned_ortho_error_wraps_in_arc(
     invalid_http_timeout_error: InvalidTimeoutError,
 ) {

@@ -3,38 +3,15 @@
 use super::handle_banner;
 use super::is_utf8_locale;
 use super::locale_is_utf8;
-use crate::test_utils::{apply_optional_env, restore_optional_env};
-use rstest::{fixture, rstest};
-use serial_test::serial;
-use vk::environment;
+use ortho_config::MapEnv;
+use rstest::rstest;
 
-struct LocaleEnvGuard {
-    lc_all: Option<String>,
-    lc_ctype: Option<String>,
-    lang: Option<String>,
-}
-
-impl Drop for LocaleEnvGuard {
-    fn drop(&mut self) {
-        restore_optional_env("LC_ALL", self.lc_all.take());
-        restore_optional_env("LC_CTYPE", self.lc_ctype.take());
-        restore_optional_env("LANG", self.lang.take());
-    }
-}
-
-#[fixture]
-fn locale_env() -> LocaleEnvGuard {
-    LocaleEnvGuard {
-        lc_all: environment::var("LC_ALL").ok(),
-        lc_ctype: environment::var("LC_CTYPE").ok(),
-        lang: environment::var("LANG").ok(),
-    }
-}
-
-fn apply_locale(lc_all: Option<&str>, lc_ctype: Option<&str>, lang: Option<&str>) {
-    apply_optional_env("LC_ALL", lc_all);
-    apply_optional_env("LC_CTYPE", lc_ctype);
-    apply_optional_env("LANG", lang);
+/// Build an environment holding only the locale variables that are set.
+fn locale_env(lc_all: Option<&str>, lc_ctype: Option<&str>, lang: Option<&str>) -> MapEnv {
+    [("LC_ALL", lc_all), ("LC_CTYPE", lc_ctype), ("LANG", lang)]
+        .into_iter()
+        .filter_map(|(key, value)| value.map(|value| (key, value)))
+        .fold(MapEnv::new(), |env, (key, value)| env.with_var(key, value))
 }
 
 #[rstest]
@@ -47,17 +24,14 @@ fn apply_locale(lc_all: Option<&str>, lc_ctype: Option<&str>, lang: Option<&str>
 #[case(None, None, Some("en_GB.UTF-8"), true)]
 #[case(None, None, Some("C"), false)]
 #[case(None, None, None, false)]
-#[serial]
 fn detect_utf8_locale_cases(
     #[case] lc_all: Option<&str>,
     #[case] lc_ctype: Option<&str>,
     #[case] lang: Option<&str>,
     #[case] expected: bool,
-    locale_env: LocaleEnvGuard,
 ) {
-    let _ = locale_env;
-    apply_locale(lc_all, lc_ctype, lang);
-    assert_eq!(locale_is_utf8(), expected);
+    let env = locale_env(lc_all, lc_ctype, lang);
+    assert_eq!(locale_is_utf8(&env), expected);
 }
 
 #[test]

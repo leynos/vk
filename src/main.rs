@@ -28,11 +28,6 @@ mod summary;
 #[cfg(test)]
 mod test_utils;
 
-mod environment {
-    //! Environment helpers for the binary crate.
-    pub(crate) use vk::environment::var;
-}
-
 pub use crate::api::GraphQLClient;
 pub use issues::{Issue, fetch_issue};
 pub use review_threads::{

@@ -6,7 +6,6 @@
 use crate::auth::resolve_github_token;
 use crate::branch_pr::fetch_pr_for_branch;
 use crate::cli_args::{GlobalArgs, IssueArgs, PrArgs, ResolveArgs};
-use crate::environment;
 use crate::ref_parser::{
     RepoInfo, is_fragment_only, parse_fragment_only, parse_issue_reference,
     parse_pr_thread_reference,
@@ -21,6 +20,7 @@ use crate::{
     fetch_review_threads_with_options, filter_threads_by_files, resolve,
 };
 use branch::resolve_branch_and_repo;
+use ortho_config::{EnvSource, ProcessEnv};
 use output::{
     handle_banner, handle_print_result, is_broken_pipe_kind, print_reviews_block,
     print_threads_block,
@@ -74,7 +74,7 @@ fn warn_on_missing_token_and_locale(token: &str) {
     if token.is_empty() {
         warn!("GitHub token not set, using anonymous API access");
     }
-    if !locale_is_utf8() {
+    if !locale_is_utf8(&ProcessEnv) {
         warn!("terminal locale is not UTF-8; emojis may not render correctly");
     }
 }
@@ -356,13 +356,11 @@ fn is_utf8_locale(pattern: Option<&regex::Regex>, value: &str) -> bool {
 }
 
 /// Return whether the first configured locale variable is UTF-8.
-fn locale_is_utf8() -> bool {
-    for key in ["LC_ALL", "LC_CTYPE", "LANG"] {
-        if let Ok(value) = environment::var(key) {
-            return is_utf8_locale(crate::UTF8_RE.as_ref(), &value);
-        }
-    }
-    false
+fn locale_is_utf8(env: &dyn EnvSource) -> bool {
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .into_iter()
+        .find_map(|key| env.get(key).and_then(|value| value.into_string().ok()))
+        .is_some_and(|value| is_utf8_locale(crate::UTF8_RE.as_ref(), &value))
 }
 
 mod branch;
