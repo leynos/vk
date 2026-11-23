@@ -182,6 +182,26 @@ mod tests {
         })
     }
 
+    /// Load the global arguments for a bare `vk` invocation from `env`.
+    fn load_bare_vk<E>(env: E) -> ortho_config::OrthoResult<GlobalArgs>
+    where
+        E: EnvSource + ScanEnvSource + 'static,
+    {
+        load_global_args_without_cli_overrides_from_process_args(
+            [OsString::from("vk")],
+            &Arc::new(env),
+        )
+    }
+
+    /// Load a bare `vk` invocation in a fresh sandbox whose selector is `selector`.
+    fn load_with_selector(selector: &str) -> GlobalArgs {
+        let dir = tempfile::tempdir().expect("create config sandbox");
+        crate::fs_access::write_string(&dir.path().join("rel.toml"), "repo = \"from-relative\"\n")
+            .expect("write config");
+        load_bare_vk(sandbox_env(dir.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, selector))
+            .expect("load global args")
+    }
+
     fn setup_global_args_without_cli_overrides<I, F>(
         configure: F,
     ) -> (tempfile::TempDir, GlobalArgs)
@@ -232,11 +252,9 @@ mod tests {
         let sandbox = tempfile::tempdir().expect("create config sandbox");
         let broken_path = sandbox.path().join("broken.toml");
         crate::fs_access::write_string(&broken_path, "not = [valid").expect("write broken config");
-        let env =
-            Arc::new(sandbox_env(sandbox.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, &broken_path));
-
-        let result =
-            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")], &env);
+        let result = load_bare_vk(
+            sandbox_env(sandbox.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, &broken_path),
+        );
 
         let err = result.expect_err("broken explicit config must surface a configuration error");
         let rendered = format!("{err}");
@@ -269,13 +287,10 @@ mod tests {
     #[test]
     fn a_relative_explicit_config_path_does_not_fail_loading_without_a_working_directory() {
         let dir = tempfile::tempdir().expect("create config sandbox");
-        let env = Arc::new(NoCurrentDir(
-            sandbox_env(dir.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, "vk.toml"),
-        ));
+        let env =
+            NoCurrentDir(sandbox_env(dir.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, "vk.toml"));
 
-        let global =
-            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")], &env)
-                .expect("the selector is dropped, as in discovery");
+        let global = load_bare_vk(env).expect("the selector is dropped, as in discovery");
 
         assert!(global.repo.is_none());
     }
@@ -318,27 +333,17 @@ mod tests {
 
     #[test]
     fn an_empty_explicit_config_path_does_not_fail_loading() {
-        let dir = tempfile::tempdir().expect("create config sandbox");
-        let env = Arc::new(sandbox_env(dir.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, ""));
-
-        let global =
-            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")], &env)
-                .expect("an empty selector is ignored");
-
-        assert!(global.repo.is_none());
+        assert!(
+            load_with_selector("").repo.is_none(),
+            "an empty selector is ignored"
+        );
     }
 
     #[test]
     fn a_relative_explicit_config_path_loads_from_the_injected_directory() {
-        let dir = tempfile::tempdir().expect("create config sandbox");
-        crate::fs_access::write_string(&dir.path().join("rel.toml"), "repo = \"from-relative\"\n")
-            .expect("write config");
-        let env = Arc::new(sandbox_env(dir.path()).with_var(EXPLICIT_CONFIG_PATH_ENV, "rel.toml"));
-
-        let global =
-            load_global_args_without_cli_overrides_from_process_args([OsString::from("vk")], &env)
-                .expect("load global args");
-
-        assert_eq!(global.repo.as_deref(), Some("from-relative"));
+        assert_eq!(
+            load_with_selector("rel.toml").repo.as_deref(),
+            Some("from-relative")
+        );
     }
 }
