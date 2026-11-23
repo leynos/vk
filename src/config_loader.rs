@@ -327,7 +327,10 @@ mod tests {
 
         let global = load_bare_vk(env).expect("the selector is dropped, as in discovery");
 
-        assert!(global.repo.is_none());
+        assert!(
+            global.repo.is_none(),
+            "a dropped selector must leave the defaults untouched",
+        );
     }
 
     #[test]
@@ -337,7 +340,11 @@ mod tests {
             .with_current_dir(dir)
             .with_var(EXPLICIT_CONFIG_PATH_ENV, "vk.toml");
 
-        assert_eq!(explicit_config_path(&env), Some(dir.join("vk.toml")));
+        assert_eq!(
+            explicit_config_path(&env),
+            Some(dir.join("vk.toml")),
+            "a relative selector must be anchored to the injected directory",
+        );
     }
 
     #[test]
@@ -347,7 +354,11 @@ mod tests {
             .with_current_dir("/injected/dir")
             .with_var(EXPLICIT_CONFIG_PATH_ENV, &absolute);
 
-        assert_eq!(explicit_config_path(&env), Some(absolute));
+        assert_eq!(
+            explicit_config_path(&env),
+            Some(absolute),
+            "an absolute selector must not be re-anchored",
+        );
     }
 
     #[test]
@@ -356,14 +367,22 @@ mod tests {
             .with_current_dir("/injected/dir")
             .with_var(EXPLICIT_CONFIG_PATH_ENV, "");
 
-        assert_eq!(explicit_config_path(&env), None);
+        assert_eq!(
+            explicit_config_path(&env),
+            None,
+            "an empty selector must select nothing",
+        );
     }
 
     #[test]
     fn a_relative_explicit_config_path_selects_nothing_without_a_working_directory() {
         let env = NoCurrentDir(MapEnv::new().with_var(EXPLICIT_CONFIG_PATH_ENV, "vk.toml"));
 
-        assert_eq!(explicit_config_path(&env), None);
+        assert_eq!(
+            explicit_config_path(&env),
+            None,
+            "a relative selector must be dropped when the working directory is unreadable",
+        );
     }
 
     #[test]
@@ -378,7 +397,8 @@ mod tests {
     fn a_relative_explicit_config_path_loads_from_the_injected_directory() {
         assert_eq!(
             load_with_selector("rel.toml").repo.as_deref(),
-            Some("from-relative")
+            Some("from-relative"),
+            "the relative selector must load from the injected directory",
         );
     }
 }
