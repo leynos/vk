@@ -111,9 +111,12 @@ that exercises the behaviour:
 - End-to-end tests under `tests/e2e/` for externally observable workflows.
 - Snapshot tests where output format consistency matters.
 
-Environment-mutating tests must use the shared guards and sandbox helpers under
-`src/test_utils.rs` or `tests/support/`. Direct unsynchronised environment
-mutation can make tests order-dependent.
+Tests must not change the process environment or working directory. Code that
+reads the environment takes an `ortho_config::EnvSource`: production passes
+`ProcessEnv`, and tests pass a `MapEnv` (see `resolve_github_token_in` in
+`src/auth.rs` and `locale_is_utf8` in `src/commands.rs`). Pin a working
+directory with `MapEnv::with_current_dir`. Tests that exercise the binary end
+to end set variables on the child with `Command::env`.
 
 ## Configuration development
 

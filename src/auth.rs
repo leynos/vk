@@ -92,6 +92,15 @@ mod tests {
     #[case(None, None, Some("github-token"), Some("config-token"), "github-token")]
     #[case(None, None, None, Some("config-token"), "config-token")]
     #[case(Some(""), Some(""), Some("github-token"), Some(""), "github-token")]
+    #[case::no_token_anywhere(None, None, None, None, "")]
+    #[case::empty_config_token_only(None, None, None, Some(""), "")]
+    #[case::empty_vk_env_falls_through_to_github_env(
+        None,
+        Some(""),
+        Some("github-token"),
+        None,
+        "github-token"
+    )]
     fn resolve_github_token_cases(
         #[case] cli_token: Option<&str>,
         #[case] vk_env: Option<&'static str>,

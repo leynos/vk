@@ -373,10 +373,13 @@ project:
   `mockable::DefaultEnv` supplied at the production composition root and
   `mockable::MockEnv` in tests. A narrow closure seam of the same shape is
   acceptable where a trait object would be disproportionate. Production code
-  must not reach for `std::env::var`/`var_os` outside that composition root. In
-  this repository, tests that cannot yet inject the environment use the shared
-  lock in `src/environment.rs` (`environment::with_lock`, reached through the
-  `vk::test_utils` helpers); the injection rule above still governs new code.
+  must not reach for `std::env::var`/`var_os` outside that composition root.
+  This repository has no `mockable` dependency: `ortho_config::EnvSource`
+  (`ProcessEnv` at the composition root, `MapEnv` in tests) is its injected
+  environment trait and satisfies this rule. Tests that cannot yet inject the
+  environment use the shared lock in `src/environment.rs`
+  (`environment::with_lock`, reached through the `vk::test_utils` helpers); the
+  injection rule above still governs new code.
 - **Process-wide locks are not an escape hatch.** Serializing environment
   mutation behind a shared `Mutex`, `OnceLock`, or `serial_test` attribute is
   not an accepted fallback. It serializes the suite, defeats property-based

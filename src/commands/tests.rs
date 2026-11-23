@@ -38,7 +38,7 @@ fn detect_utf8_locale_cases(
     assert_eq!(
         locale_is_utf8(&env),
         expected,
-        "the first set locale variable decides: LC_ALL={lc_all:?} LC_CTYPE={lc_ctype:?} \
+        "the first Unicode-convertible locale variable decides: LC_ALL={lc_all:?} LC_CTYPE={lc_ctype:?} \
          LANG={lang:?}"
     );
 }
