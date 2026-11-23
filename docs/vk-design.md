@@ -121,7 +121,11 @@ integration tests share a single source of truth.
 <!-- mdformat on -->
 
 `run_pr` fetches the latest review from each reviewer and all unresolved
-threads. The helper `fetch_review_threads_with_options` accepts a
+threads. The reviews listing is read to exhaustion, following `pageInfo`
+through every page, before the latest review per author is selected, so a
+review GitHub returns on a later page is never missed. That selection is per
+author; it is not the pull request's aggregate `reviewDecision`, which `vk`
+does not request. The helper `fetch_review_threads_with_options` accepts a
 `FetchOptions` struct and skips outdated threads before comment pagination
 unless `--show-outdated` is set, avoiding unnecessary requests. After printing a
 `code review` banner and a summary, the reviews are printed, followed by a
