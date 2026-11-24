@@ -33,24 +33,22 @@ impl MergeEnv {
     /// Write `config`, then build an environment holding `VK_CONFIG_PATH` and
     /// every `Some` pair in `env`. A `None` pair is simply absent.
     ///
-    /// When `enter_config_dir` is true the environment's working directory is
-    /// the configuration directory, for path-relative merges.
+    /// The environment's working directory is the configuration directory, so
+    /// discovery finds the generated `.vk.toml` and never reads the process's
+    /// working directory.
     ///
     /// # Examples
     /// ```rust,ignore
     /// use crate::env_support::MergeEnv;
     ///
-    /// let merge_env = MergeEnv::new("[cmds.pr]\nreference = \"ref\"", &[("VK_REPO", None)], true);
+    /// let merge_env = MergeEnv::new("[cmds.pr]\nreference = \"ref\"", &[("VK_REPO", None)]);
     /// let merged = cli.load_and_merge_with_env(merge_env.env()).expect("merge");
     /// ```
-    pub fn new(config: &str, env: &[(&str, Option<&str>)], enter_config_dir: bool) -> Self {
+    pub fn new(config: &str, env: &[(&str, Option<&str>)]) -> Self {
         let (dir, config_path) = write_config(config);
-        let base = MapEnv::new().with_var("VK_CONFIG_PATH", config_path.as_os_str());
-        let base = if enter_config_dir {
-            base.with_current_dir(dir.path())
-        } else {
-            base
-        };
+        let base = MapEnv::new()
+            .with_current_dir(dir.path())
+            .with_var("VK_CONFIG_PATH", config_path.as_os_str());
         let map = env
             .iter()
             .filter_map(|(key, value)| value.map(|value| (*key, value)))

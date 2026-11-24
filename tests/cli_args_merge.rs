@@ -21,8 +21,6 @@ fn with_case_environment(
     case: MergeCase,
     assertions: impl FnOnce(MergeExpectation, Arc<ortho_config::MapEnv>),
 ) {
-    let enter_config_dir = case.requires_config_dir();
-
     let MergeCase {
         config,
         env,
@@ -30,7 +28,7 @@ fn with_case_environment(
         ..
     } = case;
 
-    let merge_env = MergeEnv::new(config, env, enter_config_dir);
+    let merge_env = MergeEnv::new(config, env);
 
     assertions(expectation, merge_env.env());
 }

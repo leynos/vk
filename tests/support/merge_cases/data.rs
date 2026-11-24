@@ -12,7 +12,7 @@ type EnvAssignments = &'static [(&'static str, Option<&'static str>)];
 #[derive(Copy, Clone)]
 struct SubcommandCaseData {
     subcommand: MergeSubcommand,
-    scenarios: [(MergeScenario, &'static str, EnvAssignments, bool); 3],
+    scenarios: [(MergeScenario, &'static str, EnvAssignments); 3],
     expectation_builder: fn(MergeScenario) -> MergeExpectation,
 }
 
@@ -39,9 +39,8 @@ pub enum MergeScenario {
 /// Merge scenario fixture consumed by CLI and subcommand tests.
 ///
 /// Captures the configuration, environment assignments, and expectations
-/// needed to drive precedence assertions in both suites.
-/// The CLI harness consults `requires_config_dir` to mirror how relative paths
-/// resolve when cases opt into entering the generated config directory.
+/// needed to drive precedence assertions in both suites. Both harnesses pin the
+/// injected working directory to the generated configuration directory.
 #[derive(Clone, Debug)]
 pub struct MergeCase {
     /// Subcommand under test for this precedence scenario.
@@ -54,32 +53,17 @@ pub struct MergeCase {
     pub env: EnvAssignments,
     /// Expected merge result for the subcommand/scenario pair.
     pub expectation: MergeExpectation,
-    /// When true, CLI-harness tests enter the generated config directory before merging.
-    ///
-    /// This mirrors real CLI execution so relative CLI arguments resolve against the
-    /// configuration file’s directory. The subcommand harness always enters the config dir.
-    pub enter_config_dir: bool,
-}
-
-impl MergeCase {
-    /// True when CLI tests must enter the generated config directory before merging.
-    ///
-    /// Mirrors the CLI's relative-path handling so expectations stay aligned with behaviour.
-    pub fn requires_config_dir(&self) -> bool {
-        self.enter_config_dir
-    }
 }
 
 fn build_cases_from_data(data: &SubcommandCaseData) -> Vec<MergeCase> {
     data.scenarios
         .iter()
-        .map(|&(scenario, config, env, enter_config_dir)| MergeCase {
+        .map(|&(scenario, config, env)| MergeCase {
             subcommand: data.subcommand,
             scenario,
             config,
             env,
             expectation: (data.expectation_builder)(scenario),
-            enter_config_dir,
         })
         .collect()
 }
@@ -104,23 +88,12 @@ const SUBCOMMAND_CASE_DATA: [SubcommandCaseData; 3] = [
     SubcommandCaseData {
         subcommand: MergeSubcommand::Pr,
         scenarios: [
-            (
-                MergeScenario::CliOverEnv,
-                PR_CONFIG,
-                PR_ENV_CLI_OVER_ENV,
-                true,
-            ),
-            (
-                MergeScenario::EnvOverFile,
-                PR_CONFIG,
-                PR_ENV_ENV_OVER_FILE,
-                true,
-            ),
+            (MergeScenario::CliOverEnv, PR_CONFIG, PR_ENV_CLI_OVER_ENV),
+            (MergeScenario::EnvOverFile, PR_CONFIG, PR_ENV_ENV_OVER_FILE),
             (
                 MergeScenario::FileOverDefaults,
                 PR_CONFIG,
                 PR_ENV_FILE_OVER_DEFAULTS,
-                true,
             ),
         ],
         expectation_builder: build_pr_expectation,
@@ -132,19 +105,16 @@ const SUBCOMMAND_CASE_DATA: [SubcommandCaseData; 3] = [
                 MergeScenario::CliOverEnv,
                 ISSUE_CONFIG,
                 ISSUE_ENV_CLI_OVER_ENV,
-                false,
             ),
             (
                 MergeScenario::EnvOverFile,
                 ISSUE_CONFIG,
                 ISSUE_ENV_ENV_OVER_FILE,
-                false,
             ),
             (
                 MergeScenario::FileOverDefaults,
                 ISSUE_CONFIG,
                 ISSUE_ENV_FILE_OVER_DEFAULTS,
-                true,
             ),
         ],
         expectation_builder: build_issue_expectation,
@@ -156,19 +126,16 @@ const SUBCOMMAND_CASE_DATA: [SubcommandCaseData; 3] = [
                 MergeScenario::CliOverEnv,
                 RESOLVE_CONFIG_WITH_REFERENCE,
                 RESOLVE_ENV_CLI_OVER_ENV,
-                false,
             ),
             (
                 MergeScenario::EnvOverFile,
                 RESOLVE_MESSAGE_CONFIG,
                 RESOLVE_ENV_ENV_OVER_FILE,
-                false,
             ),
             (
                 MergeScenario::FileOverDefaults,
                 RESOLVE_MESSAGE_CONFIG,
                 RESOLVE_ENV_FILE_OVER_DEFAULTS,
-                true,
             ),
         ],
         expectation_builder: build_resolve_expectation,

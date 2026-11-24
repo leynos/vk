@@ -20,8 +20,6 @@ use rstest::rstest;
 use sub_support::merge_with_sources;
 
 fn assert_merge_case(case: MergeCase) {
-    let enter_config_dir = case.requires_config_dir();
-
     let MergeCase {
         config,
         env,
@@ -36,7 +34,7 @@ fn assert_merge_case(case: MergeCase) {
             expected_files,
             expected_show_outdated,
         } => {
-            let merged = merge_with_sources(config, env, enter_config_dir, &cli);
+            let merged = merge_with_sources(config, env, &cli);
             assert_eq!(merged.reference.as_deref(), expected_reference);
             assert_eq!(merged.files, to_owned_vec(expected_files));
             assert_eq!(merged.show_outdated, expected_show_outdated);
@@ -45,7 +43,7 @@ fn assert_merge_case(case: MergeCase) {
             cli,
             expected_reference,
         } => {
-            let merged = merge_with_sources(config, env, enter_config_dir, &cli);
+            let merged = merge_with_sources(config, env, &cli);
             assert_eq!(merged.reference.as_deref(), expected_reference);
         }
         MergeExpectation::Resolve {
@@ -53,7 +51,7 @@ fn assert_merge_case(case: MergeCase) {
             expected_reference,
             expected_message,
         } => {
-            let merged = merge_with_sources(config, env, enter_config_dir, &cli);
+            let merged = merge_with_sources(config, env, &cli);
             assert_eq!(merged.reference, expected_reference);
             assert_eq!(merged.message.as_deref(), expected_message);
         }
