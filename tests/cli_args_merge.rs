@@ -10,15 +10,17 @@ mod support;
 use merge_cases::{
     MergeCase, MergeExpectation, MergeScenario, MergeSubcommand, case as merge_case,
 };
-use merge_support::{environment_keys, to_owned_vec};
+use merge_support::to_owned_vec;
 use ortho_config::SubcmdConfigMerge;
 use rstest::rstest;
-use serial_test::serial;
-use support::{EnvGuard, apply_env, maybe_enter_dir, setup_env_and_config};
+use std::sync::Arc;
+use support::MergeEnv;
 
-fn with_case_environment(case: MergeCase, assertions: impl FnOnce(MergeExpectation)) {
-    let enter_config_dir = case.requires_config_dir();
-
+/// Run `assertions` against the case's expectation and injected environment.
+fn with_case_environment(
+    case: MergeCase,
+    assertions: impl FnOnce(MergeExpectation, Arc<ortho_config::MapEnv>),
+) {
     let MergeCase {
         config,
         env,
@@ -26,21 +28,15 @@ fn with_case_environment(case: MergeCase, assertions: impl FnOnce(MergeExpectati
         ..
     } = case;
 
-    let keys = environment_keys(env);
-    let _guard = EnvGuard::new(&keys);
-    let (config_dir, _config_path) = setup_env_and_config(config);
-    let _dir = maybe_enter_dir(enter_config_dir, config_dir.path());
+    let merge_env = MergeEnv::new(config, env);
 
-    apply_env(env);
-
-    assertions(expectation);
+    assertions(expectation, merge_env.env());
 }
 
 #[test]
-#[serial]
 fn env_overrides_false_cli_show_outdated_flag() {
     let case = merge_case(MergeSubcommand::Pr, MergeScenario::EnvOverFile);
-    with_case_environment(case, |expectation| match expectation {
+    with_case_environment(case, |expectation, env| match expectation {
         MergeExpectation::Pr {
             cli,
             expected_show_outdated,
@@ -51,7 +47,7 @@ fn env_overrides_false_cli_show_outdated_flag() {
                 "precondition: CLI defaults should leave show_outdated unset"
             );
 
-            let merged = cli.load_and_merge().expect("merge pr args");
+            let merged = cli.load_and_merge_with_env(env).expect("merge pr args");
             assert!(
                 expected_show_outdated,
                 "env_over_file scenario should enable show_outdated"
@@ -63,14 +59,14 @@ fn env_overrides_false_cli_show_outdated_flag() {
 }
 
 fn assert_cli_merge(case: MergeCase) {
-    with_case_environment(case, |expectation| match expectation {
+    with_case_environment(case, |expectation, env| match expectation {
         MergeExpectation::Pr {
             cli,
             expected_reference,
             expected_files,
             expected_show_outdated,
         } => {
-            let merged = cli.load_and_merge().expect("merge pr args");
+            let merged = cli.load_and_merge_with_env(env).expect("merge pr args");
             assert_eq!(merged.reference.as_deref(), expected_reference);
             assert_eq!(merged.files, to_owned_vec(expected_files));
             assert_eq!(merged.show_outdated, expected_show_outdated);
@@ -79,7 +75,7 @@ fn assert_cli_merge(case: MergeCase) {
             cli,
             expected_reference,
         } => {
-            let merged = cli.load_and_merge().expect("merge issue args");
+            let merged = cli.load_and_merge_with_env(env).expect("merge issue args");
             assert_eq!(merged.reference.as_deref(), expected_reference);
         }
         MergeExpectation::Resolve {
@@ -87,7 +83,9 @@ fn assert_cli_merge(case: MergeCase) {
             expected_reference,
             expected_message,
         } => {
-            let merged = cli.load_and_merge().expect("merge resolve args");
+            let merged = cli
+                .load_and_merge_with_env(env)
+                .expect("merge resolve args");
             assert_eq!(merged.reference, expected_reference);
             assert_eq!(merged.message.as_deref(), expected_message);
         }
@@ -95,7 +93,7 @@ fn assert_cli_merge(case: MergeCase) {
 }
 
 fn assert_cli_preserves(case: MergeCase) {
-    with_case_environment(case, |expectation| match expectation {
+    with_case_environment(case, |expectation, env| match expectation {
         MergeExpectation::Pr {
             cli,
             expected_reference,
@@ -103,7 +101,7 @@ fn assert_cli_preserves(case: MergeCase) {
             expected_show_outdated,
         } => {
             let snapshot = cli.clone();
-            let merged = cli.load_and_merge().expect("merge pr args");
+            let merged = cli.load_and_merge_with_env(env).expect("merge pr args");
             assert_eq!(cli.reference, snapshot.reference);
             assert_eq!(cli.files, snapshot.files);
             assert_eq!(cli.show_outdated, snapshot.show_outdated);
@@ -116,7 +114,7 @@ fn assert_cli_preserves(case: MergeCase) {
             expected_reference,
         } => {
             let snapshot = cli.clone();
-            let merged = cli.load_and_merge().expect("merge issue args");
+            let merged = cli.load_and_merge_with_env(env).expect("merge issue args");
             assert_eq!(cli.reference, snapshot.reference);
             assert_eq!(merged.reference.as_deref(), expected_reference);
         }
@@ -126,7 +124,9 @@ fn assert_cli_preserves(case: MergeCase) {
             expected_message,
         } => {
             let snapshot = cli.clone();
-            let merged = cli.load_and_merge().expect("merge resolve args");
+            let merged = cli
+                .load_and_merge_with_env(env)
+                .expect("merge resolve args");
             assert_eq!(cli.reference, snapshot.reference);
             assert_eq!(cli.message, snapshot.message);
             assert_eq!(merged.reference, expected_reference);
@@ -151,7 +151,6 @@ fn assert_cli_preserves(case: MergeCase) {
     MergeSubcommand::Resolve,
     MergeScenario::FileOverDefaults
 ))]
-#[serial]
 fn load_and_merge_merges_sources(#[case] case: MergeCase) {
     assert_cli_merge(case);
 }
@@ -160,7 +159,6 @@ fn load_and_merge_merges_sources(#[case] case: MergeCase) {
 #[case::pr(merge_case(MergeSubcommand::Pr, MergeScenario::CliOverEnv))]
 #[case::issue(merge_case(MergeSubcommand::Issue, MergeScenario::CliOverEnv))]
 #[case::resolve(merge_case(MergeSubcommand::Resolve, MergeScenario::CliOverEnv))]
-#[serial]
 fn load_and_merge_preserves_cli_instance(#[case] case: MergeCase) {
     assert_cli_preserves(case);
 }
