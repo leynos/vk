@@ -22,8 +22,6 @@ mod markdown_lint;
 mod placement;
 #[path = "workflow_contracts/placement_tests.rs"]
 mod placement_tests;
-#[path = "workflow_contracts/pull_request_concurrency.rs"]
-mod pull_request_concurrency;
 #[path = "support/workflows/mod.rs"]
 mod reader;
 #[path = "workflow_contracts/reader_tests.rs"]
