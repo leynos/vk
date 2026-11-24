@@ -1,0 +1,13 @@
+# Whitaker (Dylint) configuration for the workspace.
+#
+# `macro_aware_cognitive_complexity` gates cognitive complexity at CodeScene's
+# ceiling of 9. It skips branching a macro generated. Clippy's
+# `cognitive_complexity` is a nursery lint that nothing enabled here, so the
+# threshold of 12 in `clippy.toml` applied to nothing. The lint is
+# experimental, so the suite loads it only on request. The tracker is
+# https://github.com/leynos/whitaker/issues/504.
+[whitaker]
+experimental = ["macro_aware_cognitive_complexity"]
+
+[macro_aware_cognitive_complexity]
+max_complexity = 9

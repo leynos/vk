@@ -1,5 +1,6 @@
-# Align with CodeScene’s ceiling
-cognitive-complexity-threshold = 12     # default is 25
+# Cognitive complexity is not gated by Clippy: it scores code after macro
+# expansion, so it counts branching a macro generated. Whitaker's
+# `macro_aware_cognitive_complexity` gates it at 9 (see `dylint.toml`).
 
 # `CodeScene` is a proper noun, not a code item. `doc_markdown` cannot tell
 # the two apart, and backticking a company name through every line of prose

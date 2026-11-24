@@ -50,6 +50,16 @@ installs it through the shared `install-whitaker` action, pinned to a revision
 concordat QG-002 approves, in the `build-test` job. The feature-gated job runs
 `make lint-clippy` alone, so the suite runs once per pull request.
 
+Cognitive complexity is not gated by Clippy. Clippy's `cognitive_complexity`
+scores code after macro expansion, so it counts branching a macro generated, and
+`clippy.toml` does not set `cognitive-complexity-threshold`. Whitaker's
+experimental `macro_aware_cognitive_complexity` gates it at
+`max_complexity = 9`, CodeScene's ceiling. Clippy's lint never gated this
+repository: it is a nursery lint that nothing enabled, so its threshold of 12
+applied to nothing. `dylint.toml` opts in with
+`[whitaker] experimental = ["macro_aware_cognitive_complexity"]`. Fix a finding
+by extracting named helpers, never by raising the threshold.
+
 Use `make fmt` after documentation changes. It formats Rust and Markdown
 sources. Review Markdown formatter diffs before committing so footnotes, links,
 tables, and code fences still carry the intended meaning.
