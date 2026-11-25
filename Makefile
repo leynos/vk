@@ -65,6 +65,11 @@ clean: ## Remove build artifacts
 
 test: ## Run tests with warnings treated as errors
 	$(CARGO) fetch --locked --target "$${CARGO_BUILD_TARGET:-host-tuple}"
+	# Pay for the nested builds before the timed run: build the test binaries with
+	# the same flags as the run, then run the trybuild binary once, because a plain
+	# `--no-run` leaves the trybuild build tree (target/tests/trybuild) empty.
+	$(GATE_RUSTFLAGS) $(CARGO) test --no-run --all-targets --all-features $(BUILD_JOBS)
+	$(GATE_RUSTFLAGS) $(CARGO) test --test graphql_codegen_ui --all-features $(BUILD_JOBS)
 	$(GATE_RUSTFLAGS) $(CARGO) test --all-targets --all-features $(BUILD_JOBS)
 
 # The tests that exist only with `unstable-rest-resolve`: the `resolve`

@@ -592,6 +592,15 @@ with the same fetch first. The estate lint rule `nested-cargo-offline-tests`
 checks both halves. No Cargo configuration file here sets `build.target`; if
 one ever does, the fetch must name that target too.
 
+`make test` also pays for the `trybuild` build before the timed run. It builds
+the test binaries with the flags of the run (`--no-run`) and runs
+`graphql_codegen_ui` once, because `--no-run` leaves `trybuild`'s own build tree
+(`target/tests/trybuild`) empty. On a cold target the warm-up pays about 160 s
+for that test, and the timed `graphql_codegen_ui` test then takes about 1.8 s
+(the whole `make test` takes about 17 s warm). The estate lint rule
+`nested-cargo-cold-build` checks that each test pass has a preparation with its
+own flags.
+
 ## Documentation maintenance
 
 Update documentation in the same branch as the behaviour it describes:
