@@ -250,10 +250,14 @@ project:
 
     ```sh
     cargo fetch --locked --target "${CARGO_BUILD_TARGET:-host-tuple}"
+    cargo test --no-run --all-targets --all-features
+    cargo test --test graphql_codegen_ui --all-features
     cargo test --all-targets --all-features
     ```
 
-    running the tests of every target (`--all-targets`) with `-D warnings` and
+    The two middle commands pay for the nested `trybuild` build before the
+    timed run, because `--no-run` leaves `trybuild`'s own tree empty. The last
+    runs the tests of every target (`--all-targets`) with `-D warnings` and
     the build-standard flags appended to any inherited `RUSTFLAGS`. Doctests are
     not included: `--all-targets` excludes them, and the Makefile has no
     doctest stage. It runs `cargo test` only, not `cargo-nextest`.
