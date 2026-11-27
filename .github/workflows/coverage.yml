@@ -39,13 +39,13 @@ jobs:
         with:
           fetch-depth: 0
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@bd052c68a4792e92c3272fb1b6ea3b594f3ab7f3
+        uses: leynos/shared-actions/.github/actions/setup-rust@a108423efa7fb83565089449f2647d34286a48a4
         with:
           install-mold: 'true'
       - name: Install mdtablefix
         # `make check-fmt` runs `mdtablefix --check --git`; 0.6.0 is the
         # first release with `--check` and `--git`.
-        uses: leynos/shared-actions/.github/actions/install-mdtablefix@bd052c68a4792e92c3272fb1b6ea3b594f3ab7f3
+        uses: leynos/shared-actions/.github/actions/install-mdtablefix@a108423efa7fb83565089449f2647d34286a48a4
         with:
           version: "0.6.1"
 
@@ -66,7 +66,7 @@ jobs:
         with:
           globs: '**/*.md'
       - name: Install Whitaker
-        uses: leynos/shared-actions/.github/actions/install-whitaker@bd052c68a4792e92c3272fb1b6ea3b594f3ab7f3
+        uses: leynos/shared-actions/.github/actions/install-whitaker@a108423efa7fb83565089449f2647d34286a48a4
         with:
           # The Cranelift component stays installed so the opt-in selection in
           # .cargo/config.toml still works for the lint suite's toolchain.
@@ -74,7 +74,7 @@ jobs:
       - name: Lint
         run: make lint
       - name: Generate coverage
-        uses: leynos/shared-actions/.github/actions/generate-coverage@bd052c68a4792e92c3272fb1b6ea3b594f3ab7f3
+        uses: leynos/shared-actions/.github/actions/generate-coverage@a108423efa7fb83565089449f2647d34286a48a4
         env:
           # Coverage instrumentation is LLVM-only (BD-007).
           CARGO_PROFILE_DEV_CODEGEN_BACKEND: llvm
@@ -103,7 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Setup Rust
-        uses: leynos/shared-actions/.github/actions/setup-rust@bd052c68a4792e92c3272fb1b6ea3b594f3ab7f3
+        uses: leynos/shared-actions/.github/actions/setup-rust@a108423efa7fb83565089449f2647d34286a48a4
         with:
           install-mold: 'true'
       - name: Install OpenSSL
